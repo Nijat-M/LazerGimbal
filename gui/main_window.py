@@ -253,6 +253,9 @@ class MainWindow(QMainWindow):
         self.btn_sync.clicked.connect(self.sync_position)
         
         self.btn_buzzer = QPushButton("测试蜂鸣器 (Buzzer)")
+        
+        ctrl_layout.addWidget(self.btn_servo_power)
+        ctrl_layout.addWidget(self.btn_sync)
         ctrl_layout.addWidget(self.btn_buzzer)
         right_layout.addLayout(ctrl_layout)
 
