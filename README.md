@@ -35,10 +35,23 @@ This project implements a computer vision-based tracking system that controls a 
 - **Architecture**: Multi-threaded design separating Vision (OpenCV), GUI (PyQt6), and Serial Communication.
 
 ## Hardware Requirements
-- **Microcontroller**: STM32F401 
-- **Actuators**: 2x SG90/MG90S Servos (Pan/Tilt)
-- **Camera**: USB Webcam (ID 0)
-- **Laser**: Red laser pointer (optional, for tracking)
+
+### Electronics
+- **Microcontroller**: STM32F401CCU6
+- **Servos**: 2x MG996R High-Torque Servos (Pan/Tilt)
+- **Bluetooth Module**: HC-05 (Serial Communication)
+- **Camera**: Laptop built-in webcam (*Temporary solution - dedicated vision module to be added*)
+- **Laser**: Red laser pointer (optional, for tracking demonstration)
+
+### Power Supply
+- **Current**: 4x 1.5V Duracell AA Batteries (6V output)
+- **Planned Upgrade**: 12V DC Adapter + XL4016 Buck Converter (for stable voltage and current)
+
+### Mechanical Structure
+- **3D Printed Pan-Tilt Mechanism**: [MakerWorld - Pan Tilt Servo Antenna Tracker MG996R](https://makerworld.com/en/models/973248-pan-tilt-servo-antenna-tracker-mg996r#profileId-945437)
+- Designed for MG996R servos with robust mounting
+
+> **Note**: The system currently uses a laptop camera for vision processing. A dedicated vision module (e.g., OpenMV, ESP32-CAM) will be integrated in future versions for standalone operation.
 
 ## Software Requirements
 - Python 3.x
