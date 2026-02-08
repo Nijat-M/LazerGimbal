@@ -1,0 +1,8 @@
+
+__pycache__/
+*.pyc
+.venv/
+.idea/
+.vscode/
+gimbal_config.json
+*.log

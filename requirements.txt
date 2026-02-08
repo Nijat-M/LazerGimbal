@@ -1,0 +1,5 @@
+PyQt6
+pyqtdarktheme
+opencv-python
+pyserial
+numpy
