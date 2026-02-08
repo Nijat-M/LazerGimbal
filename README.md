@@ -5,6 +5,10 @@ A 2-axis laser gimbal tracking system using OpenCV and STM32.
 ## Overview
 This project implements a computer vision-based tracking system that controls a 2-axis servo gimbal to follow a target (Red Laser or Blue Object). It uses a PID controller for smooth movement and includes a manual test mode for calibration.
 
+## Demo Videos
+- [Laser Tracking Demo (Short)](https://www.youtube.com/shorts/czz0KMfvBXw)
+- [Full System Demonstration](https://www.youtube.com/watch?v=KGi6N0OxIrQ)
+
 ## Features
 - **Visual Tracking**: Real-time tracking of Red (Laser) or Blue objects using HSV color space.
 - **PID Control**: Custom PID algorithm (`core/pid.py`) for smooth and accurate servo positioning.
@@ -25,11 +29,41 @@ This project implements a computer vision-based tracking system that controls a 
 - Python 3.x
 - Dependencies: `PyQt6`, `opencv-python`, `numpy`, `pyserial`, `qdarktheme`
 
-## installation
-1. Clone the repository.
-2. Install dependencies:
+## Installation
+1. **Ensure Python is installed**: Verify that Python 3.x is installed on your system.
+   ```bash
+   python --version
+   ```
+
+2. **Clone the repository**:
+   ```bash
+   git clone https://github.com/Nijat-M/LazerGimbal.git
+   cd LazerGimbal
+   ```
+
+3. **Create a virtual environment**:
+   ```bash
+   python -m venv .venv
+   ```
+
+4. **Activate the virtual environment**:
+   - Windows:
+     ```bash
+     .venv\Scripts\activate
+     ```
+   - Linux/Mac:
+     ```bash
+     source .venv/bin/activate
+     ```
+
+5. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
+   ```
+
+6. **Run the application**: Simply double-click `run_app.bat` or run:
+   ```bash
+   python main.py
    ```
 
 ## Usage
