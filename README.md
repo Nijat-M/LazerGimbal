@@ -5,6 +5,16 @@ A 2-axis laser gimbal tracking system using OpenCV and STM32.
 ## Overview
 This project implements a computer vision-based tracking system that controls a 2-axis servo gimbal to follow a target (Red Laser or Blue Object). It uses a PID controller for smooth movement and includes a manual test mode for calibration.
 
+## Hardware Images
+
+<div align="center">
+  <img src="images/ALL.jpeg" width="500" alt="Complete System">
+  <p><i>Complete Laser Gimbal System</i></p>
+  
+  <img src="images/Pan Tilt.jpeg" width="500" alt="Pan-Tilt Mechanism">
+  <p><i>Pan-Tilt Servo Mechanism</i></p>
+</div>
+
 ## Demo Videos
 - [Laser Tracking Demo (Short)](https://www.youtube.com/shorts/czz0KMfvBXw)
 - [Full System Demonstration](https://www.youtube.com/watch?v=KGi6N0OxIrQ)
