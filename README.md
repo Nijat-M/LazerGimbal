@@ -40,6 +40,7 @@ This project implements a computer vision-based tracking system that controls a 
 - **Microcontroller**: STM32F401CCU6
 - **Servos**: 2x MG996R High-Torque Servos (Pan/Tilt)
 - **Bluetooth Module**: HC-05 (Serial Communication)
+- **Capacitor**: 1000µF Electrolytic Capacitor (Power filtering for servos)
 - **Camera**: Laptop built-in webcam (*Temporary solution - dedicated vision module to be added*)
 - **Laser**: Red laser pointer (optional, for tracking demonstration)
 
