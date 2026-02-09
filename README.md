@@ -51,6 +51,12 @@ This project implements a computer vision-based tracking system that controls a 
 - **3D Printed Pan-Tilt Mechanism**: [MakerWorld - Pan Tilt Servo Antenna Tracker MG996R](https://makerworld.com/en/models/973248-pan-tilt-servo-antenna-tracker-mg996r#profileId-945437)
 - Designed for MG996R servos with robust mounting
 
+### Circuit Schematic
+<div align="center">
+  <img src="images/Schematic.svg" width="700" alt="Circuit Schematic">
+  <p><i>System Wiring Diagram - STM32F401, HC-05, MG996R Servos</i></p>
+</div>
+
 > **Note**: The system currently uses a laptop camera for vision processing. A dedicated vision module (e.g., OpenMV, ESP32-CAM) will be integrated in future versions for standalone operation.
 
 ## Software Requirements
