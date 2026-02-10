@@ -27,12 +27,11 @@ class TestModePanel(QGroupBox):
             btn.setFixedSize(50, 50)
             btn.setStyleSheet("font-size: 20px; font-weight: bold;")
 
-        # 连接信号
-        # 注意: 这里只发射信号，不直接控制串口或修改配置
-        self.btn_up.clicked.connect(lambda: self.request_move_signal.emit('y', -1))
-        self.btn_down.clicked.connect(lambda: self.request_move_signal.emit('y', 1))
-        self.btn_left.clicked.connect(lambda: self.request_move_signal.emit('x', 1)) 
-        self.btn_right.clicked.connect(lambda: self.request_move_signal.emit('x', -1))
+        # 连接信号（添加调试输出）
+        self.btn_up.clicked.connect(lambda: self._emit_move('y', -1, '上'))
+        self.btn_down.clicked.connect(lambda: self._emit_move('y', 1, '下'))
+        self.btn_left.clicked.connect(lambda: self._emit_move('x', 1, '左'))
+        self.btn_right.clicked.connect(lambda: self._emit_move('x', -1, '右'))
 
         # 布局
         layout.addWidget(self.btn_up, 0, 1)
@@ -41,27 +40,8 @@ class TestModePanel(QGroupBox):
         layout.addWidget(self.btn_down, 1, 1)
         
         self.setLayout(layout)
-
-    def handle_key_event(self, event):
-        """
-        处理键盘事件 (被 MainWindow 调用)
-        :return: True if handled, False otherwise
-        """
-        if not self.isVisible():
-            return False
-
-        key = event.key()
-        if key == Qt.Key.Key_Up:
-            self.request_move_signal.emit('y', -1)
-            return True
-        elif key == Qt.Key.Key_Down:
-            self.request_move_signal.emit('y', 1)
-            return True
-        elif key == Qt.Key.Key_Left:
-            self.request_move_signal.emit('x', 1)
-            return True
-        elif key == Qt.Key.Key_Right:
-            self.request_move_signal.emit('x', -1)
-            return True
-        
-        return False
+    
+    def _emit_move(self, axis, direction, name):
+        """发射移动信号（带调试信息）"""
+        print(f"[TEST_PANEL] 按钮点击: {name} (轴={axis}, 方向={direction})")
+        self.request_move_signal.emit(axis, direction)

@@ -33,15 +33,15 @@ class Config:
         # ==========================
         # Proportional (P): 比例项，主要动力。
         # 越大响应越快，但容易震荡。
-        self.PID_KP = 0.5   # Default (More Aggressive for speed)
+        self.PID_KP = 0.4   # 温和：稳定优先，避免过冲
         
         # Integral (I): 积分项，消除稳态误差。
         # 用于修正"差一点点"的情况。
-        self.PID_KI = 0.0   # Usually small for gimabls
+        self.PID_KI = 0.0   # 云台系统通常不需要积分项
         
         # Derivative (D): 微分项，阻尼作用。
         # 用于抑制震荡，相当于"刹车"。
-        self.PID_KD = 0.1   # Increased D-term for latency compensation
+        self.PID_KD = 0.2   # 平衡：良好的阻尼效果
         
         # ==========================
         # 3. 运动限制 (Motion Limits)
@@ -52,11 +52,16 @@ class Config:
         
         # MAX_STEP: 每次循环最大移动步数。
         # 限制最大速度，防止舵机动作过大/过快。
-        self.MAX_STEP = 25
+        # 注意：代码中使用智能速度控制，根据距离动态调整
+        self.MAX_STEP = 20         # 基础最大速度（温和）
+        self.MAX_STEP_FAST = 25    # 远距离快速接近（降低避免扭到头）
+        self.MAX_STEP_MEDIUM = 15  # 中距离平稳移动
+        self.MAX_STEP_SLOW = 8     # 近距离精确定位
         
         # DEADZONE: 死区 (Pixels)。
         # 当误差小于此像素值时，不发送指令，防止在目标附近抖动。
-        self.DEADZONE = 20
+        # 注意：代码中实际使用自适应死区(5-25像素)
+        self.DEADZONE = 15
 
         # ==========================
         # 4. 图像参数 (Computer Vision)
@@ -93,11 +98,13 @@ class Config:
         
         self.SERVO_MIN_LIMIT = 0   # 最小角度
         self.SERVO_MAX_LIMIT = 180 # 最大角度
+        
+        # 手动模式单次移动步长（度）
+        self.MANUAL_STEP = 5  # 每次按方向键移动5度
 
-
-
-        # 默认追踪颜色 ('RED' or 'BLUE')
-        self.DEFAULT_TRACK_COLOR = 'BLUE' 
+        # ==========================
+        # 7. 配置文件 (Configuration)
+        # ==========================
         self.CONFIG_FILE = "gimbal_config.json"
 
     def load_config(self):

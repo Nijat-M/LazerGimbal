@@ -1,8 +1,15 @@
 # -*- coding: utf-8 -*-
 import sys
-import qdarktheme
 from PyQt6.QtWidgets import QApplication
 from gui.main_window import MainWindow
+
+# 尝试导入主题（可选）
+try:
+    import qdarktheme
+    HAS_DARK_THEME = True
+except ImportError:
+    HAS_DARK_THEME = False
+    print("[SYSTEM] 提示: 安装 pyqtdarktheme 以启用暗色主题")
 
 def main():
     """
@@ -18,8 +25,12 @@ def main():
     # 1. 创建应用程序对象
     app = QApplication(sys.argv)
     
-    # 2. 应用现代暗色主题 (Apply Modern Dark Theme)
-    app.setStyleSheet(qdarktheme.load_stylesheet())
+    # 2. 应用现代暗色主题 (可选)
+    if HAS_DARK_THEME:
+        app.setStyleSheet(qdarktheme.load_stylesheet())
+        print("[SYSTEM] 已应用暗色主题")
+    else:
+        print("[SYSTEM] 使用默认主题")
     
     # 3. 创建并显示主窗口
     window = MainWindow()
