@@ -17,9 +17,10 @@ PID 调参面板 (PID Tuning Panel)
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QSlider, QPushButton, QCheckBox, QMessageBox
+    QSlider, QPushButton, QCheckBox, QMessageBox, QFrame
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation
+from PyQt6.QtGui import QCursor
 
 
 class PIDTuner(QWidget):
@@ -44,18 +45,66 @@ class PIDTuner(QWidget):
         self.kp = initial_kp
         self.ki = initial_ki
         self.kd = initial_kd
+        self.is_expanded = False  # 默认折叠
         
         self.init_ui(invert_x, invert_y)
         self.update_sliders()
+        # 初始状态设为折叠
+        self.content_frame.setVisible(self.is_expanded)
     
     def init_ui(self, invert_x, invert_y):
         """初始化UI"""
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
-        # 标题
-        title = QLabel("<b>⚙️ PID 参数调节</b>")
-        title.setStyleSheet("color: #4CAF50; font-size: 14px;")
-        layout.addWidget(title)
+        # ==========================
+        # 标题栏（可点击折叠/展开）
+        # ==========================
+        title_frame = QFrame()
+        title_frame.setObjectName("pidTunerTitle")
+        title_frame.setStyleSheet("""
+            QFrame#pidTunerTitle {
+                border: 1px solid palette(mid);
+                border-radius: 5px;
+                padding: 8px;
+                background-color: palette(dark);
+            }
+            QFrame#pidTunerTitle:hover {
+                background-color: palette(mid);
+            }
+        """)
+        title_frame.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        
+        title_layout = QHBoxLayout(title_frame)
+        title_layout.setContentsMargins(5, 5, 5, 5)
+        
+        self.title_label = QLabel("▶ ⚙️ PID 参数调节 (点击展开)")
+        self.title_label.setStyleSheet("font-size: 13px; font-weight: bold;")
+        title_layout.addWidget(self.title_label)
+        title_layout.addStretch()
+        
+        # 让标题栏可点击
+        title_frame.mousePressEvent = lambda event: self.toggle_content()
+        
+        layout.addWidget(title_frame)
+        
+        # ==========================
+        # 内容框架（可折叠）
+        # ==========================
+        self.content_frame = QFrame()
+        self.content_frame.setObjectName("pidTunerContent")
+        self.content_frame.setStyleSheet("""
+            QFrame#pidTunerContent {
+                border: 1px solid palette(mid);
+                border-top: none;
+                border-radius: 0 0 5px 5px;
+                padding: 10px;
+            }
+        """)
+        
+        content_layout = QVBoxLayout(self.content_frame)
+        content_layout.setSpacing(8)
         
         # ==========================
         # Kp 滑块
@@ -73,12 +122,12 @@ class PIDTuner(QWidget):
         self.label_kp_val.setStyleSheet("color: #FFA726; font-weight: bold;")
         kp_layout.addWidget(self.label_kp_val)
         
-        layout.addLayout(kp_layout)
+        content_layout.addLayout(kp_layout)
         
         # Kp 说明
         kp_hint = QLabel("↑ 比例项：响应速度（过大会震荡）")
         kp_hint.setStyleSheet("color: gray; font-size: 10px;")
-        layout.addWidget(kp_hint)
+        content_layout.addWidget(kp_hint)
         
         # ==========================
         # Ki 滑块
@@ -96,12 +145,12 @@ class PIDTuner(QWidget):
         self.label_ki_val.setStyleSheet("color: #66BB6A; font-weight: bold;")
         ki_layout.addWidget(self.label_ki_val)
         
-        layout.addLayout(ki_layout)
+        content_layout.addLayout(ki_layout)
         
         # Ki 说明
         ki_hint = QLabel("↑ 积分项：消除稳态误差（通常很小）")
         ki_hint.setStyleSheet("color: gray; font-size: 10px;")
-        layout.addWidget(ki_hint)
+        content_layout.addWidget(ki_hint)
         
         # ==========================
         # Kd 滑块
@@ -119,14 +168,14 @@ class PIDTuner(QWidget):
         self.label_kd_val.setStyleSheet("color: #42A5F5; font-weight: bold;")
         kd_layout.addWidget(self.label_kd_val)
         
-        layout.addLayout(kd_layout)
+        content_layout.addLayout(kd_layout)
         
         # Kd 说明
         kd_hint = QLabel("↑ 微分项：阻尼作用（抑制震荡）")
         kd_hint.setStyleSheet("color: gray; font-size: 10px;")
-        layout.addWidget(kd_hint)
+        content_layout.addWidget(kd_hint)
         
-        layout.addSpacing(10)
+        content_layout.addSpacing(10)
         
         # ==========================
         # 反转设置
@@ -143,9 +192,9 @@ class PIDTuner(QWidget):
         
         check_layout.addWidget(self.chk_invert_x)
         check_layout.addWidget(self.chk_invert_y)
-        layout.addLayout(check_layout)
+        content_layout.addLayout(check_layout)
         
-        layout.addSpacing(10)
+        content_layout.addSpacing(10)
         
         # ==========================
         # 按钮
@@ -153,11 +202,25 @@ class PIDTuner(QWidget):
         self.btn_save = QPushButton("💾 保存配置")
         self.btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
         self.btn_save.clicked.connect(self._on_save_clicked)
-        layout.addWidget(self.btn_save)
+        content_layout.addWidget(self.btn_save)
         
         self.btn_reset = QPushButton("🔄 重置默认 PID")
         self.btn_reset.clicked.connect(self._on_reset_clicked)
-        layout.addWidget(self.btn_reset)
+        content_layout.addWidget(self.btn_reset)
+        
+        # 将内容框架添加到主布局
+        layout.addWidget(self.content_frame)
+    
+    def toggle_content(self):
+        """切换折叠/展开状态"""
+        self.is_expanded = not self.is_expanded
+        self.content_frame.setVisible(self.is_expanded)
+        
+        # 更新标题文字
+        if self.is_expanded:
+            self.title_label.setText("▼ ⚙️ PID 参数调节 (点击折叠)")
+        else:
+            self.title_label.setText("▶ ⚙️ PID 参数调节 (点击展开)")
     
     def update_sliders(self):
         """更新滑块位置和显示"""
@@ -210,17 +273,29 @@ class PIDTuner(QWidget):
     
     def _on_reset_clicked(self):
         """重置按钮点击"""
+        # 从配置文件读取默认值
+        try:
+            from config.pid_config import PIDConfig
+            default_kp = PIDConfig.KP
+            default_ki = PIDConfig.KI
+            default_kd = PIDConfig.KD
+        except:
+            # 后备默认值
+            default_kp = 0.3
+            default_ki = 0.0
+            default_kd = 0.25
+        
         reply = QMessageBox.question(
             self,
             "确认重置",
-            "是否重置为默认 PID 参数？\n\nKp=0.40, Ki=0.0, Kd=0.2",
+            f"是否重置为默认 PID 参数？\n\nKp={default_kp:.2f}, Ki={default_ki:.2f}, Kd={default_kd:.2f}",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            self.kp = 0.4
-            self.ki = 0.0
-            self.kd = 0.2
+            self.kp = default_kp
+            self.ki = default_ki
+            self.kd = default_kd
             self.update_sliders()
             self.reset_requested.emit()
     

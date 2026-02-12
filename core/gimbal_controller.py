@@ -175,16 +175,16 @@ class GimbalController(QObject):
             # 远离目标时死区小，提高响应速度
             error_magnitude = (err_x**2 + err_y**2)**0.5
             
-            # 动态死区：5-25像素，根据误差大小调整
-            if error_magnitude < 50:
+            # 动态死区：5-30像素，根据误差大小调整
+            if error_magnitude < 40:
                 # 接近目标，使用较大死区防止震荡
-                adaptive_deadzone = 25
-            elif error_magnitude < 100:
+                adaptive_deadzone = 30
+            elif error_magnitude < 80:
                 # 中等距离，使用中等死区
-                adaptive_deadzone = 15
+                adaptive_deadzone = 20
             else:
                 # 远离目标，使用较小死区提高响应
-                adaptive_deadzone = 5
+                adaptive_deadzone = 10
             
             if abs(err_x) < adaptive_deadzone and abs(err_y) < adaptive_deadzone:
                 return
@@ -195,18 +195,21 @@ class GimbalController(QObject):
             if self.invert_y:
                 err_y = -err_y
             
-            # 7. [智能速度控制] Speed Adaptation
+            # 7. [智能速度控制] Speed Adaptation - 更平滑的速度过渡
             # 根据误差大小动态调整最大步数，远快近慢
-            # 这样可以快速接近目标，同时避免冲过头
+            # 增加速度档位，让过渡更平滑
             if error_magnitude > 150:
-                # 远距离：快速接近（降低避免扭到头）
-                adaptive_max_step = getattr(cfg, 'MAX_STEP_FAST', 25)
-            elif error_magnitude > 80:
-                # 中距离：平稳移动
-                adaptive_max_step = getattr(cfg, 'MAX_STEP_MEDIUM', 15)
+                # 超远距离：中等速度（避免太快飞出）
+                adaptive_max_step = getattr(cfg, 'MAX_STEP_VERY_FAST', 15)
+            elif error_magnitude > 100:
+                # 远距离：平稳移动
+                adaptive_max_step = getattr(cfg, 'MAX_STEP_FAST', 12)
+            elif error_magnitude > 60:
+                # 中距离：稳定移动
+                adaptive_max_step = getattr(cfg, 'MAX_STEP_MEDIUM', 9)
             else:
                 # 近距离：精确定位
-                adaptive_max_step = getattr(cfg, 'MAX_STEP_SLOW', 8)
+                adaptive_max_step = getattr(cfg, 'MAX_STEP_SLOW', 6)
             
             # 动态更新PID的速度限制
             self.pid_x.max_step = adaptive_max_step

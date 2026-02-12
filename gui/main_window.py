@@ -18,9 +18,9 @@
 import sys
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QLabel, QMessageBox
+    QLabel, QMessageBox, QScrollArea
 )
-from PyQt6.QtCore import pyqtSlot
+from PyQt6.QtCore import pyqtSlot, Qt
 
 # 导入核心模块
 try:
@@ -30,7 +30,7 @@ try:
     from vision.worker import VisionWorker
     from gui.test_panel import TestModePanel
     from gui.widgets import (
-        CameraView, SerialPanel, ModePanel, 
+        CameraView, CameraPanel, SerialPanel, ModePanel, 
         PIDTuner, ControlPanel
     )
 except ImportError:
@@ -41,7 +41,7 @@ except ImportError:
     from vision.worker import VisionWorker
     from gui.test_panel import TestModePanel
     from gui.widgets import (
-        CameraView, SerialPanel, ModePanel, 
+        CameraView, CameraPanel, SerialPanel, ModePanel, 
         PIDTuner, ControlPanel
     )
 
@@ -72,6 +72,8 @@ class MainWindow(QMainWindow):
 
         # 启动视觉线程
         self.vision_thread.start()
+        
+        # 摄像头会通过 camera_panel 自动检测并应用，无需手动初始化
 
     def init_ui(self):
         """初始化界面 - 使用组件化设计"""
@@ -88,20 +90,54 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.camera_view, 2)
 
         # ==========================
-        # 右侧：控制面板
+        # 右侧：控制面板（添加滚动区域）
         # ==========================
-        right_layout = QVBoxLayout()
-        right_layout.setSpacing(15)
+        # 创建滚动区域容器
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setMinimumWidth(420)  # 设置最小宽度
+        scroll_area.setMaximumWidth(480)  # 增加最大宽度，留出滚动条空间
+        
+        # 设置滚动条样式，使其更加美观且不挡住内容
+        scroll_area.setStyleSheet("""
+            QScrollBar:vertical {
+                width: 12px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #c0c0c0;
+                border-radius: 6px;
+                min-height: 20px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #a0a0a0;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
+        
+        # 创建内容组件
+        scroll_content = QWidget()
+        right_layout = QVBoxLayout(scroll_content)
+        right_layout.setSpacing(10)  # 减小间距，节省空间
+        right_layout.setContentsMargins(10, 10, 15, 10)  # 右侧留出更多空间给滚动条
 
         # 1. 串口连接面板
         self.serial_panel = SerialPanel(default_port=cfg.SERIAL_PORT)
         right_layout.addWidget(self.serial_panel)
+        
+        # 2. 摄像头选择面板（新增）
+        self.camera_panel = CameraPanel(default_id=cfg.CAMERA_ID)
+        right_layout.addWidget(self.camera_panel)
 
-        # 2. 模式选择面板
+        # 3. 模式选择面板
         self.mode_panel = ModePanel()
         right_layout.addWidget(self.mode_panel)
 
-        # 3. PID 调参面板
+        # 4. PID 调参面板
         self.pid_tuner = PIDTuner(
             initial_kp=cfg.PID_KP,
             initial_ki=cfg.PID_KI,
@@ -111,13 +147,14 @@ class MainWindow(QMainWindow):
         )
         right_layout.addWidget(self.pid_tuner)
 
-        # 4. 控制按钮面板
+        # 5. 控制按钮面板
         self.control_panel = ControlPanel()
         right_layout.addWidget(self.control_panel)
 
-        # 5. 测试模式面板（默认隐藏）
+        # 6. 测试模式面板（默认隐藏）
         self.test_panel = TestModePanel()
         self.test_panel.setVisible(False)
+        self.test_panel.setMaximumHeight(150)  # 限制最大高度
         right_layout.addWidget(self.test_panel)
 
         # 状态栏
@@ -126,7 +163,12 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.status_label)
         
         right_layout.addStretch()
-        main_layout.addLayout(right_layout, 1)
+        
+        # 将内容设置到滚动区域
+        scroll_area.setWidget(scroll_content)
+        
+        # 将滚动区域添加到主布局
+        main_layout.addWidget(scroll_area, 1)
 
     def init_signals(self):
         """连接信号与槽 - 协调各组件通信"""
@@ -139,6 +181,9 @@ class MainWindow(QMainWindow):
         
         # ===== 串口线程 =====
         self.serial_thread.connection_state_signal.connect(self.on_connection_status_changed)
+        
+        # ===== 摄像头面板 =====
+        self.camera_panel.camera_changed.connect(self.on_camera_changed)
         
         # ===== 控制器 =====
         self.controller.status_update_signal.connect(self.update_status)
@@ -191,6 +236,12 @@ class MainWindow(QMainWindow):
             self.status_label.setStyleSheet("color: red; padding: 5px;")
             self.serial_panel.set_connection_status(False, message)
     
+    def on_camera_changed(self, camera_id, width, height):
+        """摄像头切换"""
+        print(f"[GUI] 摄像头切换: ID={camera_id}, Resolution={width}x{height}")
+        self.vision_thread.switch_camera(camera_id, width, height)
+        self.status_label.setText(f"摄像头: Camera {camera_id} @ {width}x{height}")
+    
     def on_mode_changed(self, mode):
         """模式切换"""
         print(f"[GUI] 工作模式切换: {mode}")
@@ -226,10 +277,16 @@ class MainWindow(QMainWindow):
     
     def on_reset_pid(self):
         """重置 PID"""
-        # 更新为新的默认值
-        self.controller.update_pid_tunings(0.4, 0.0, 0.2)
+        # 从配置文件读取默认值
+        from config.pid_config import PIDConfig
+        default_kp = PIDConfig.KP
+        default_ki = PIDConfig.KI
+        default_kd = PIDConfig.KD
+        
+        # 更新控制器
+        self.controller.update_pid_tunings(default_kp, default_ki, default_kd)
         # 同步更新GUI滑块显示
-        self.pid_tuner.set_pid_values(0.4, 0.0, 0.2)
+        self.pid_tuner.set_pid_values(default_kp, default_ki, default_kd)
     
     def on_control_toggled(self, checked):
         """控制开关"""

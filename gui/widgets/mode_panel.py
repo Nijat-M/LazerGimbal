@@ -32,15 +32,21 @@ class ModePanel(QGroupBox):
         # 按钮组
         self.mode_group = QButtonGroup(self)
         
-        # 三个单选框
+        # 四个单选框
         self.rb_idle = QRadioButton("待机 (IDLE)")
-        self.rb_tracking = QRadioButton("视觉追踪 (Tracking)")
+        self.rb_tracking = QRadioButton("激光追踪 (Laser Tracking)")
+        self.rb_blue_tracking = QRadioButton("蓝色物体追踪 (Blue Object)")
         self.rb_test = QRadioButton("测试模式 (Test Mode)")
         
         self.rb_idle.setChecked(True)
         
+        # 设置提示文本
+        self.rb_tracking.setToolTip("红色激光追踪蓝色物体")
+        self.rb_blue_tracking.setToolTip("让蓝色物体居中在画面中央")
+        
         self.mode_group.addButton(self.rb_idle, 0)
         self.mode_group.addButton(self.rb_tracking, 1)
+        self.mode_group.addButton(self.rb_blue_tracking, 2)
         self.mode_group.addButton(self.rb_test, 3)
         
         # 连接信号
@@ -48,6 +54,7 @@ class ModePanel(QGroupBox):
         
         layout.addWidget(self.rb_idle)
         layout.addWidget(self.rb_tracking)
+        layout.addWidget(self.rb_blue_tracking)
         layout.addWidget(self.rb_test)
     
     def _on_mode_toggled(self, btn_id, checked):
@@ -55,7 +62,7 @@ class ModePanel(QGroupBox):
         if not checked:
             return
         
-        mode_map = {0: "IDLE", 1: "TRACKING", 3: "TEST"}
+        mode_map = {0: "IDLE", 1: "TRACKING", 2: "BLUE_TRACKING", 3: "TEST"}
         mode = mode_map.get(btn_id, "IDLE")
         
         # 测试模式需要确认
@@ -84,6 +91,8 @@ class ModePanel(QGroupBox):
         """获取当前模式"""
         if self.rb_tracking.isChecked():
             return "TRACKING"
+        elif self.rb_blue_tracking.isChecked():
+            return "BLUE_TRACKING"
         elif self.rb_test.isChecked():
             return "TEST"
         else:

@@ -6,6 +6,7 @@ GUI 组件导出 (Widget Exports)
 """
 
 from .camera_view import CameraView
+from .camera_panel import CameraPanel
 from .serial_panel import SerialPanel
 from .mode_panel import ModePanel
 from .pid_tuner import PIDTuner
@@ -13,6 +14,7 @@ from .control_panel import ControlPanel
 
 __all__ = [
     'CameraView',
+    'CameraPanel',
     'SerialPanel',
     'ModePanel',
     'PIDTuner',

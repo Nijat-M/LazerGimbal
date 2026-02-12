@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
+import os
 import sys
+
+# 抑制OpenCV警告和错误信息（在导入cv2之前设置）
+os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '0'
+os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
+
 from PyQt6.QtWidgets import QApplication
 from gui.main_window import MainWindow
 

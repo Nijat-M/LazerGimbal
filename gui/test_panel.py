@@ -16,16 +16,18 @@ class TestModePanel(QGroupBox):
 
     def init_ui(self):
         layout = QGridLayout()
+        layout.setContentsMargins(5, 5, 5, 5)  # 减小边距
+        layout.setSpacing(5)  # 减小间距
         
         self.btn_up = QPushButton("▲")
         self.btn_down = QPushButton("▼")
         self.btn_left = QPushButton("◀")
         self.btn_right = QPushButton("▶")
         
-        # 按钮样式
+        # 按钮样式 - 更紧凑
         for btn in [self.btn_up, self.btn_down, self.btn_left, self.btn_right]:
-            btn.setFixedSize(50, 50)
-            btn.setStyleSheet("font-size: 20px; font-weight: bold;")
+            btn.setFixedSize(40, 40)  # 从50x50改为40x40
+            btn.setStyleSheet("font-size: 18px; font-weight: bold;")
 
         # 连接信号（添加调试输出）
         self.btn_up.clicked.connect(lambda: self._emit_move('y', -1, '上'))
