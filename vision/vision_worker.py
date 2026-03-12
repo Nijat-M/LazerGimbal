@@ -130,26 +130,31 @@ class VisionWorker(QThread):
         self.quit()
         self.wait()
 
+    def close_camera(self) -> None:
+        """手动关闭摄像头"""
+        logger.info("[VISION] 正在关闭摄像头...")
+        self.camera_ready = False
+        if self.cap is not None and self.cap.isOpened():
+            self.cap.release()
+            self.cap = None
+        
+        # 发送一张黑屏蒙版告知UI已关闭
+        black_frame = QImage(self.frame_width, self.frame_height, QImage.Format.Format_RGB888)
+        black_frame.fill(0)
+        self.frame_signal.emit(black_frame)
+        logger.info("[VISION] 摄像头已关闭")
+
     # --------------------------------------------------
     # 主循环
     # --------------------------------------------------
 
     def run(self) -> None:
         """线程主循环"""
-        logger.info("[VISION] 视觉线程已启动，等待摄像头初始化...")
-
-        while self.is_running and not self.camera_ready:
-            time.sleep(0.1)
-
-        if not self.is_running:
-            logger.info("[VISION] 线程退出")
-            return
-
-        logger.info("[VISION] 摄像头初始化完成，开始处理画面")
+        logger.info("[VISION] 视觉线程已启动，等待摄像头指令...")
         error_count = 0
 
         while self.is_running:
-            if self.cap is None or not self.cap.isOpened():
+            if not self.camera_ready or self.cap is None or not self.cap.isOpened():
                 time.sleep(0.1)
                 continue
 

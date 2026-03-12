@@ -188,6 +188,7 @@ class MainWindow(QMainWindow):
         
         # ===== 摄像头面板 =====
         self.camera_panel.camera_changed.connect(self.on_camera_changed)
+        self.camera_panel.camera_toggled.connect(self.on_camera_toggled)
         
         # ===== 控制器 =====
         self.controller.status_update_signal.connect(self.update_status)
@@ -242,9 +243,16 @@ class MainWindow(QMainWindow):
     
     def on_camera_changed(self, camera_id, width, height):
         """摄像头切换"""
-        print(f"[GUI] 摄像头切换: ID={camera_id}, Resolution={width}x{height}")
+        logger.info(f"[GUI] 摄像头切换: ID={camera_id}, Resolution={width}x{height}")
         self.vision_thread.switch_camera(camera_id, width, height)
         self.status_label.setText(f"摄像头: Camera {camera_id} @ {width}x{height}")
+
+    def on_camera_toggled(self, is_open: bool):
+        """摄像头开关触发"""
+        if not is_open:
+            logger.info("[GUI] 用户触发关闭摄像头")
+            self.vision_thread.close_camera()
+            self.status_label.setText("摄像头已关闭")
     
     def on_mode_changed(self, mode):
         """模式切换"""
