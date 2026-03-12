@@ -3,212 +3,188 @@
 配置模块统一接口 (Configuration Module)
 
 [使用方法 Usage]
-原来:
+推荐方式（直接导入配置类）：
+    from config import ControlConfig, VisionConfig, HardwareConfig
+    ControlConfig.KP = 0.5
+    VisionConfig.CAMERA_ID = 1
+
+兼容方式（旧代码）：
     from config import cfg
-    cfg.PID_KP = 0.5
+    cfg.PID_KP  # 通过 cfg 访问（兼容旧接口）
 
-现在:
-    from config import cfg, PIDConfig, VisionConfig, HardwareConfig
-    
-    # 方式1: 使用旧接口（兼容性）
-    cfg.PID_KP = 0.5
-    
-    # 方式2: 使用新接口（推荐）
-    PIDConfig.KP = 0.5
-    VisionConfig.CAMERA_ID = 0
-    HardwareConfig.SERIAL_PORT = "COM3"
-
-[优点]
-1. 参数分类清晰，容易找到
-2. 每个配置文件独立，便于调试
-3. 向下兼容旧代码
+[配置文件职责]
+- control_config.py : PID参数、速度分级、死区、误差缩放（控制相关全在这里）
+- vision_config.py  : 摄像头、颜色阈值、图像参数
+- hardware_config.py: 串口、舵机PWM、手动控制参数
 """
 
 import json
 import os
-from .pid_config import PIDConfig
+from datetime import datetime
+
+from .control_config import ControlConfig
 from .vision_config import VisionConfig
 from .hardware_config import HardwareConfig
 
 
 class ConfigManager:
     """
-    配置管理器 (Configuration Manager)
-    提供统一的配置加载/保存接口
+    配置管理器（简化版）
+
+    职责：统一提供配置的保存/加载接口。
+    不再包含冗余的属性映射，直接使用各配置类。
     """
-    
+
     CONFIG_FILE = "gimbal_config.json"
-    
+
     def __init__(self):
-        """
-        初始化配置（兼容旧代码的属性映射）
-        """
-        # 自动加载配置
+        """初始化时自动加载配置文件（若存在）"""
         self.load_config()
-    
-    # ==========================
-    # 兼容性属性（映射到新配置类）
-    # ==========================
-    # PID 参数
+
+    # --------------------------------------------------
+    # 兼容旧代码的属性（最小集合，避免大规模改动旧代码）
+    # --------------------------------------------------
     @property
-    def PID_KP(self): return PIDConfig.KP
+    def PID_KP(self) -> float: return ControlConfig.KP
     @PID_KP.setter
-    def PID_KP(self, value): PIDConfig.KP = value
-    
+    def PID_KP(self, v: float): ControlConfig.KP = v
+
     @property
-    def PID_KI(self): return PIDConfig.KI
+    def PID_KI(self) -> float: return ControlConfig.KI
     @PID_KI.setter
-    def PID_KI(self, value): PIDConfig.KI = value
-    
+    def PID_KI(self, v: float): ControlConfig.KI = v
+
     @property
-    def PID_KD(self): return PIDConfig.KD
+    def PID_KD(self) -> float: return ControlConfig.KD
     @PID_KD.setter
-    def PID_KD(self, value): PIDConfig.KD = value
-    
+    def PID_KD(self, v: float): ControlConfig.KD = v
+
     @property
-    def MAX_STEP(self): return PIDConfig.MAX_STEP
-    @MAX_STEP.setter
-    def MAX_STEP(self, value): PIDConfig.MAX_STEP = value
-    
-    @property
-    def DEADZONE(self): return PIDConfig.DEADZONE
-    @DEADZONE.setter
-    def DEADZONE(self, value): PIDConfig.DEADZONE = value
-    
-    @property
-    def INVERT_X(self): return PIDConfig.INVERT_X
+    def INVERT_X(self) -> bool: return ControlConfig.INVERT_X
     @INVERT_X.setter
-    def INVERT_X(self, value): PIDConfig.INVERT_X = value
-    
+    def INVERT_X(self, v: bool): ControlConfig.INVERT_X = v
+
     @property
-    def INVERT_Y(self): return PIDConfig.INVERT_Y
+    def INVERT_Y(self) -> bool: return ControlConfig.INVERT_Y
     @INVERT_Y.setter
-    def INVERT_Y(self, value): PIDConfig.INVERT_Y = value
-    
+    def INVERT_Y(self, v: bool): ControlConfig.INVERT_Y = v
+
     @property
-    def SERVO_SOFTWARE_STEP_SCALE(self): return PIDConfig.SERVO_STEP_TO_DEGREE
-    
-    # 视觉参数
+    def SERVO_SOFTWARE_STEP_SCALE(self) -> float: return ControlConfig.SERVO_STEP_TO_DEGREE
+
     @property
-    def CAMERA_ID(self): return VisionConfig.CAMERA_ID
+    def SERVO_MIN_LIMIT(self) -> int: return ControlConfig.SERVO_MIN_LIMIT
+
+    @property
+    def SERVO_MAX_LIMIT(self) -> int: return ControlConfig.SERVO_MAX_LIMIT
+
+    # 以下从各子配置类透出（只读，旧代码使用）
+    @property
+    def CAMERA_ID(self) -> int: return VisionConfig.CAMERA_ID
     @CAMERA_ID.setter
-    def CAMERA_ID(self, value): VisionConfig.CAMERA_ID = value
-    
+    def CAMERA_ID(self, v: int): VisionConfig.CAMERA_ID = v
+
     @property
-    def FRAME_WIDTH(self): return VisionConfig.FRAME_WIDTH
+    def FRAME_WIDTH(self) -> int: return VisionConfig.FRAME_WIDTH
+
     @property
-    def FRAME_HEIGHT(self): return VisionConfig.FRAME_HEIGHT
+    def FRAME_HEIGHT(self) -> int: return VisionConfig.FRAME_HEIGHT
+
     @property
-    def CENTER_X(self): return VisionConfig.CENTER_X
+    def CENTER_X(self) -> int: return VisionConfig.CENTER_X
+
     @property
-    def CENTER_Y(self): return VisionConfig.CENTER_Y
-    @property
-    def PIXELS_PER_DEGREE(self): return VisionConfig.PIXELS_PER_DEGREE
-    
+    def CENTER_Y(self) -> int: return VisionConfig.CENTER_Y
+
     @property
     def HSV_RED_LOWER1(self): return VisionConfig.HSV_RED_LOWER1
+
     @property
     def HSV_RED_UPPER1(self): return VisionConfig.HSV_RED_UPPER1
+
     @property
     def HSV_RED_LOWER2(self): return VisionConfig.HSV_RED_LOWER2
+
     @property
     def HSV_RED_UPPER2(self): return VisionConfig.HSV_RED_UPPER2
+
     @property
     def HSV_BLUE_LOWER(self): return VisionConfig.HSV_BLUE_LOWER
+
     @property
     def HSV_BLUE_UPPER(self): return VisionConfig.HSV_BLUE_UPPER
-    
-    # 硬件参数
+
     @property
-    def SERIAL_PORT(self): return HardwareConfig.SERIAL_PORT
+    def SERIAL_PORT(self) -> str: return HardwareConfig.SERIAL_PORT
     @SERIAL_PORT.setter
-    def SERIAL_PORT(self, value): HardwareConfig.SERIAL_PORT = value
-    
+    def SERIAL_PORT(self, v: str): HardwareConfig.SERIAL_PORT = v
+
     @property
-    def BAUD_RATE(self): return HardwareConfig.BAUD_RATE
+    def BAUD_RATE(self) -> int: return HardwareConfig.BAUD_RATE
+
     @property
-    def TIMEOUT(self): return HardwareConfig.TIMEOUT
+    def TIMEOUT(self) -> int: return HardwareConfig.TIMEOUT
+
     @property
-    def SERVO_MIN_LIMIT(self): return HardwareConfig.SERVO_MIN_LIMIT
+    def MANUAL_STEP(self) -> int: return HardwareConfig.MANUAL_STEP
+
     @property
-    def SERVO_MAX_LIMIT(self): return HardwareConfig.SERVO_MAX_LIMIT
-    @property
-    def MANUAL_STEP(self): return HardwareConfig.MANUAL_STEP
-    @property
-    def DEGREE_TO_PULSE(self): return HardwareConfig.DEGREE_TO_PULSE
-    
-    # CONFIG_FILE 已在类级别定义，无需 property
-    
-    # ==========================
-    # 配置保存/加载
-    # ==========================
-    def load_config(self):
-        """
-        从 JSON 文件加载配置
-        Load configuration from file
-        """
-        config_file = ConfigManager.CONFIG_FILE
-        if not os.path.exists(config_file):
+    def DEGREE_TO_PULSE(self) -> int: return HardwareConfig.DEGREE_TO_PULSE
+
+    # --------------------------------------------------
+    # 配置保存 / 加载
+    # --------------------------------------------------
+    def load_config(self) -> None:
+        """从 JSON 文件加载配置"""
+        if not os.path.exists(self.CONFIG_FILE):
             print("[CONFIG] 配置文件不存在，使用默认值")
             return
-        
+
         try:
-            with open(config_file, 'r', encoding='utf-8') as f:
+            with open(self.CONFIG_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
-            # 加载 PID 参数
+
+            # 新格式
             if 'PID' in data:
-                PIDConfig.update_from_dict(data['PID'])
-            
-            # 向下兼容旧格式
+                ControlConfig.update_from_dict(data['PID'])
+            # 兼容旧格式
             else:
-                PIDConfig.KP = data.get('PID_KP', PIDConfig.KP)
-                PIDConfig.KI = data.get('PID_KI', PIDConfig.KI)
-                PIDConfig.KD = data.get('PID_KD', PIDConfig.KD)
-                PIDConfig.MAX_STEP = data.get('MAX_STEP', PIDConfig.MAX_STEP)
-                PIDConfig.DEADZONE = data.get('DEADZONE', PIDConfig.DEADZONE)
-            
-            print(f"[CONFIG] ✓ 已加载配置: {config_file}")
-            print(f"[CONFIG]   PID: Kp={PIDConfig.KP:.2f}, Ki={PIDConfig.KI:.3f}, Kd={PIDConfig.KD:.2f}")
-            
+                ControlConfig.KP = data.get('PID_KP', ControlConfig.KP)
+                ControlConfig.KI = data.get('PID_KI', ControlConfig.KI)
+                ControlConfig.KD = data.get('PID_KD', ControlConfig.KD)
+
+            print(f"[CONFIG] ✓ 已加载配置: {self.CONFIG_FILE}")
+            print(f"[CONFIG]   PID: Kp={ControlConfig.KP:.2f}, "
+                  f"Ki={ControlConfig.KI:.3f}, Kd={ControlConfig.KD:.2f}")
+
         except Exception as e:
             print(f"[CONFIG] ✗ 加载失败: {e}")
-    
-    def save_config(self):
-        """
-        保存当前配置到 JSON 文件
-        Save configuration to file
-        """
-        config_file = ConfigManager.CONFIG_FILE
+
+    def save_config(self) -> None:
+        """保存当前配置到 JSON 文件"""
         data = {
-            'PID': PIDConfig.get_tuning_dict(),
-            'version': '2.0',  # 新版本标记
-            'last_updated': self._get_timestamp()
+            'PID': ControlConfig.get_tuning_dict(),
+            'version': '3.0',
+            'last_updated': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
-        
         try:
-            with open(config_file, 'w', encoding='utf-8') as f:
+            with open(self.CONFIG_FILE, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
-            print(f"[CONFIG] ✓ 已保存配置: {config_file}")
+            print(f"[CONFIG] ✓ 已保存配置: {self.CONFIG_FILE}")
         except Exception as e:
             print(f"[CONFIG] ✗ 保存失败: {e}")
-    
-    def _get_timestamp(self):
-        """获取当前时间戳"""
-        from datetime import datetime
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 # ==========================
-# 全局单例（兼容旧代码）
+# 全局单例（兼容旧代码 `from config import cfg`）
 # ==========================
 cfg = ConfigManager()
 
-# 导出所有配置类
+# 推荐直接使用配置类
 __all__ = [
-    'cfg',              # 兼容旧代码
-    'PIDConfig',        # PID 参数
-    'VisionConfig',     # 视觉参数
-    'HardwareConfig',   # 硬件参数
-    'ConfigManager'     # 配置管理器
+    'cfg',           # 兼容旧代码
+    'ControlConfig', # 控制参数（PID/速度/死区/缩放）
+    'VisionConfig',  # 视觉参数（颜色/摄像头）
+    'HardwareConfig', # 硬件参数（串口/舵机）
+    'ConfigManager',
 ]
