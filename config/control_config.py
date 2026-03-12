@@ -21,7 +21,7 @@ class ControlConfig:
     # ==========================================
     KP: float = 0.3    # 比例系数 (Proportional Gain) - 稳定优先
     KI: float = 0.0    # 积分系数 (Integral Gain)    - 云台系统通常为0
-    KD: float = 0.25   # 微分系数 (Derivative Gain)  - 增加阻尼，减少震荡
+    KD: float = 0.45   # 微分系数 (Derivative Gain)  - 值越高阻尼越大，专门抑制画圈摆动
     MAX_INTEGRAL: int = 100  # 积分上限（防止积分饱和）
 
     # ==========================================
@@ -58,7 +58,8 @@ class ControlConfig:
     # ==========================================
     # 误差滤波 (Error Filter)
     # ==========================================
-    ERROR_FILTER_LENGTH: int = 3  # 移动平均滤波器长度（帧数）
+    # 降低滤波器长度，彻底消除视觉相移(Phase Lag)造成的低频缓慢摆动
+    ERROR_FILTER_LENGTH: int = 1  # (相当于直通，无延迟，最锋利)
 
     # ==========================================
     # 安全限制 (Safety Limits)

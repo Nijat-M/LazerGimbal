@@ -168,7 +168,8 @@ class VisionWorker(QThread):
                 import traceback
                 traceback.print_exc()
 
-            time.sleep(0.01)  # 10ms，避免CPU占用过高
+            # (原有的 time.sleep(0.01) 已被删除，因为 cap.read() 自身就是硬件阻塞的)
+            # 通过依赖 OpenCV 底层帧数阻塞，这解决了画面延迟和操作响应慢的根本问题。
 
         logger.info("[VISION] 线程退出，释放摄像头")
         if self.cap is not None:

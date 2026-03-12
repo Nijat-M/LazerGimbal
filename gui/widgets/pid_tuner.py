@@ -276,7 +276,7 @@ class PIDTuner(QWidget):
         # 直接使用硬编码的出厂安全值，避免被动态修改污染
         default_kp = 0.3
         default_ki = 0.0
-        default_kd = 0.25
+        default_kd = 0.45
 
         reply = QMessageBox.question(
             self,
@@ -290,6 +290,8 @@ class PIDTuner(QWidget):
             self.ki = default_ki
             self.kd = default_kd
             self.update_sliders()
+            # 必须手动发射 PID 变更信号，否则底层的 GimbalController 拿不到新值
+            self.pid_changed.emit(self.kp, self.ki, self.kd)
             self.reset_requested.emit()
     
     def set_pid_values(self, kp, ki, kd):
