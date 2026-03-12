@@ -323,14 +323,16 @@ class MainWindow(QMainWindow):
         """关闭窗口时清理资源"""
         print("[GUI] 关闭窗口，停止线程...")
         
-        # 停止视觉线程
-        self.vision_thread.is_running = False
-        self.vision_thread.wait()
+        # 通知线程停止
+        if hasattr(self, 'vision_thread') and self.vision_thread.isRunning():
+            self.vision_thread.is_running = False
+            # 给出最多 1000 毫秒的时间，避免死等 OpenCV 释放导致未响应卡死
+            self.vision_thread.wait(1000)
         
-        # 停止串口线程
-        if self.serial_thread.isRunning():
-            self.serial_thread.stop()
-            self.serial_thread.wait()
+        if hasattr(self, 'serial_thread') and self.serial_thread.isRunning():
+            self.serial_thread.is_running = False
+            self.serial_thread.wait(1000)
+
         
         event.accept()
 
