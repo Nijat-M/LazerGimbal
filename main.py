@@ -8,13 +8,13 @@ os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
 
 from PyQt6.QtWidgets import QApplication
 from gui.main_window import MainWindow
+from utils.logger import Logger
+
+logger = Logger("System")
 
 # 尝试导入主题（可选）
 try:
     import qdarktheme
-from utils.logger import Logger
-logger = Logger("System")
-
     HAS_DARK_THEME = True
 except ImportError:
     HAS_DARK_THEME = False
