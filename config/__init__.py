@@ -25,6 +25,9 @@ from datetime import datetime
 from .control_config import ControlConfig
 from .vision_config import VisionConfig
 from .hardware_config import HardwareConfig
+from utils.logger import Logger
+logger = Logger("Config")
+
 
 
 class ConfigManager:
@@ -137,7 +140,7 @@ class ConfigManager:
     def load_config(self) -> None:
         """从 JSON 文件加载配置"""
         if not os.path.exists(self.CONFIG_FILE):
-            print("[CONFIG] 配置文件不存在，使用默认值")
+            logger.info("[CONFIG] 配置文件不存在，使用默认值")
             return
 
         try:
@@ -153,12 +156,12 @@ class ConfigManager:
                 ControlConfig.KI = data.get('PID_KI', ControlConfig.KI)
                 ControlConfig.KD = data.get('PID_KD', ControlConfig.KD)
 
-            print(f"[CONFIG] ✓ 已加载配置: {self.CONFIG_FILE}")
+            logger.info(f"[CONFIG] ✓ 已加载配置: {self.CONFIG_FILE}")
             print(f"[CONFIG]   PID: Kp={ControlConfig.KP:.2f}, "
                   f"Ki={ControlConfig.KI:.3f}, Kd={ControlConfig.KD:.2f}")
 
         except Exception as e:
-            print(f"[CONFIG] ✗ 加载失败: {e}")
+            logger.info(f"[CONFIG] ✗ 加载失败: {e}")
 
     def save_config(self) -> None:
         """保存当前配置到 JSON 文件"""
@@ -170,9 +173,9 @@ class ConfigManager:
         try:
             with open(self.CONFIG_FILE, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
-            print(f"[CONFIG] ✓ 已保存配置: {self.CONFIG_FILE}")
+            logger.info(f"[CONFIG] ✓ 已保存配置: {self.CONFIG_FILE}")
         except Exception as e:
-            print(f"[CONFIG] ✗ 保存失败: {e}")
+            logger.info(f"[CONFIG] ✗ 保存失败: {e}")
 
 
 # ==========================

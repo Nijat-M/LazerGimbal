@@ -12,10 +12,13 @@ from gui.main_window import MainWindow
 # 尝试导入主题（可选）
 try:
     import qdarktheme
+from utils.logger import Logger
+logger = Logger("System")
+
     HAS_DARK_THEME = True
 except ImportError:
     HAS_DARK_THEME = False
-    print("[SYSTEM] 提示: 安装 pyqtdarktheme 以启用暗色主题")
+    logger.info("[SYSTEM] 提示: 安装 pyqtdarktheme 以启用暗色主题")
 
 def main():
     """
@@ -25,8 +28,8 @@ def main():
     # 强制 stdout 立即刷新，防止 crash 时日志丢失
     sys.stdout.reconfigure(encoding='utf-8')
     
-    print("[SYSTEM] 程序启动...")
-    print("[SYSTEM] 初始化 Application...")
+    logger.info("[SYSTEM] 程序启动...")
+    logger.info("[SYSTEM] 初始化 Application...")
 
     # 1. 创建应用程序对象
     app = QApplication(sys.argv)
@@ -34,9 +37,9 @@ def main():
     # 2. 应用现代暗色主题 (可选)
     if HAS_DARK_THEME:
         app.setStyleSheet(qdarktheme.load_stylesheet())
-        print("[SYSTEM] 已应用暗色主题")
+        logger.info("[SYSTEM] 已应用暗色主题")
     else:
-        print("[SYSTEM] 使用默认主题")
+        logger.info("[SYSTEM] 使用默认主题")
     
     # 3. 创建并显示主窗口
     window = MainWindow()

@@ -28,6 +28,9 @@ from PyQt6.QtGui import QImage
 
 from config.vision_config import VisionConfig
 from vision.detector import TargetDetector
+from utils.logger import Logger
+
+logger = Logger("VisionWorker")
 
 
 class VisionWorker(QThread):
@@ -70,11 +73,11 @@ class VisionWorker(QThread):
     def set_mode(self, mode: str) -> None:
         """设置工作模式"""
         self.mode = mode
-        print(f"[VISION] 视觉线程模式: {mode}")
+        logger.info(f"[VISION] 视觉线程模式: {mode}")
 
     def switch_camera(self, camera_id: int, width: int, height: int) -> None:
         """动态切换摄像头"""
-        print(f"[VISION] 切换摄像头: ID={camera_id}, {width}x{height}")
+        logger.info(f"[VISION] 切换摄像头: ID={camera_id}, {width}x{height}")
 
         self.camera_id = camera_id
         self.frame_width = width
@@ -86,11 +89,11 @@ class VisionWorker(QThread):
 
         self.cap = cv2.VideoCapture(self.camera_id, cv2.CAP_DSHOW)
         if not self.cap.isOpened():
-            print("[VISION] DSHOW后端失败，尝试默认后端...")
+            logger.info("[VISION] DSHOW后端失败，尝试默认后端...")
             self.cap = cv2.VideoCapture(self.camera_id)
 
         if not self.cap.isOpened():
-            print(f"[VISION ERROR] 无法打开摄像头 ID={camera_id}")
+            logger.error(f"[VISION ERROR] 无法打开摄像头 ID={camera_id}")
             self.camera_ready = False
             return
 
@@ -106,7 +109,7 @@ class VisionWorker(QThread):
         actual_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         actual_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         actual_fps = int(self.cap.get(cv2.CAP_PROP_FPS))
-        print(f"[VISION] ✓ 摄像头就绪: {actual_w}x{actual_h} @ {actual_fps}fps")
+        logger.info(f"[VISION] ✓ 摄像头就绪: {actual_w}x{actual_h} @ {actual_fps}fps")
 
         self.camera_ready = True
 
@@ -122,16 +125,16 @@ class VisionWorker(QThread):
 
     def run(self) -> None:
         """线程主循环"""
-        print("[VISION] 视觉线程已启动，等待摄像头初始化...")
+        logger.info("[VISION] 视觉线程已启动，等待摄像头初始化...")
 
         while self.is_running and not self.camera_ready:
             time.sleep(0.1)
 
         if not self.is_running:
-            print("[VISION] 线程退出")
+            logger.info("[VISION] 线程退出")
             return
 
-        print("[VISION] 摄像头初始化完成，开始处理画面")
+        logger.info("[VISION] 摄像头初始化完成，开始处理画面")
         error_count = 0
 
         while self.is_running:
@@ -144,9 +147,9 @@ class VisionWorker(QThread):
             if not ret or frame is None:
                 error_count += 1
                 if error_count <= 5:
-                    print(f"[VISION ERROR] 读取帧失败 ({error_count}/5)")
+                    logger.error(f"[VISION ERROR] 读取帧失败 ({error_count}/5)")
                 elif error_count == 100:
-                    print("[VISION ERROR] 持续读取失败，请检查摄像头连接")
+                    logger.error("[VISION ERROR] 持续读取失败，请检查摄像头连接")
                     error_count = 0
                 time.sleep(0.1)
                 continue
@@ -161,13 +164,13 @@ class VisionWorker(QThread):
                 else:
                     self._send_image(frame)  # IDLE：只显示原图
             except Exception as e:
-                print(f"[VISION ERROR] 模式 {self.mode} 处理出错: {e}")
+                logger.error(f"模式 {self.mode} 处理出错: {e}")
                 import traceback
                 traceback.print_exc()
 
             time.sleep(0.01)  # 10ms，避免CPU占用过高
 
-        print("[VISION] 线程退出，释放摄像头")
+        logger.info("[VISION] 线程退出，释放摄像头")
         if self.cap is not None:
             self.cap.release()
 
@@ -204,16 +207,16 @@ class VisionWorker(QThread):
             self.control_signal.emit(error_x, error_y)  # → handle_vision_error
 
             if self.laser_tracking_status != "both":
-                print("[VISION] ✓ 同时检测到蓝色目标和红色激光")
+                logger.info("[VISION] ✓ 同时检测到蓝色目标和红色激光")
                 self.laser_tracking_status = "both"
 
         elif blue_result.detected and not laser_result.detected:
             if self.laser_tracking_status != "blue_only":
-                print("[VISION] 找到蓝色目标，但红色激光丢失")
+                logger.info("[VISION] 找到蓝色目标，但红色激光丢失")
                 self.laser_tracking_status = "blue_only"
         else:
             if self.laser_tracking_status not in (None, "none"):
-                print("[VISION] 未检测到目标")
+                logger.info("[VISION] 未检测到目标")
                 self.laser_tracking_status = "none"
 
         # 调试蒙版
@@ -256,11 +259,11 @@ class VisionWorker(QThread):
             self.target_pos_signal.emit(pos[0], pos[1])
 
             if not self.blue_object_detected:
-                print("[VISION] ✓ 找到蓝色目标")
+                logger.info("[VISION] ✓ 找到蓝色目标")
                 self.blue_object_detected = True
         else:
             if self.blue_object_detected:
-                print("[VISION] ✗ 未找到蓝色目标")
+                logger.info("[VISION] ✗ 未找到蓝色目标")
                 self.blue_object_detected = False
 
         # 调试蒙版（蓝色检测范围）
@@ -282,7 +285,7 @@ class VisionWorker(QThread):
                              QImage.Format.Format_RGB888).copy()
             self.frame_signal.emit(q_image)
         except Exception as e:
-            print(f"[VISION ERROR] send_image failed: {e}")
+            logger.error(f"[VISION ERROR] send_image failed: {e}")
 
     def _send_mask(self, mask: cv2.Mat) -> None:
         """将单通道蒙版发送给 UI（调试用）"""
@@ -292,4 +295,4 @@ class VisionWorker(QThread):
                              QImage.Format.Format_Grayscale8).copy()
             self.mask_signal.emit(q_image)
         except Exception as e:
-            print(f"[VISION ERROR] send_mask failed: {e}")
+            logger.error(f"[VISION ERROR] send_mask failed: {e}")

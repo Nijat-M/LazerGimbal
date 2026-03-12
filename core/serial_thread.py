@@ -11,6 +11,9 @@ try:
 except ImportError:
     sys.path.append("..")
     from config import cfg
+from utils.logger import Logger
+logger = Logger("SerialThread")
+
 
 class SerialThread(QThread):
     """
@@ -57,12 +60,12 @@ class SerialThread(QThread):
             
             if self.serial_port.is_open:
                 msg = f"已连接至 {port_name}"
-                print(f"[SERIAL] {msg}")
+                logger.info(f"[SERIAL] {msg}")
                 self.connection_state_signal.emit(True, msg)
                 return True
         except serial.SerialException as e:
             error_msg = f"连接失败: {str(e)}"
-            print(f"[SERIAL ERROR] {error_msg}")
+            logger.error(f"[SERIAL ERROR] {error_msg}")
             self.connection_state_signal.emit(False, error_msg)
             return False
         return False
@@ -100,7 +103,7 @@ class SerialThread(QThread):
                         self.serial_port.write(cmd.encode('utf-8'))
                         # print(f"[SERIAL TX] '{cmd.strip()}'")  # Disabled for performance (latency)
                     except Exception as e:
-                        print(f"[SERIAL TX ERROR] {e}")
+                        logger.error(f"[SERIAL TX ERROR] {e}")
 
                 # 2. 处理接收数据 (Receiving)
                 try:
@@ -108,10 +111,10 @@ class SerialThread(QThread):
                         # readline() 会读取直到 '\n'，由于设置了 timeout，不会无限阻塞
                         data = self.serial_port.readline().decode('utf-8').strip()
                         if data:
-                            print(f"[SERIAL RX] '{data}'") 
+                            logger.info(f"[SERIAL RX] '{data}'")
                             self.data_received_signal.emit(data)
                 except Exception as e:
-                    print(f"接收错误: {e}")
+                    logger.info(f"接收错误: {e}")
 
             # 避免 CPU 占用过高 (Yield CPU)
             # 10ms 的休眠足以让 OS 调度其他任务

@@ -23,6 +23,9 @@ from config import cfg
 from config.control_config import ControlConfig
 from core.pid import PIDController
 from core.control.error_processor import ErrorProcessor
+from utils.logger import Logger
+
+logger = Logger("GimbalController")
 
 
 class GimbalController(QObject):
@@ -89,7 +92,7 @@ class GimbalController(QObject):
         self.control_enabled = enabled
         status = "控制已启动" if enabled else "控制已停止"
         self.status_update_signal.emit(status)
-        print(f"[CONTROLLER] {status}")
+        logger.info(f"[CONTROLLER] {status}")
 
     def set_invert(self, invert_x: bool, invert_y: bool) -> None:
         """设置轴向反转"""
@@ -105,7 +108,7 @@ class GimbalController(QObject):
         ControlConfig.KP = kp
         ControlConfig.KI = ki
         ControlConfig.KD = kd
-        print(f"[CONTROLLER] PID参数已更新: Kp={kp:.2f}, Ki={ki:.3f}, Kd={kd:.2f}")
+        logger.info(f"[CONTROLLER] PID参数已更新: Kp={kp:.2f}, Ki={ki:.3f}, Kd={kd:.2f}")
 
     def handle_target_position(self, target_x: int, target_y: int) -> None:
         """
@@ -167,7 +170,7 @@ class GimbalController(QObject):
                not self.serial_thread.serial_port.is_open:
                 now = time.time()
                 if now - self.last_warn_time > 2.0:
-                    print("[WARNING] 串口未连接！请先点击'连接'按钮。")
+                    logger.warning("[WARNING] 串口未连接！请先点击'连接'按钮。")
                     self.status_update_signal.emit("警告: 串口未连接")
                     self.last_warn_time = now
                 return
@@ -175,8 +178,8 @@ class GimbalController(QObject):
             # 3. [安全看门狗] 超时停止控制，防止失控
             if time.time() - self.last_vision_time > ControlConfig.VISION_WATCHDOG_TIMEOUT:
                 if self.current_error_x != 0 or self.current_error_y != 0:
-                    print(f"[SAFETY] 视觉信号丢失 "
-                          f">{ControlConfig.VISION_WATCHDOG_TIMEOUT}s，停止控制")
+                    logger.warning("视觉信号丢失，停止控制",
+                                   timeout=ControlConfig.VISION_WATCHDOG_TIMEOUT)
                     self.current_error_x = 0
                     self.current_error_y = 0
                 return
@@ -245,7 +248,7 @@ class GimbalController(QObject):
             self.position_update_signal.emit(self.servo_x, self.servo_y)
 
         except Exception as e:
-            print(f"[CONTROLLER ERROR] 控制循环异常: {e}")
+            logger.error(f"[CONTROLLER ERROR] 控制循环异常: {e}")
             import traceback
             traceback.print_exc()
 
@@ -261,11 +264,11 @@ class GimbalController(QObject):
             axis: 'x' 或 'y'
             direction: 1（正向）或 -1（反向）
         """
-        print(f"[MANUAL] 手动移动请求: 轴={axis}, 方向={direction}")
+        logger.info(f"[MANUAL] 手动移动请求: 轴={axis}, 方向={direction}")
 
         if not self.serial_thread.serial_port or \
            not self.serial_thread.serial_port.is_open:
-            print("[WARNING] 串口未连接，无法手动移动")
+            logger.warning("[WARNING] 串口未连接，无法手动移动")
             self.status_update_signal.emit("⚠️ 警告: 串口未连接")
             return
 
@@ -274,26 +277,26 @@ class GimbalController(QObject):
         # 应用反转设置
         if axis == 'x' and self.invert_x:
             degree_step = -degree_step
-            print("[MANUAL] X轴已反转（INVERT_X=True）")
+            logger.info("[MANUAL] X轴已反转（INVERT_X=True）")
         elif axis == 'y' and self.invert_y:
             degree_step = -degree_step
-            print("[MANUAL] Y轴已反转（INVERT_Y=True）")
+            logger.info("[MANUAL] Y轴已反转（INVERT_Y=True）")
 
         # 角度 → PWM 脉冲
         pulse_step = int(degree_step * cfg.DEGREE_TO_PULSE)
-        print(f"[MANUAL] 角度步长: {degree_step}°, PWM脉冲步长: {pulse_step}")
+        logger.info(f"[MANUAL] 角度步长: {degree_step}°, PWM脉冲步长: {pulse_step}")
 
         if axis == 'x':
             next_pos = self.servo_x + degree_step
             if ControlConfig.SERVO_MIN_LIMIT <= next_pos <= ControlConfig.SERVO_MAX_LIMIT:
                 self.servo_x = next_pos
                 cmd = f"x{'+' if pulse_step >= 0 else ''}{pulse_step}"
-                print(f"[MANUAL] 发送 X 轴命令: {cmd} (新位置={self.servo_x:.1f}°)")
+                logger.info(f"[MANUAL] 发送 X 轴命令: {cmd} (新位置={self.servo_x:.1f}°)")
                 self.serial_thread.send_command(f"{cmd}\n")
                 self.position_update_signal.emit(self.servo_x, self.servo_y)
                 self.status_update_signal.emit(f"手动移动 X: {self.servo_x:.1f}°")
             else:
-                print(f"[LIMIT] X轴已到达限位: {next_pos:.1f}°")
+                logger.warning(f"[LIMIT] X轴已到达限位: {next_pos:.1f}°")
                 self.status_update_signal.emit(f"⚠️ X轴限位: {next_pos:.1f}°")
 
         elif axis == 'y':
@@ -301,12 +304,12 @@ class GimbalController(QObject):
             if ControlConfig.SERVO_MIN_LIMIT <= next_pos <= ControlConfig.SERVO_MAX_LIMIT:
                 self.servo_y = next_pos
                 cmd = f"y{'+' if pulse_step >= 0 else ''}{pulse_step}"
-                print(f"[MANUAL] 发送 Y 轴命令: {cmd} (新位置={self.servo_y:.1f}°)")
+                logger.info(f"[MANUAL] 发送 Y 轴命令: {cmd} (新位置={self.servo_y:.1f}°)")
                 self.serial_thread.send_command(f"{cmd}\n")
                 self.position_update_signal.emit(self.servo_x, self.servo_y)
                 self.status_update_signal.emit(f"手动移动 Y: {self.servo_y:.1f}°")
             else:
-                print(f"[LIMIT] Y轴已到达限位: {next_pos:.1f}°")
+                logger.warning(f"[LIMIT] Y轴已到达限位: {next_pos:.1f}°")
                 self.status_update_signal.emit(f"⚠️ Y轴限位: {next_pos:.1f}°")
 
     def sync_position(self) -> None:
@@ -322,7 +325,7 @@ class GimbalController(QObject):
         self.error_processor.reset()
         self.position_update_signal.emit(self.servo_x, self.servo_y)
         self.status_update_signal.emit("位置已重置为中位 (90, 90)")
-        print("[CONTROLLER] 位置已同步重置")
+        logger.info("[CONTROLLER] 位置已同步重置")
 
 
 # --------------------------------------------------
