@@ -15,7 +15,7 @@ os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '0'
 os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
 
 from PyQt6.QtWidgets import (
-    QGroupBox, QFormLayout, QComboBox, QPushButton, QLabel
+    QGroupBox, QFormLayout, QHBoxLayout, QComboBox, QPushButton, QLabel
 )
 from PyQt6.QtCore import pyqtSignal, QTimer
 import cv2
