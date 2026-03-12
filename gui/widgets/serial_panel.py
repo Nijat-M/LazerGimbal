@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QGroupBox, QFormLayout, QComboBox, QPushButton
 )
 from PyQt6.QtCore import pyqtSignal
+import serial.tools.list_ports
 
 
 class SerialPanel(QGroupBox):
@@ -29,11 +30,17 @@ class SerialPanel(QGroupBox):
         
         # 端口选择
         self.combo_port = QComboBox()
-        self.combo_port.addItems([
-            "COM1", "COM2", "COM3", "COM4", "COM5",
-            "COM6", "COM7", "COM8", "COM9", "COM10"
-        ])
-        self.combo_port.setCurrentText(default_port)
+        
+        # 自动检测可用端口
+        ports = [port.device for port in serial.tools.list_ports.comports()]
+        if not ports:
+            ports = [default_port] # 兜底
+            
+        self.combo_port.addItems(ports)
+        if default_port in ports:
+            self.combo_port.setCurrentText(default_port)
+        else:
+            self.combo_port.setCurrentIndex(0)
         
         # 连接按钮
         self.btn_connect = QPushButton("连接 (Connect)")

@@ -160,6 +160,7 @@ class MainWindow(QMainWindow):
         # 状态栏
         self.status_label = QLabel("系统就绪")
         self.status_label.setStyleSheet("color: gray; padding: 5px;")
+        self.status_label.setWordWrap(True) # 允许长文本换行，防止撑大窗口
         right_layout.addWidget(self.status_label)
         
         right_layout.addStretch()
