@@ -63,15 +63,16 @@ class PIDTuner(QWidget):
         # ==========================
         title_frame = QFrame()
         title_frame.setObjectName("pidTunerTitle")
+        # 使用 palette(...) 替代写死的 #2d2d2d，自动适配 qdarktheme
         title_frame.setStyleSheet("""
             QFrame#pidTunerTitle {
                 border: 1px solid palette(mid);
                 border-radius: 5px;
                 padding: 8px;
-                background-color: palette(dark);
+                background-color: palette(button);
             }
             QFrame#pidTunerTitle:hover {
-                background-color: palette(mid);
+                background-color: palette(highlight);
             }
         """)
         title_frame.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -100,6 +101,7 @@ class PIDTuner(QWidget):
                 border-top: none;
                 border-radius: 0 0 5px 5px;
                 padding: 10px;
+                background-color: palette(window);
             }
         """)
         
@@ -197,10 +199,10 @@ class PIDTuner(QWidget):
         content_layout.addSpacing(10)
         
         # ==========================
-        # 按钮
+        # 按钮 - 同样使用主题色
         # ==========================
         self.btn_save = QPushButton("💾 保存配置")
-        self.btn_save.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        self.btn_save.setStyleSheet("font-weight: bold; padding: 5px;")
         self.btn_save.clicked.connect(self._on_save_clicked)
         content_layout.addWidget(self.btn_save)
         

@@ -62,7 +62,7 @@ class MainWindow(QMainWindow):
     """
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LaserGimbal Pro - 激光云台控制系统 v2.0")
+        self.setWindowTitle("LaserGimbal - 激光云台 v0.2.0")
         self.resize(1000, 700)
 
         # [核心线程和控制器]
@@ -181,6 +181,8 @@ class MainWindow(QMainWindow):
         # 视觉 -> 摄像头显示组件
         self.vision_thread.frame_signal.connect(self.camera_view.update_camera_feed)
         self.vision_thread.mask_signal.connect(self.camera_view.update_mask_feed)
+        # 实时信息更新
+        self.vision_thread.stats_signal.connect(self.camera_panel.update_vision_stats)
         # 视觉 -> 控制器（两条信号路径）
         # TRACKING 模式：发送两点误差（激光 vs 蓝色目标）
         self.vision_thread.control_signal.connect(self.controller.handle_vision_error)
@@ -249,7 +251,6 @@ class MainWindow(QMainWindow):
         else:
             self.status_label.setStyleSheet("color: red; padding: 5px;")
             self.serial_panel.set_connection_status(False, message)
-    
     def on_camera_changed(self, camera_id, width, height):
         """摄像头切换"""
         logger.info(f"[GUI] 摄像头切换: ID={camera_id}, Resolution={width}x{height}")

@@ -10,43 +10,57 @@ This project implements a computer vision-based tracking system that controls a 
 - [V0.1.5 Laser Tracking Demo](https://www.youtube.com/watch?v=KGi6N0OxIrQ) - Real-time laser tracking demonstration PID test
 - [V0.1.6 Manual Test Mode](https://www.youtube.com/shorts/dynt_BvkDTA) - Manual control and calibration
 
+## Changelog
+
+### [v0.2.0] - 2026-03-12
+- **Power System Upgrade**: Integrated a 12V DC Adapter with an XL4016 Buck Converter to provide a dedicated, stable 6V power supply for the gimbal servos.
+- **Framework Refactor & Bug Fixes**: Comprehensive codebase restructuring and resolution of several critical issues, including:
+    - Fixed instability in serial communication for more reliable hardware commands.
+    - Improved consistency of visual tracking for better target lock.
+    - Stabilized PID control logic for significantly smoother movements.
+    - Overhauled Graphical User Interface (GUI) for a more modern and intuitive aesthetic.
+    - Enhanced step size and deadzone algorithms to increase tracking speed and responsiveness.
+
+
 
 ## System Images
 
 <div align="center">
-  <img src="images/ALL.jpeg" width="500" alt="Complete System">
-  <p><i>Complete Laser Gimbal System</i></p>
+  <img src="images/Camera_and_new_power%20suply.jpeg" width="400" alt="New Camera and Power System">
+  <p><i>New External 720p USB Camera and Stable Power Module</i></p>
   
-  <img src="images/Pan Tilt.jpeg" width="500" alt="Pan-Tilt Mechanism">
-  <p><i>Pan-Tilt Servo Mechanism</i></p>
+  <img src="images/Pan%20Tilt.jpeg" width="400" alt="Pan-Tilt Mechanism">
+  <p><i>Pan-Tilt Servo Mechanism (MG996R)</i></p>
   
   <img src="images/GUI.png" width="600" alt="GUI Interface">
-  <p><i>Control Interface - Tracking Mode & Manual Test Panel</i></p>
+  <p><i>Control Interface - Real-time Status Monitoring & PID Tuning & Manual Test Panel</i></p>
 </div>
 
 ## Features
-- **Visual Tracking**: Real-time tracking of Red (Laser) or Blue objects using HSV color space.
-- **PID Control**: Custom PID algorithm (`core/pid.py`) for smooth and accurate servo positioning.
-- **Manual Test Mode**: Keyboard and UI controls to manually move the gimbal for testing and calibration.
+- **Visual Tracking**: Real-time tracking using HSV color space, optimized for 720p.
+- **PID Control**: Customizable PID algorithm for smooth servo positioning.
+- **Dynamic Resolution**: Supports "Brute Force" MJPG mode to unlock 60 FPS on Windows drivers.
+- **Clean UI**: Integrated status monitoring (FPS/RES) and real-time PID tuning.
 - **Safety Mechanisms**:
   - Software Limits (0-180 degrees)
-  - Vision Signal Watchdog (Stops if target lost > 1s)
-  - Movement Deadzone (Prevents jitter)
-- **Architecture**: Multi-threaded design separating Vision (OpenCV), GUI (PyQt6), and Serial Communication.
+  - Vision Signal Watchdog (Timeout protection)
+  - Movement Deadzone (Prevents servo jitter)
 
 ## Hardware Requirements
 
 ### Electronics
-- **Microcontroller**: STM32F401CCU6
-- **Servos**: 2x MG996R High-Torque Servos (Pan/Tilt)
-- **Bluetooth Module**: HC-05 (Serial Communication)
+- **Microcontroller**: STM32F401CCU6 (Blackpill)
+- **Servos**: 2x MG996R High-Torque Servos
 - **Capacitor**: 1000µF Electrolytic Capacitor (Power filtering for servos)
-- **Camera**: Laptop built-in webcam (*Temporary solution - dedicated vision module to be added*)
+- **Camera**: External 720p USB Desktop Camera (Mounted on gimbal)
+- **Power Supply**: 12V 2A DC Adapter
+- **Step-Down Module**: XL4016 Buck Converter (Regulated to stable 6V for servos)
+- **Serial Communication**: HC-05 Bluetooth or direct USB-TTL
 - **Laser**: Red laser pointer (optional, for tracking demonstration)
 
 ### Power Supply
-- **Current**: 4x 1.5V Duracell AA Batteries (6V output)
-- **Planned Upgrade**: 12V DC Adapter + XL4016 Buck Converter (for stable voltage and current)
+- **OLD**: 4x 1.5V Duracell AA Batteries (6V output)
+- **NOW**: 12V DC Adapter + XL4016 Buck Converter (for stable voltage and current)
 
 ### Mechanical Structure
 - **3D Printed Pan-Tilt Mechanism**: [MakerWorld - Pan Tilt Servo Antenna Tracker MG996R](https://makerworld.com/en/models/973248-pan-tilt-servo-antenna-tracker-mg996r#profileId-945437)
@@ -58,69 +72,58 @@ This project implements a computer vision-based tracking system that controls a 
   <p><i>System Wiring Diagram - STM32F401, HC-05, MG996R Servos</i></p>
 </div>
 
-> **Note**: The system currently uses a laptop camera for vision processing. A dedicated vision module (e.g., OpenMV, ESP32-CAM) will be integrated in future versions for standalone operation.
+### Project Structure
+```text
+LazerGimbal/
+├── config/                # Global configuration profiles
+│   ├── control_config.py  # PID parameters, limits, and speed levels
+│   ├── hardware_config.py # COM port and baud rate settings
+│   └── vision_config.py   # HSV thresholds and camera resolution
+├── core/                  # Core logic and hardware communication
+│   ├── serial_thread.py   # Serial communication worker
+│   ├── gimbal_controller.py # PID control loop and servo management
+│   └── pid.py             # PID algorithm implementation
+├── gui/                   # Graphical User Interface (PyQt6)
+│   ├── main_window.py     # Main application window assembly
+│   ├── test_panel.py      # Manual servo control panel
+│   └── widgets/           # Modular UI components
+│       ├── camera_view.py # Video feed display
+│       ├── camera_panel.py# Camera/Resolution selection & Stats
+│       └── pid_tuner.py   # Real-time PID parameter slider
+├── vision/                # Computer vision processing
+│   ├── vision_worker.py   # Frame processing and target detection
+│   └── detector.py        # Color-based object detection logic
+├── images/                # Hardware and schematic documentation
+├── main.py                # Main application entry point
+└── requirements.txt       # Project dependencies
+```
 
 ## Software Requirements
-- Python 3.x
+- Python 3.10+
 - Dependencies: `PyQt6`, `opencv-python`, `numpy`, `pyserial`, `qdarktheme`
 
 ## Installation
-1. **Ensure Python is installed**: Verify that Python 3.x is installed on your system.
-   ```bash
-   python --version
-   ```
-
-2. **Clone the repository**:
+1. **Clone the repository**:
    ```bash
    git clone https://github.com/Nijat-M/LazerGimbal.git
    cd LazerGimbal
    ```
 
-3. **Create a virtual environment**:
+2. **Setup virtual environment**:
    ```bash
    python -m venv .venv
+   .venv\Scripts\activate  # Windows
    ```
 
-4. **Activate the virtual environment**:
-   - Windows:
-     ```bash
-     .venv\Scripts\activate
-     ```
-   - Linux/Mac:
-     ```bash
-     source .venv/bin/activate
-     ```
-
-5. **Install dependencies**:
+3. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
 
-6. **Run the application**: Simply double-click `run_app.bat` or run:
+4. **Run the application**:
    ```bash
    python main.py
    ```
-
-## Usage
-1. Connect the STM32 board via USB.
-2. Run the application:
-   ```bash
-   python main.py
-   ```
-3. **Connect**: Select the correct COM port and click "Connect".
-4. **Tracking**:
-   - Select "Tracking" mode.
-   - Click "Start Control" to enable servo movement.
-   - Toggle "Target Color" (Red/Blue) as needed.
-5. **Testing**:
-   - Select "Test Mode" to manually move the gimbal using Arrow Keys or UI buttons.
-   - **Note**: Ensure the gimbal has free range of motion before testing.
-
-## Configuration
-- `config/`: Contains modular global settings.
-  - `control_config.py`: Adjusts PID, Deadzone, Limits, and Speed profiles.
-  - `vision_config.py`: Adjusts HSV color tracking thresholds and camera limits.
-  - `hardware_config.py`: Adjusts COM port baud rate and timeout constants.
 
 ## License
 [MIT License](LICENSE)

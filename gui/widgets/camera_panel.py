@@ -17,7 +17,7 @@ os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
 from PyQt6.QtWidgets import (
     QGroupBox, QFormLayout, QHBoxLayout, QComboBox, QPushButton, QLabel
 )
-from PyQt6.QtCore import pyqtSignal, QTimer
+from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 import cv2
 
 
@@ -47,14 +47,12 @@ class CameraPanel(QGroupBox):
         # 分辨率选择
         self.combo_resolution = QComboBox()
         self.combo_resolution.addItems([
-            "320x240 (低分辨率-高速)",
-            "640x480 (标准-推荐)",
-            "800x600 (中等)",
-            "1280x720 (高清)",
-            "1920x1080 (全高清)"
+            "640x480 (标准-4:3)",
+            "1280x720 (高清-16:9)",
+            "1920x1080 (全高清-高速诱导)"
         ])
-        self.combo_resolution.setCurrentIndex(1)  # 默认640x480
-        self.combo_resolution.setToolTip("分辨率越高，细节越清晰，但处理速度越慢")
+        self.combo_resolution.setCurrentIndex(0)  # 默认 640x480
+        self.combo_resolution.setToolTip("1080p 选项可诱导摄像头开启高速 MJPG 模式（即使硬件仅支持 720p）")
         
         # 开启/关闭按钮
         self.btn_toggle = QPushButton("开启摄像头 (Open)")
@@ -83,9 +81,24 @@ class CameraPanel(QGroupBox):
         self.lbl_status.setStyleSheet("color: gray; font-size: 10px;")
         self.lbl_status.setWordWrap(True)
         
-        layout.addRow("摄像头:", self.combo_camera)
+        # 实时视觉统计 (FPS, 分辨率)
+        self.lbl_vision_stats = QLabel("FPS: -- | RES: --")
+        self.lbl_vision_stats.setStyleSheet("""
+            background-color: #1a1a1a; 
+            color: #00ff00; 
+            font-weight: bold; 
+            font-family: Consolas, monospace;
+            padding: 5px;
+            border-radius: 3px;
+            border: 1px solid #333;
+        """)
+        self.lbl_vision_stats.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        layout.addRow("实时状态:", self.lbl_vision_stats)
+        layout.addRow("设备:", self.combo_camera)
         layout.addRow("分辨率:", self.combo_resolution)
         layout.addRow(btn_layout)
+        
         layout.addRow(self.btn_refresh)
         layout.addRow(self.lbl_status)
     
@@ -119,12 +132,15 @@ class CameraPanel(QGroupBox):
         # 更新状态并智能应用
         if self.available_cameras:
             num_cameras = len(self.available_cameras)
-            
             if num_cameras == 1:
-                # 只有一个摄像头，自动应用
-                camera_id = self.available_cameras[0]
+                # 只有一个摄像头，自动选择
                 self.combo_camera.setCurrentIndex(0)
-                msg = f"✓ 已自动选择 Camera {camera_id}"
+                msg = f"✓ 已检测到 Camera {self.available_cameras[0]}"
+            else:
+                msg = f"✓ 已检测到 {num_cameras} 个摄像头"
+            
+            self.lbl_status.setText(msg)
+            self.lbl_status.setStyleSheet("color: green; font-size: 10px;")
         else:
             msg = "未检测到摄像头！请检查设备连接"
             self.lbl_status.setText(msg)
@@ -224,6 +240,22 @@ class CameraPanel(QGroupBox):
         except:
             return 640, 480  # 默认值
     
+    def update_vision_stats(self, fps, width, height):
+        """更新视觉统计信息"""
+        color = "#00ff00" if fps > 30 else "#ffff00"
+        if fps < 15: color = "#ff0000"
+        
+        self.lbl_vision_stats.setText(f"FPS: {fps:.1f} | RES: {width}x{height}")
+        self.lbl_vision_stats.setStyleSheet(f"""
+            background-color: #1a1a1a; 
+            color: {color}; 
+            font-weight: bold; 
+            font-family: Consolas, monospace;
+            padding: 5px;
+            border-radius: 3px;
+            border: 1px solid #333;
+        """)
+
     def get_current_camera_id(self):
         """获取当前选择的摄像头ID"""
         camera_index = self.combo_camera.currentIndex()

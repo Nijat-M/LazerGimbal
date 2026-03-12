@@ -124,8 +124,13 @@ class GimbalController(QObject):
         raw_error_x = target_x - VisionConfig_center_x()
         raw_error_y = target_y - VisionConfig_center_y()
 
+        # [分辨率归一化] 核心改进：
+        # 将不同分辨率下的误差（像素）统一缩放到 640x480 空间。
+        # 这样 PID 参数和 SPEED_LEVELS 就不需要根据分辨率重新调整。
+        norm_x, norm_y = self._normalize_error(raw_error_x, raw_error_y)
+
         # 通过 ErrorProcessor 缩放 + 滤波
-        processed_x, processed_y = self.error_processor.process(raw_error_x, raw_error_y)
+        processed_x, processed_y = self.error_processor.process(norm_x, norm_y)
 
         self.current_error_x = processed_x
         self.current_error_y = processed_y
@@ -144,8 +149,11 @@ class GimbalController(QObject):
         """
         self.last_vision_time = time.time()
 
+        # [分辨率归一化]
+        norm_x, norm_y = self._normalize_error(err_x, err_y)
+
         # 通过 ErrorProcessor 缩放 + 滤波
-        processed_x, processed_y = self.error_processor.process(err_x, err_y)
+        processed_x, processed_y = self.error_processor.process(norm_x, norm_y)
 
         self.current_error_x = processed_x
         self.current_error_y = processed_y
@@ -325,8 +333,17 @@ class GimbalController(QObject):
         self.error_processor.reset()
         self.position_update_signal.emit(self.servo_x, self.servo_y)
         self.status_update_signal.emit("位置已重置为中位 (90, 90)")
-        logger.info("[CONTROLLER] 位置已同步重置")
-
+    def _normalize_error(self, err_x: int, err_y: int) -> Tuple[int, int]:
+        """将不同分辨率下的误差像素归一化到 640 宽度的基准空间"""
+        from config.vision_config import VisionConfig
+        actual_w = VisionConfig.FRAME_WIDTH
+        if actual_w <= 0:
+            return err_x, err_y
+        
+        # 计算缩放比 (例如 1920 -> 640, scale = 0.333)
+        # 确保 10% 屏宽的误差在任何分辨率下都对应相同的数值
+        scale = 640.0 / actual_w
+        return int(err_x * scale), int(err_y * scale)
 
 # --------------------------------------------------
 # 辅助函数（避免循环导入，延迟读取 VisionConfig）

@@ -3991,7 +3991,7 @@ LOAD E:/STM32CubeIDE_2.0.0/STM32CubeIDE/plugins/com.st.stm32cube.ide.mcu.externa
  .debug_str     0x0008cf6e        0x0 ./Core/Src/tim.o
                               0x86cdb (size before relaxing)
  .debug_str     0x0008cf6e        0x0 ./Core/Src/usart.o
-                              0x86e4a (size before relaxing)
+                              0x86e46 (size before relaxing)
  .debug_str     0x0008cf6e        0x0 ./Core/Startup/startup_stm32f401ccux.o
                                  0x67 (size before relaxing)
  .debug_str     0x0008cf6e        0x0 ./Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal.o

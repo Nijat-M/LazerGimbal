@@ -18,7 +18,6 @@ class ControlPanel(QWidget):
     # 信号
     control_toggled = pyqtSignal(bool)  # 控制开关
     reset_requested = pyqtSignal()      # 重置位置
-    buzzer_requested = pyqtSignal()     # 测试蜂鸣器
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -42,11 +41,6 @@ class ControlPanel(QWidget):
         self.btn_reset.setToolTip("重置软件坐标为中位 (90°, 90°)")
         self.btn_reset.clicked.connect(self.reset_requested.emit)
         layout.addWidget(self.btn_reset)
-        
-        # 蜂鸣器按钮
-        self.btn_buzzer = QPushButton("测试蜂鸣器")
-        self.btn_buzzer.clicked.connect(self.buzzer_requested.emit)
-        layout.addWidget(self.btn_buzzer)
     
     def _on_control_toggled(self, checked):
         """控制开关切换"""

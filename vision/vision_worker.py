@@ -25,6 +25,7 @@ import cv2
 import time
 from PyQt6.QtCore import QThread, pyqtSignal, pyqtSlot, Qt
 from PyQt6.QtGui import QImage
+from collections import deque
 
 from config.vision_config import VisionConfig
 from vision.detector import TargetDetector
@@ -42,12 +43,14 @@ class VisionWorker(QThread):
         mask_signal       : 发送调试蒙版（给 UI 调试显示）
         control_signal    : 发送误差 (err_x, err_y)（TRACKING 模式，激光追蓝色）
         target_pos_signal : 发送目标位置 (pos_x, pos_y)（BLUE_TRACKING 模式，居中追踪）
+        stats_signal      : 发送实时统计数据 (fps, width, height)
     """
 
     frame_signal = pyqtSignal(QImage)       # 处理后的画面
     mask_signal = pyqtSignal(QImage)        # 调试蒙版
     control_signal = pyqtSignal(int, int)   # 误差信号 (TRACKING 模式)
     target_pos_signal = pyqtSignal(int, int)  # 原始坐标 (BLUE_TRACKING 模式)
+    stats_signal = pyqtSignal(float, int, int) # (fps, width, height)
 
     def __init__(self):
         super().__init__()
@@ -63,8 +66,13 @@ class VisionWorker(QThread):
         self.detector = TargetDetector()
 
         # 状态跟踪（避免重复打印）
-        self.blue_object_detected: bool = False
-        self.laser_tracking_status = None  # "both" | "blue_only" | "none"
+        self.blue_object_detected = False   # 蓝色物体检测状态
+        self.laser_tracking_status = None  # 记录当前追踪状态
+
+        # FPS 计算相关
+        self.prev_time = time.time()
+        self.fps_queue = deque(maxlen=20)  # 平滑 FPS
+        self.current_fps = 0
 
         # 线程安全标志，用于异步打开摄像头
         self._need_reconnect = False
@@ -112,21 +120,43 @@ class VisionWorker(QThread):
             self.camera_ready = False
             return
 
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        self.cap.set(cv2.CAP_PROP_FPS, VisionConfig.TARGET_FPS)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if self.cap.isOpened():
+            # [核心逻辑] 先设分辨率 -> 强制设 MJPG -> 再次确认分辨率
+            # 这种“补刀”式设置能防止驱动自动重置回慢速模式。
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+            
+            # 强制开启 MJPG
+            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            
+            # [确认]
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+            self.cap.set(cv2.CAP_PROP_FPS, 60)
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-        time.sleep(0.3)
-        for _ in range(5):
-            self.cap.read()  # 预热
+        # 暖机时间延长，让驱动有足够时间匹配模式
+        time.sleep(1.0) 
+        for _ in range(15):
+            self.cap.read() 
 
         actual_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         actual_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         actual_fps = int(self.cap.get(cv2.CAP_PROP_FPS))
+        actual_fourcc = int(self.cap.get(cv2.CAP_PROP_FOURCC))
+        
+        # 解码 FourCC 编码
+        f_str = "".join([chr((actual_fourcc >> 8 * i) & 0xFF) for i in range(4)]) if actual_fourcc > 0 else "DEFAULT"
 
         self.frame_width = actual_w
         self.frame_height = actual_h
+
+        logger.info(f"[VISION] 优化模式就绪: {actual_w}x{actual_h} @ {actual_fps}fps, 编码: {f_str}")
+
+        self.frame_width = actual_w
+        self.frame_height = actual_h
+
+        logger.info(f"[VISION] 硬件实际反馈: {actual_w}x{actual_h} @ {actual_fps}fps, 编码: {f_str}")
 
         # 动态更新全局配置
         VisionConfig.FRAME_WIDTH = actual_w
@@ -196,12 +226,23 @@ class VisionWorker(QThread):
             error_count = 0
 
             try:
+                # 计算 FPS (在处理模式前计算，确保 stats_signal 发送的是当前帧的FPS)
+                curr_time = time.time()
+                dt = curr_time - self.prev_time
+                self.prev_time = curr_time
+                if dt > 0:
+                    self.fps_queue.append(1.0 / dt)
+                    self.current_fps = sum(self.fps_queue) / len(self.fps_queue)
+
                 if self.mode == "TRACKING":
                     self._process_tracking(frame)
                 elif self.mode == "BLUE_TRACKING":
                     self._process_blue_tracking(frame)
-                else:
-                    self._send_image(frame)  # IDLE：只显示原图
+                
+                # 统一发送实时状态统计
+                self.stats_signal.emit(self.current_fps, self.frame_width, self.frame_height)
+                self._draw_overlay(frame) # _draw_overlay现在只计算FPS，不绘图
+                self._send_image(frame)
             except Exception as e:
                 logger.error(f"模式 {self.mode} 处理出错: {e}")
                 import traceback
@@ -262,7 +303,8 @@ class VisionWorker(QThread):
         # 调试蒙版
         debug_mask = self.detector.get_debug_mask(frame)
         self._send_mask(debug_mask)
-        self._send_image(frame)
+        # self._send_image(frame)  # 已经在 run() 统一发送了
+
 
     def _process_blue_tracking(self, frame: cv2.Mat) -> None:
         """
@@ -289,11 +331,8 @@ class VisionWorker(QThread):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
             cv2.arrowedLine(frame, (cx, cy), pos, (0, 255, 0), 2)
 
-            # 显示坐标信息（调试用）
-            raw_ex = pos[0] - cx
-            raw_ey = pos[1] - cy
-            cv2.putText(frame, f"Pos: ({pos[0]}, {pos[1]}) Err: ({raw_ex}, {raw_ey})",
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 0), 1)
+            # 显示坐标信息（已移至全局 Overlay 或精简）
+            pass
 
             # 发送原始坐标（不是误差！）→ handle_target_position
             self.target_pos_signal.emit(pos[0], pos[1])
@@ -310,11 +349,17 @@ class VisionWorker(QThread):
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         mask_blue = cv2.inRange(hsv, VisionConfig.HSV_BLUE_LOWER, VisionConfig.HSV_BLUE_UPPER)
         self._send_mask(mask_blue)
-        self._send_image(frame)
+        # self._send_image(frame)  # 已经在 run() 统一发送了
+
 
     # --------------------------------------------------
-    # 图像发送工具
+    # 渲染与发送工具
     # --------------------------------------------------
+
+    def _draw_overlay(self, frame: cv2.Mat) -> None:
+        """不再向画面直接绘图，改为通过 stats_signal 更新 UI"""
+        # FPS 计算已移至 run() 循环开始处，确保 stats_signal 发送的是最新值
+        pass # 清空绘图逻辑
 
     def _send_image(self, frame: cv2.Mat) -> None:
         """将 BGR 帧转为 QImage 发送给 UI"""
