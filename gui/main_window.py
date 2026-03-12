@@ -22,6 +22,10 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import pyqtSlot, Qt
 
+from utils.logger import Logger
+logger = Logger("GUI")
+
+
 # 导入核心模块
 try:
     from config import cfg
@@ -221,19 +225,24 @@ class MainWindow(QMainWindow):
     def on_serial_connection_toggled(self, checked, port):
         """串口连接切换"""
         if checked:
-            print(f"[GUI] 连接串口: {port}")
+            logger.info(f"[GUI] 连接串口: {port}")
             self.controller.sync_position()
             self.serial_thread.connect_serial(port, cfg.BAUD_RATE)
-            self.serial_thread.start()
+            if not self.serial_thread.isRunning():
+                self.serial_thread.start()
         else:
-            print("[GUI] 断开串口")
-            self.serial_thread.stop()
+            logger.info("[GUI] 断开串口请求")
             self.serial_thread.disconnect_serial()
+            # 注意：不建议在此直接 stop()，因为线程内部可能还在处理最后的读取/写入。
+            # 依靠 disconnect_serial 关闭串口后，线程循环会自动跳过。
+            # 真正的停止建议在 closeEvent。
     
     def on_connection_status_changed(self, success, message):
         """串口连接状态改变"""
-        print(f"[GUI] {message}")
+        logger.info(f"[GUI] {message}")
         self.status_label.setText(message)
+        # 同步更新串口面板的按钮状态
+        self.serial_panel.set_connection_status(success, message)
         
         if success:
             self.status_label.setStyleSheet("color: #00ff00; padding: 5px;")

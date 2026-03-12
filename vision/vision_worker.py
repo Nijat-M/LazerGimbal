@@ -23,7 +23,7 @@ os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
 
 import cv2
 import time
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal, pyqtSlot, Qt
 from PyQt6.QtGui import QImage
 
 from config.vision_config import VisionConfig
@@ -66,6 +66,12 @@ class VisionWorker(QThread):
         self.blue_object_detected: bool = False
         self.laser_tracking_status = None  # "both" | "blue_only" | "none"
 
+        # 线程安全标志，用于异步打开摄像头
+        self._need_reconnect = False
+        self._pending_id = -1
+        self._pending_w = 640
+        self._pending_h = 480
+
     # --------------------------------------------------
     # 公共接口
     # --------------------------------------------------
@@ -76,29 +82,38 @@ class VisionWorker(QThread):
         logger.info(f"[VISION] 视觉线程模式: {mode}")
 
     def switch_camera(self, camera_id: int, width: int, height: int) -> None:
-        """动态切换摄像头"""
-        logger.info(f"[VISION] 切换摄像头: ID={camera_id}, {width}x{height}")
+        """异步请求切换摄像头"""
+        self._pending_id = camera_id
+        self._pending_w = width
+        self._pending_h = height
+        self._need_reconnect = True
+        self.camera_ready = False  # 暂时停止处理逻辑
 
-        self.camera_id = camera_id
-        self.frame_width = width
-        self.frame_height = height
+    def _do_switch_camera(self) -> None:
+        """在后台线程中实际执行打开操作"""
+        camera_id = self._pending_id
+        width = self._pending_w
+        height = self._pending_h
+        
+        logger.info(f"[VISION] 正在后台打开摄像头: ID={camera_id}, {width}x{height}")
 
         if self.cap is not None and self.cap.isOpened():
             self.cap.release()
-            time.sleep(0.5)
+            self.cap = None
+            time.sleep(0.3)
 
-        self.cap = cv2.VideoCapture(self.camera_id, cv2.CAP_DSHOW)
+        self.cap = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
         if not self.cap.isOpened():
             logger.info("[VISION] DSHOW后端失败，尝试默认后端...")
-            self.cap = cv2.VideoCapture(self.camera_id)
+            self.cap = cv2.VideoCapture(camera_id)
 
         if not self.cap.isOpened():
             logger.error(f"[VISION ERROR] 无法打开摄像头 ID={camera_id}")
             self.camera_ready = False
             return
 
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
         self.cap.set(cv2.CAP_PROP_FPS, VisionConfig.TARGET_FPS)
         self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
@@ -110,17 +125,19 @@ class VisionWorker(QThread):
         actual_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         actual_fps = int(self.cap.get(cv2.CAP_PROP_FPS))
 
-        # 动态更新全局配置：非常关键！否则改变分辨率后锚点死锁在320x240
+        self.frame_width = actual_w
+        self.frame_height = actual_h
+
+        # 动态更新全局配置
         VisionConfig.FRAME_WIDTH = actual_w
         VisionConfig.FRAME_HEIGHT = actual_h
         VisionConfig.CENTER_X = actual_w // 2
         VisionConfig.CENTER_Y = actual_h // 2
 
-        logger.info(f"[VISION] ✓ 摄像头就绪: {actual_w}x{actual_h} @ {actual_fps}fps (中心点: {VisionConfig.CENTER_X},{VisionConfig.CENTER_Y})")
+        logger.info(f"[VISION] ✓ 摄像头就绪: {actual_w}x{actual_h} @ {actual_fps}fps")
 
-        # 如果帧率达不到目标（由于免驱USB摄像头自带暗光自动降帧策略）
         if 0 < actual_fps < VisionConfig.TARGET_FPS:
-            logger.warning(f"[VISION] 注意: 当前环境较暗，摄像头触发了低光补偿自动降帧 ({actual_fps}fps < 目标{VisionConfig.TARGET_FPS}fps)。如需丝滑60帧，请【大幅增加环境光照】！")
+            logger.warning(f"[VISION] 环境光照可能不足，实际帧率: {actual_fps}")
 
         self.camera_ready = True
 
@@ -150,10 +167,16 @@ class VisionWorker(QThread):
 
     def run(self) -> None:
         """线程主循环"""
-        logger.info("[VISION] 视觉线程已启动，等待摄像头指令...")
+        logger.info("[VISION] 视觉线程已启动，等待指令...")
         error_count = 0
 
         while self.is_running:
+            # 检查是否需要（重）连摄像头 -> 异步操作防止UI卡死
+            if self._need_reconnect:
+                self._do_switch_camera()
+                self._need_reconnect = False
+                continue
+
             if not self.camera_ready or self.cap is None or not self.cap.isOpened():
                 time.sleep(0.1)
                 continue

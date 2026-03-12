@@ -29,10 +29,10 @@ class ControlConfig:
     # 按阈值从大到小排列（列表，顺序明确，不用dict避免迭代歧义）
     # ==========================================
     SPEED_LEVELS: List[Dict[str, Any]] = [
-        {'threshold': 150, 'max_step': 32},  # 超远距离 (>150px)
-        {'threshold': 100, 'max_step': 24},  # 远距离   (100-150px)
-        {'threshold': 60,  'max_step': 16},   # 中距离   (60-100px)
-        {'threshold': 0,   'max_step': 8},   # 近距离   (<60px, 兜底)
+        {'threshold': 150, 'max_step': 40},  # 超远距离 (>150px)
+        {'threshold': 100, 'max_step': 30},  # 远距离   (100-150px)
+        {'threshold': 60,  'max_step': 18},   # 中距离   (60-100px)
+        {'threshold': 0,   'max_step': 6},   # 近距离   (<60px, 兜底)
     ]
 
     # ==========================================

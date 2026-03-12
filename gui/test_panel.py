@@ -1,6 +1,8 @@
-
 from PyQt6.QtWidgets import QGroupBox, QGridLayout, QPushButton
 from PyQt6.QtCore import pyqtSignal, Qt
+from utils.logger import Logger
+logger = Logger("TestPanel")
+
 
 class TestModePanel(QGroupBox):
     """
@@ -45,5 +47,5 @@ class TestModePanel(QGroupBox):
     
     def _emit_move(self, axis, direction, name):
         """发射移动信号（带调试信息）"""
-        print(f"[TEST_PANEL] 按钮点击: {name} (轴={axis}, 方向={direction})")
+        logger.info(f"[TEST_PANEL] 按钮点击: {name} (轴={axis}, 方向={direction})")
         self.request_move_signal.emit(axis, direction)

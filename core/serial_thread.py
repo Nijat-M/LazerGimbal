@@ -96,28 +96,37 @@ class SerialThread(QThread):
         """
         while self.is_running:
             if self.serial_port and self.serial_port.is_open:
-                # 1. 处理发送队列 (Sending)
-                while not self.write_queue.empty():
-                    try:
+                try:
+                    # 1. 处理发送队列 (Sending)
+                    while not self.write_queue.empty():
                         cmd = self.write_queue.get_nowait()
                         self.serial_port.write(cmd.encode('utf-8'))
-                        # print(f"[SERIAL TX] '{cmd.strip()}'")  # Disabled for performance (latency)
-                    except Exception as e:
-                        logger.error(f"[SERIAL TX ERROR] {e}")
+                        # logger.debug(f"[SERIAL TX] '{cmd.strip()}'")
 
-                # 2. 处理接收数据 (Receiving)
-                try:
+                    # 2. 处理接收数据 (Receiving)
+                    # 先检查 in_waiting，避免 readline 阻塞
                     if self.serial_port.in_waiting > 0:
-                        # readline() 会读取直到 '\n'，由于设置了 timeout，不会无限阻塞
                         data = self.serial_port.readline().decode('utf-8').strip()
                         if data:
                             logger.info(f"[SERIAL RX] '{data}'")
                             self.data_received_signal.emit(data)
+                
+                except (serial.SerialException, OSError) as e:
+                    # 捕获物理断开或权限异常
+                    error_msg = f"检测到物理断开或硬件异常: {e}"
+                    logger.error(f"[SERIAL ERROR] {error_msg}")
+                    # 在本线程内关闭并通知 UI
+                    self.serial_port.close()
+                    self.connection_state_signal.emit(False, error_msg)
+                    # 清空队列防止积压
+                    while not self.write_queue.empty():
+                        try: self.write_queue.get_nowait()
+                        except: pass
+                
                 except Exception as e:
-                    logger.info(f"接收错误: {e}")
+                    logger.error(f"[SERIAL UNKNOWN ERROR] {e}")
 
             # 避免 CPU 占用过高 (Yield CPU)
-            # 10ms 的休眠足以让 OS 调度其他任务
             time.sleep(0.01)
 
     def stop(self):
