@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-主窗口 - 重构版 (Main Window - Refactored)
+主窗口 - 重构版 v3.0 (Main Window - Refactored)
 
 [架构改进 Architecture Improvement]
 原来 423 行代码全在一个文件 → 现在拆分成模块化组件
@@ -176,8 +176,11 @@ class MainWindow(QMainWindow):
         # 视觉 -> 摄像头显示组件
         self.vision_thread.frame_signal.connect(self.camera_view.update_camera_feed)
         self.vision_thread.mask_signal.connect(self.camera_view.update_mask_feed)
-        # 视觉 -> 控制器
+        # 视觉 -> 控制器（两条信号路径）
+        # TRACKING 模式：发送两点误差（激光 vs 蓝色目标）
         self.vision_thread.control_signal.connect(self.controller.handle_vision_error)
+        # BLUE_TRACKING 模式：发送蓝色目标原始坐标（误差由控制器计算）
+        self.vision_thread.target_pos_signal.connect(self.controller.handle_target_position)
         
         # ===== 串口线程 =====
         self.serial_thread.connection_state_signal.connect(self.on_connection_status_changed)
@@ -276,16 +279,15 @@ class MainWindow(QMainWindow):
         self.status_label.setText("✓ 配置已保存")
     
     def on_reset_pid(self):
-        """重置 PID"""
-        # 从配置文件读取默认值
-        from config.pid_config import PIDConfig
-        default_kp = PIDConfig.KP
-        default_ki = PIDConfig.KI
-        default_kd = PIDConfig.KD
-        
+        """重置 PID（恢复 ControlConfig 默认值）"""
+        from config.control_config import ControlConfig
+        default_kp = ControlConfig.KP
+        default_ki = ControlConfig.KI
+        default_kd = ControlConfig.KD
+
         # 更新控制器
         self.controller.update_pid_tunings(default_kp, default_ki, default_kd)
-        # 同步更新GUI滑块显示
+        # 同步更新 GUI 滑块显示
         self.pid_tuner.set_pid_values(default_kp, default_ki, default_kd)
     
     def on_control_toggled(self, checked):
