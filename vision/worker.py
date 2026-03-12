@@ -109,7 +109,18 @@ class VisionWorker(QThread):
         actual_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         actual_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         actual_fps = int(self.cap.get(cv2.CAP_PROP_FPS))
-        logger.info(f"[VISION] ✓ 摄像头就绪: {actual_w}x{actual_h} @ {actual_fps}fps")
+
+        # 动态更新全局配置：非常关键！否则改变分辨率后锚点死锁在320x240
+        VisionConfig.FRAME_WIDTH = actual_w
+        VisionConfig.FRAME_HEIGHT = actual_h
+        VisionConfig.CENTER_X = actual_w // 2
+        VisionConfig.CENTER_Y = actual_h // 2
+
+        logger.info(f"[VISION] ✓ 摄像头就绪: {actual_w}x{actual_h} @ {actual_fps}fps (中心点: {VisionConfig.CENTER_X},{VisionConfig.CENTER_Y})")
+
+        # 如果帧率达不到目标（由于免驱USB摄像头自带暗光自动降帧策略）
+        if 0 < actual_fps < VisionConfig.TARGET_FPS:
+            logger.warning(f"[VISION] 注意: 当前环境较暗，摄像头触发了低光补偿自动降帧 ({actual_fps}fps < 目标{VisionConfig.TARGET_FPS}fps)。如需丝滑60帧，请【大幅增加环境光照】！")
 
         self.camera_ready = True
 
