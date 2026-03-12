@@ -37,12 +37,12 @@ class ControlConfig:
 
     # ==========================================
     # 自适应死区 (Adaptive Deadzone)
-    # 按误差从小到大排列（越近死区越大，防震荡）
+    # 按误差从小到大排列（近点死区稍大防震荡，远点死区小快响应）
     # ==========================================
     CONTROL_DEADZONE_LEVELS: List[Dict[str, Any]] = [
-        {'threshold': 40,  'deadzone': 30},  # 接近目标：大死区防震荡
-        {'threshold': 80,  'deadzone': 20},  # 中等距离：中等死区
-        {'threshold': 999, 'deadzone': 10},  # 远离目标：小死区快响应
+        {'threshold': 20,  'deadzone': 12},  # 极小误差区域，小死区容忍微小跳动
+        {'threshold': 50,  'deadzone': 8},   # 中低误差区域，进一步缩小死区使PID介入
+        {'threshold': 999, 'deadzone': 5},   # 大误差区域，极小死区提供最快响应
     ]
 
     # ==========================================

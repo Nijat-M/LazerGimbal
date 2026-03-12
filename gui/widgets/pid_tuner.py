@@ -272,11 +272,11 @@ class PIDTuner(QWidget):
         )
     
     def _on_reset_clicked(self):
-        """重置按钮点击（恢复 ControlConfig 默认值）"""
-        from config.control_config import ControlConfig
-        default_kp = ControlConfig.KP
-        default_ki = ControlConfig.KI
-        default_kd = ControlConfig.KD
+        """重置按钮点击（恢复出厂默认值）"""
+        # 直接使用硬编码的出厂安全值，避免被动态修改污染
+        default_kp = 0.3
+        default_ki = 0.0
+        default_kd = 0.25
 
         reply = QMessageBox.question(
             self,
