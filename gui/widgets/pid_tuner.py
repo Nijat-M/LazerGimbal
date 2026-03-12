@@ -272,26 +272,19 @@ class PIDTuner(QWidget):
         )
     
     def _on_reset_clicked(self):
-        """重置按钮点击"""
-        # 从配置文件读取默认值
-        try:
-            from config.pid_config import PIDConfig
-            default_kp = PIDConfig.KP
-            default_ki = PIDConfig.KI
-            default_kd = PIDConfig.KD
-        except:
-            # 后备默认值
-            default_kp = 0.3
-            default_ki = 0.0
-            default_kd = 0.25
-        
+        """重置按钮点击（恢复 ControlConfig 默认值）"""
+        from config.control_config import ControlConfig
+        default_kp = ControlConfig.KP
+        default_ki = ControlConfig.KI
+        default_kd = ControlConfig.KD
+
         reply = QMessageBox.question(
             self,
             "确认重置",
-            f"是否重置为默认 PID 参数？\n\nKp={default_kp:.2f}, Ki={default_ki:.2f}, Kd={default_kd:.2f}",
+            f"是否重置为默认 PID 参数？\n\nKp={default_kp:.2f}, Ki={default_ki:.3f}, Kd={default_kd:.2f}",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
-        
+
         if reply == QMessageBox.StandardButton.Yes:
             self.kp = default_kp
             self.ki = default_ki
