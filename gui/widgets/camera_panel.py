@@ -152,6 +152,11 @@ class CameraPanel(QGroupBox):
         
         # 发射信号
         self.camera_changed.emit(camera_id, width, height)
+
+        # 更新下拉框的文本（保留原有FPS信息）
+        old_text = self.combo_camera.itemText(camera_index)
+        fps_part = f"@{old_text.split('@')[1]}" if "@" in old_text else ")"
+        self.combo_camera.setItemText(camera_index, f"Camera {camera_id} ({width}x{height}{fps_part}")
         
         # 更新状态
         if len(self.available_cameras) == 1:
@@ -189,29 +194,7 @@ class CameraPanel(QGroupBox):
         
         return False
     
-    def _auto_apply_single_camera(self):
-        """自动应用摄像头设置"""
-        if not self.available_cameras:
-            return
-        
-        camera_index = self.combo_camera.currentIndex()
-        if camera_index < 0 or camera_index >= len(self.available_cameras):
-            return
-        
-        camera_id = self.available_cameras[camera_index]
-        resolution_text = self.combo_resolution.currentText()
-        width, height = self._parse_resolution(resolution_text)
-        
-        # 发射信号
-        self.camera_changed.emit(camera_id, width, height)
-        
-        # 更新状态
-        if len(self.available_cameras) == 1:
-            msg = f"✓ Camera {camera_id} 已就绪 ({width}x{height})"
-        else:
-            msg = f"✓ 已应用 Camera {camera_id} ({width}x{height})"
-        self.lbl_status.setText(msg)
-        self.lbl_status.setStyleSheet("color: green; font-size: 10px;")
+
     
     def _on_apply_clicked(self):
         """应用设置按钮点击（手动切换）"""
@@ -233,6 +216,12 @@ class CameraPanel(QGroupBox):
         
         # 发射信号
         self.camera_changed.emit(camera_id, width, height)
+
+        # 同步更新下拉框的文本（保留原有FPS信息）
+        old_text = self.combo_camera.itemText(camera_index)
+        fps_part = f"@{old_text.split('@')[1]}" if "@" in old_text else ")"
+        self.combo_camera.setItemText(camera_index, f"Camera {camera_id} ({width}x{height}{fps_part}")
+        
         self.lbl_status.setText(f"✓ 已切换到 Camera {camera_id} ({width}x{height})")
         self.lbl_status.setStyleSheet("color: green; font-size: 10px;")
     
