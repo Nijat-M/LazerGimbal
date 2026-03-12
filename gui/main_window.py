@@ -27,7 +27,7 @@ try:
     from config import cfg
     from core.serial_thread import SerialThread
     from core.gimbal_controller import GimbalController
-    from vision.worker import VisionWorker
+    from vision.vision_worker import VisionWorker
     from gui.test_panel import TestModePanel
     from gui.widgets import (
         CameraView, CameraPanel, SerialPanel, ModePanel, 
@@ -38,7 +38,7 @@ except ImportError:
     from config import cfg
     from core.serial_thread import SerialThread
     from core.gimbal_controller import GimbalController
-    from vision.worker import VisionWorker
+    from vision.vision_worker import VisionWorker
     from gui.test_panel import TestModePanel
     from gui.widgets import (
         CameraView, CameraPanel, SerialPanel, ModePanel, 

@@ -116,10 +116,11 @@ This project implements a computer vision-based tracking system that controls a 
    - Select "Test Mode" to manually move the gimbal using Arrow Keys or UI buttons.
    - **Note**: Ensure the gimbal has free range of motion before testing.
 
-## configuration
-- config.py: Contains global settings (PID constants, Color Thresholds, Serial Port).
-- Calibration:
-  - `SERVO_SOFTWARE_STEP_SCALE`: Adjusts the ratio between software steps and physical degrees (Default: 0.1).
+## Configuration
+- `config/`: Contains modular global settings.
+  - `control_config.py`: Adjusts PID, Deadzone, Limits, and Speed profiles.
+  - `vision_config.py`: Adjusts HSV color tracking thresholds and camera limits.
+  - `hardware_config.py`: Adjusts COM port baud rate and timeout constants.
 
 ## License
 [MIT License](LICENSE)
