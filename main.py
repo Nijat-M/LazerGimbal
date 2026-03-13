@@ -2,6 +2,10 @@
 import os
 import sys
 
+# 关键修复：在 Windows 下，由于 PyQt6 和 PyTorch (CUDA) 可能存在 DLL (如 c10.dll, OpenMP等) 冲突，
+# 必须在导入 PyQt6 之前优先导入 torch，以保证底层库正确初始化。
+import torch
+
 # 抑制OpenCV警告和错误信息（在导入cv2之前设置）
 os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '0'
 os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'

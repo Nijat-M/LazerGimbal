@@ -21,8 +21,12 @@ import sys
 # 抑制 OpenCV 警告
 os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
 
+# 核心修改：在 Windows 下，必须先加载 torch（YOLO 会加载）再加载 cv2，否则可能导致 c10.dll 初始化失败
+from vision.yolo_detector import YOLODetector
+
 import cv2
 import time
+import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal, pyqtSlot, Qt
 from PyQt6.QtGui import QImage
 from collections import deque
@@ -64,6 +68,10 @@ class VisionWorker(QThread):
 
         # 检测器（纯视觉，无控制逻辑）
         self.detector = TargetDetector()
+        
+        # YOLO检测器 (按需初始化，或在这里先初始化)
+        self.yolo_detector = None
+
 
         # 状态跟踪（避免重复打印）
         self.blue_object_detected = False   # 蓝色物体检测状态
@@ -87,6 +95,10 @@ class VisionWorker(QThread):
     def set_mode(self, mode: str) -> None:
         """设置工作模式"""
         self.mode = mode
+        if mode == "YOLO_TRACKING" and self.yolo_detector is None:
+            logger.info("[VISION] 正在初始化 YOLOv8 模型...")
+            self.yolo_detector = YOLODetector("vision/models/yolov8n.pt")  # 从新的规范路径加载
+            logger.info("[VISION] YOLOv8 模型初始化完成。")
         logger.info(f"[VISION] 视觉线程模式: {mode}")
 
     def switch_camera(self, camera_id: int, width: int, height: int) -> None:
@@ -238,6 +250,8 @@ class VisionWorker(QThread):
                     self._process_tracking(frame)
                 elif self.mode == "BLUE_TRACKING":
                     self._process_blue_tracking(frame)
+                elif self.mode == "YOLO_TRACKING":
+                    self._process_yolo_tracking(frame)
                 
                 # 统一发送实时状态统计
                 self.stats_signal.emit(self.current_fps, self.frame_width, self.frame_height)
@@ -349,7 +363,70 @@ class VisionWorker(QThread):
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         mask_blue = cv2.inRange(hsv, VisionConfig.HSV_BLUE_LOWER, VisionConfig.HSV_BLUE_UPPER)
         self._send_mask(mask_blue)
-        # self._send_image(frame)  # 已经在 run() 统一发送了
+
+
+    def _process_yolo_tracking(self, frame: cv2.Mat) -> None:
+        """
+        YOLO_TRACKING 模式：YOLO 物体居中追踪
+        
+        发送目标的原始像素坐标，由 GimbalController 计算误差。
+        """
+        if self.yolo_detector is None:
+            return
+            
+        # 设置目标类别为 None（不限制类别），这样就可以框出猫、手机等所有COCO类别物体了
+        result = self.yolo_detector.detect_target(frame, target_class=None) 
+
+        # 画面中心十字线
+        cx = self.frame_width // 2
+        cy = self.frame_height // 2
+        cv2.line(frame, (cx - 20, cy), (cx + 20, cy), (0, 255, 255), 1)
+        cv2.line(frame, (cx, cy - 20), (cx, cy + 20), (0, 255, 255), 1)
+        cv2.circle(frame, (cx, cy), 5, (0, 255, 255), 2)
+
+        # 1. 遍历并画出视野里发现的所有目标
+        if hasattr(result, 'all_targets') and result.all_targets:
+            for t in result.all_targets:
+                tx1, ty1, tx2, ty2 = t.box
+                t_pos = t.position
+                
+                # 绘制所有检测到的物体为黄色框和圆点（BGR: (0, 255, 255) 是黄色），代表“雷达探测到但未锁定”
+                cv2.rectangle(frame, (tx1, ty1), (tx2, ty2), (0, 255, 255), 1)
+                cv2.circle(frame, t_pos, 3, (0, 255, 255), -1)
+                
+                label_name = self.yolo_detector.model.names.get(t.class_id, f"Cls_{t.class_id}")
+                cv2.putText(frame, f"{label_name} {t.confidence:.2f}",
+                            (tx1, ty1 - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+
+        # 2. 特别高亮画出被“锁定”要追踪的那一个主目标
+        if result.detected:
+            pos = result.position
+            x1, y1, x2, y2 = result.box
+            
+            # 覆写主目标的颜色为粗的红色框及醒目的提示
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            cv2.circle(frame, pos, 5, (0, 0, 255), -1)
+            
+            label_name = self.yolo_detector.model.names.get(result.class_id, f"Cls_{result.class_id}") if result.class_id is not None else "Target"
+            cv2.putText(frame, f"[LOCKED] {label_name}",
+                        (x1, y1 - 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            cv2.arrowedLine(frame, (cx, cy), pos, (0, 255, 0), 2)
+
+            self.target_pos_signal.emit(pos[0], pos[1])
+
+            if not self.blue_object_detected:
+                logger.info("[VISION] ✓ YOLO: 找到目标")
+                self.blue_object_detected = True
+        else:
+            if self.blue_object_detected:
+                logger.info("[VISION] ✗ YOLO: 未找到目标")
+                self.blue_object_detected = False
+
+        # 对于YOLO我们不需要发送特定的掩码蒙版，直接填黑
+        mask_black = np.zeros(frame.shape[:2], dtype=np.uint8)
+        self._send_mask(mask_black)
 
 
     # --------------------------------------------------
