@@ -17,11 +17,12 @@
 """
 
 import time
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
+import threading
+from typing import Tuple
+from PyQt6.QtCore import QObject, pyqtSignal
 
 from config import cfg
 from config.control_config import ControlConfig
-from core.pid import PIDController
 from core.control.error_processor import ErrorProcessor
 from utils.logger import Logger
 
@@ -62,12 +63,6 @@ class GimbalController(QObject):
         self.current_error_y: int = 0
         self.last_vision_time: float = time.time()
 
-        # [PID 控制器] 参数从 ControlConfig 读取
-        self.pid_x = PIDController(ControlConfig.KP, ControlConfig.KI,
-                                   ControlConfig.KD, ControlConfig.SPEED_LEVELS[0]['max_step'])
-        self.pid_y = PIDController(ControlConfig.KP, ControlConfig.KI,
-                                   ControlConfig.KD, ControlConfig.SPEED_LEVELS[0]['max_step'])
-
         # [控制开关]
         self.control_enabled: bool = False
 
@@ -75,13 +70,19 @@ class GimbalController(QObject):
         self.invert_x: bool = ControlConfig.INVERT_X
         self.invert_y: bool = ControlConfig.INVERT_Y
 
-        # [控制循环定时器] 40Hz (25ms)
-        self.control_timer = QTimer()
-        self.control_timer.timeout.connect(self.control_loop)
-        self.control_timer.start(25)
-
         # 警告时间戳（防止刷屏）
         self.last_warn_time: float = 0.0
+
+        # [控制循环线程] 40Hz (25ms) 替代 QTimer
+        self.is_running = True
+        self.control_thread = threading.Thread(target=self._run_control_loop, daemon=True)
+        self.control_thread.start()
+
+    def stop(self) -> None:
+        """停止控制线程，通常在退出应用时调用"""
+        self.is_running = False
+        if self.control_thread.is_alive():
+            self.control_thread.join(timeout=1.0)
 
     # --------------------------------------------------
     # 公共接口（GUI 调用）
@@ -103,12 +104,16 @@ class GimbalController(QObject):
 
     def update_pid_tunings(self, kp: float, ki: float, kd: float) -> None:
         """动态更新 PID 参数（调参时由 GUI 调用）"""
-        self.pid_x.set_tunings(kp, ki, kd)
-        self.pid_y.set_tunings(kp, ki, kd)
         ControlConfig.KP = kp
         ControlConfig.KI = ki
         ControlConfig.KD = kd
-        logger.info(f"[CONTROLLER] PID参数已更新: Kp={kp:.2f}, Ki={ki:.3f}, Kd={kd:.2f}")
+        
+        # 将 PID 参数直接发送给下位机 (STM32)
+        if self.serial_thread and self.serial_thread.serial_port and self.serial_thread.serial_port.is_open:
+            cmd = f"{{{kp},{ki},{kd}}}\n"
+            self.serial_thread.send_command(cmd)
+
+        logger.info(f"[CONTROLLER] PID参数已更新并发送至下位机: Kp={kp:.2f}, Ki={ki:.3f}, Kd={kd:.2f}")
 
     def handle_target_position(self, target_x: int, target_y: int) -> None:
         """
@@ -162,9 +167,29 @@ class GimbalController(QObject):
     # 核心控制循环
     # --------------------------------------------------
 
+    def _run_control_loop(self) -> None:
+        """
+        运行在独立线程中的控制主循环。
+        通过精确睡眠维持指定的控制频率（如40Hz），彻底与 GUI 事件循环解耦。
+        """
+        target_dt = 1.0 / 40.0  # 40Hz -> 0.025s
+        
+        while self.is_running:
+            start_time = time.perf_counter()
+            
+            # 执行单次计算和发送
+            self.control_loop()
+            
+            # 精确时间补偿睡眠
+            elapsed = time.perf_counter() - start_time
+            sleep_time = target_dt - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
+
     def control_loop(self) -> None:
         """
-        [核心] PID 控制循环（40Hz 固定频率）
+        [核心] PID 控制单次计算与指令下发
+
 
         所有参数均从 ControlConfig 读取，无硬编码数字。
         """
@@ -184,76 +209,40 @@ class GimbalController(QObject):
                 return
 
             # 3. [安全看门狗] 超时停止控制，防止失控
-            if time.time() - self.last_vision_time > ControlConfig.VISION_WATCHDOG_TIMEOUT:
+            time_since_last_vision = time.time() - self.last_vision_time
+            if time_since_last_vision > ControlConfig.VISION_WATCHDOG_TIMEOUT:
                 if self.current_error_x != 0 or self.current_error_y != 0:
-                    logger.warning("视觉信号丢失，停止控制",
-                                   timeout=ControlConfig.VISION_WATCHDOG_TIMEOUT)
+                    logger.warning(f"视觉信号丢失，停止控制 (超时: {time_since_last_vision:.2f}s)")
                     self.current_error_x = 0
                     self.current_error_y = 0
+                    # 发送停止指令
+                    if self.serial_thread and self.serial_thread.serial_port and self.serial_thread.serial_port.is_open:
+                        self.serial_thread.send_command("<0,0,0>\n")
                 return
 
             # 4. 获取当前误差
             err_x = self.current_error_x
             err_y = self.current_error_y
 
-            # 5. [自适应死区] 从 ControlConfig 统一读取，无硬编码
-            error_magnitude = ErrorProcessor.get_magnitude(err_x, err_y)
-            deadzone = ControlConfig.get_deadzone_for_error(error_magnitude)
+            # 5. [PID 上位机死区拦截] 死区可由用户界面调整，默认为 5 px 左右
+            # 将X和Y轴的死区判断【独立分开】，防止Y轴运动时带动原本已经停稳的X轴震荡！
+            if abs(err_x) < ControlConfig.DEADZONE:
+                err_x = 0
+            
+            if abs(err_y) < ControlConfig.DEADZONE:
+                err_y = 0
 
-            if abs(err_x) < deadzone and abs(err_y) < deadzone:
-                return  # 在死区内，不发送指令
-
-            # 6. [轴向反转]
+            # 6. 处理轴向反转
             if self.invert_x:
                 err_x = -err_x
             if self.invert_y:
                 err_y = -err_y
 
-            # 7. [自适应速度] 从 ControlConfig 统一读取，无硬编码
-            max_step = ControlConfig.get_speed_for_error(error_magnitude)
-            self.pid_x.max_step = max_step
-            self.pid_y.max_step = max_step
-
-            # 8. [PID 计算]
-            delta_x = self.pid_x.update(err_x)
-            delta_y = self.pid_y.update(err_y)
-
-            if delta_x == 0 and delta_y == 0:
-                return
-
-            # 9. [软件坐标更新与限位]
-            scale = ControlConfig.SERVO_STEP_TO_DEGREE
-            next_x = self.servo_x + delta_x * scale
-            next_y = self.servo_y + delta_y * scale
-
-            # 软件限位
-            if next_x > ControlConfig.SERVO_MAX_LIMIT:
-                next_x = ControlConfig.SERVO_MAX_LIMIT
-                delta_x = 0
-            elif next_x < ControlConfig.SERVO_MIN_LIMIT:
-                next_x = ControlConfig.SERVO_MIN_LIMIT
-                delta_x = 0
-
-            if next_y > ControlConfig.SERVO_MAX_LIMIT:
-                next_y = ControlConfig.SERVO_MAX_LIMIT
-                delta_y = 0
-            elif next_y < ControlConfig.SERVO_MIN_LIMIT:
-                next_y = ControlConfig.SERVO_MIN_LIMIT
-                delta_y = 0
-
-            # 10. [发送串口指令]
-            if abs(delta_x) > 0:
-                self.servo_x = next_x
-                cmd_x = f"x{'+' if delta_x >= 0 else ''}{delta_x}"
-                self.serial_thread.send_command(f"{cmd_x}\n")
-
-            if abs(delta_y) > 0:
-                self.servo_y = next_y
-                cmd_y = f"y{'+' if delta_y >= 0 else ''}{delta_y}"
-                self.serial_thread.send_command(f"{cmd_y}\n")
-
-            # 11. [更新 GUI 显示]
-            self.position_update_signal.emit(self.servo_x, self.servo_y)
+            # 7. 打包成指令发送
+            # 协议格式：<Error_X, Error_Y, 0>
+            # 第三个参数 0 预留给未来的前馈速度 Vel_X (Phase 3)
+            cmd = f"<{err_x},{err_y},0>\n"
+            self.serial_thread.send_command(cmd)
 
         except Exception as e:
             logger.error(f"[CONTROLLER ERROR] 控制循环异常: {e}")
@@ -328,8 +317,6 @@ class GimbalController(QObject):
         """
         self.servo_x = float(ControlConfig.SERVO_CENTER)
         self.servo_y = float(ControlConfig.SERVO_CENTER)
-        self.pid_x.reset()
-        self.pid_y.reset()
         self.error_processor.reset()
         self.position_update_signal.emit(self.servo_x, self.servo_y)
         self.status_update_signal.emit("位置已重置为中位 (90, 90)")

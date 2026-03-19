@@ -29,20 +29,19 @@ logger = Logger("GUI")
 # 导入核心模块
 try:
     from config import cfg
+    from config.control_config import ControlConfig
     from core.serial_thread import SerialThread
     from core.gimbal_controller import GimbalController
     from vision.vision_worker import VisionWorker
     from gui.test_panel import TestModePanel
     from gui.widgets import (
-        CameraView, CameraPanel, SerialPanel, ModePanel, 
+        CameraView, CameraPanel, SerialPanel, ModePanel,
         PIDTuner, ControlPanel
     )
 except ImportError:
     sys.path.append("..")
     from config import cfg
-    from core.serial_thread import SerialThread
-    from core.gimbal_controller import GimbalController
-    from vision.vision_worker import VisionWorker
+    from config.control_config import ControlConfig
     from gui.test_panel import TestModePanel
     from gui.widgets import (
         CameraView, CameraPanel, SerialPanel, ModePanel, 
@@ -62,7 +61,7 @@ class MainWindow(QMainWindow):
     """
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LaserGimbal - 激光云台 v0.2.0")
+        self.setWindowTitle("LaserGimbal - 激光云台 v0.3.5")
         self.resize(1000, 700)
 
         # [核心线程和控制器]
@@ -209,6 +208,7 @@ class MainWindow(QMainWindow):
         
         # PID 调参面板
         self.pid_tuner.pid_changed.connect(self.on_pid_changed)
+        self.pid_tuner.deadzone_changed.connect(self.on_deadzone_changed)
         self.pid_tuner.invert_changed.connect(self.on_invert_changed)
         self.pid_tuner.save_requested.connect(self.on_save_config)
         self.pid_tuner.reset_requested.connect(self.on_reset_pid)
@@ -287,6 +287,12 @@ class MainWindow(QMainWindow):
         cfg.PID_KI = ki
         cfg.PID_KD = kd
         self.controller.update_pid_tunings(kp, ki, kd)
+        
+    def on_deadzone_changed(self, deadzone):
+        """死区参数改变"""
+        # 修改 ControlConfig 中死区设定
+        ControlConfig.DEADZONE = deadzone
+        logger.info(f"[GUI] 死区已统一更新为: {deadzone}px")
     
     def on_invert_changed(self, invert_x, invert_y):
         """反转设置改变"""

@@ -32,6 +32,9 @@ class PIDTuner(QWidget):
     # 信号：反转设置改变
     invert_changed = pyqtSignal(bool, bool)  # (invert_x, invert_y)
     
+    # 信号：死区设置改变
+    deadzone_changed = pyqtSignal(int)
+    
     # 信号：保存配置
     save_requested = pyqtSignal()
     
@@ -39,12 +42,13 @@ class PIDTuner(QWidget):
     reset_requested = pyqtSignal()
     
     def __init__(self, initial_kp=0.4, initial_ki=0.0, initial_kd=0.2, 
-                 invert_x=True, invert_y=True, parent=None):
+                 initial_deadzone=5, invert_x=True, invert_y=True, parent=None):
         super().__init__(parent)
         
         self.kp = initial_kp
         self.ki = initial_ki
         self.kd = initial_kd
+        self.deadzone = initial_deadzone
         self.is_expanded = False  # 默认折叠
         
         self.init_ui(invert_x, invert_y)
@@ -176,6 +180,29 @@ class PIDTuner(QWidget):
         kd_hint = QLabel("↑ 微分项：阻尼作用（抑制震荡）")
         kd_hint.setStyleSheet("color: gray; font-size: 10px;")
         content_layout.addWidget(kd_hint)
+
+        # ==========================
+        # Deadzone (死区) 滑块
+        # ==========================
+        dz_layout = QHBoxLayout()
+        dz_layout.addWidget(QLabel("死区:"))
+        
+        self.slider_dz = QSlider(Qt.Orientation.Horizontal)
+        self.slider_dz.setRange(0, 30)  # 0 - 30 像素
+        self.slider_dz.valueChanged.connect(self._on_slider_changed)
+        dz_layout.addWidget(self.slider_dz)
+        
+        self.label_dz_val = QLabel("5px")
+        self.label_dz_val.setMinimumWidth(50)
+        self.label_dz_val.setStyleSheet("color: #AB47BC; font-weight: bold;")
+        dz_layout.addWidget(self.label_dz_val)
+        
+        content_layout.addLayout(dz_layout)
+        
+        # Deadzone 说明
+        dz_hint = QLabel("↑ 距离中心像素范围：抑制稳态微小震荡")
+        dz_hint.setStyleSheet("color: gray; font-size: 10px;")
+        content_layout.addWidget(dz_hint)
         
         content_layout.addSpacing(10)
         
@@ -230,34 +257,41 @@ class PIDTuner(QWidget):
         self.slider_kp.blockSignals(True)
         self.slider_ki.blockSignals(True)
         self.slider_kd.blockSignals(True)
+        self.slider_dz.blockSignals(True)
         
         self.slider_kp.setValue(int(self.kp * 100))
         self.slider_ki.setValue(int(self.ki * 100))
         self.slider_kd.setValue(int(self.kd * 100))
+        self.slider_dz.setValue(int(self.deadzone))
         
         self.slider_kp.blockSignals(False)
         self.slider_ki.blockSignals(False)
         self.slider_kd.blockSignals(False)
+        self.slider_dz.blockSignals(False)
         
         # 更新显示标签
         self.label_kp_val.setText(f"{self.kp:.2f}")
         self.label_ki_val.setText(f"{self.ki:.3f}")
         self.label_kd_val.setText(f"{self.kd:.2f}")
+        self.label_dz_val.setText(f"{self.deadzone}px")
     
     def _on_slider_changed(self):
         """滑块值改变"""
         self.kp = self.slider_kp.value() / 100.0
         self.ki = self.slider_ki.value() / 100.0
         self.kd = self.slider_kd.value() / 100.0
+        self.deadzone = self.slider_dz.value()
         
         # 更新显示
         self.label_kp_val.setText(f"{self.kp:.2f}")
         self.label_ki_val.setText(f"{self.ki:.3f}")
         self.label_kd_val.setText(f"{self.kd:.2f}")
+        self.label_dz_val.setText(f"{self.deadzone}px")
         
         # 发射信号
         self.pid_changed.emit(self.kp, self.ki, self.kd)
-    
+        self.deadzone_changed.emit(self.deadzone)
+
     def _on_invert_changed(self):
         """反转设置改变"""
         invert_x = self.chk_invert_x.isChecked()

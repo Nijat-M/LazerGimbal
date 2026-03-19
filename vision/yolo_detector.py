@@ -1,6 +1,7 @@
 from ultralytics import YOLO
 import cv2
 import numpy as np
+import math
 from typing import Optional, Tuple, List
 from dataclasses import dataclass
 
@@ -24,17 +25,21 @@ class YOLODetectionResult:
 
 
 class YOLODetector:
-    def __init__(self, model_path="vision/models/yolov8n.pt"):
+    def __init__(self, model_path="vision/models/yolo26n.pt"):
         self.model = YOLO(model_path)
+        # 目标锁定状态记录
+        self.locked_target_position: Optional[Tuple[int, int]] = None
+        self.lost_frames = 0
+        self.max_lost_frames = 10  # 丢失多少帧后认为目标彻底丢失，重新寻找全局最优
+        self.lock_distance_threshold = 150  # 锁定追踪的最大跳变距离 (像素)
         
     def detect_target(self, frame: np.ndarray, target_class=None) -> YOLODetectionResult:
         """
-        Detects multiple targets. Returns all targets and selects one main target (highest confidence) for tracking.
+        Detects multiple targets. Returns all targets and selects one main target for tracking.
+        改进：优先选择距离上一帧被锁定目标最近的候选者，防止追踪目标在不同人/物体间横跳。
         """
         results = self.model(frame, verbose=False)
         
-        best_conf = 0
-        best_target = None
         all_targets = []
         
         for r in results:
@@ -56,12 +61,33 @@ class YOLODetector:
                     )
                     all_targets.append(target)
                     
-                    # 也可以在这里改成计算“离画面中心最近”的作为 best_target
-                    if conf > best_conf:
-                        best_conf = conf
-                        best_target = target
-                        
+        # --- 工业级目标锁定逻辑：中心距最近优先 ---
+        best_target = None
+        
+        if len(all_targets) > 0:
+            if self.locked_target_position is not None and self.lost_frames < self.max_lost_frames:
+                # 寻找距离上一帧锁定目标最近的候选者
+                min_dist = float('inf')
+                for t in all_targets:
+                    # 计算欧氏距离
+                    dist = math.hypot(t.position[0] - self.locked_target_position[0], 
+                                      t.position[1] - self.locked_target_position[1])
+                    if dist < min_dist and dist < self.lock_distance_threshold:
+                        min_dist = dist
+                        best_target = t
+            
+            # 如果没找到附近的目标，或者之前没有锁定过目标，则回退到"最高置信度"作为新目标
+            if best_target is None:
+                best_conf = 0.0
+                for t in all_targets:
+                    if t.confidence > best_conf:
+                        best_conf = t.confidence
+                        best_target = t
+
+        # 更新锁定的目标状态
         if best_target is not None:
+            self.locked_target_position = best_target.position
+            self.lost_frames = 0
             return YOLODetectionResult(
                 detected=True,
                 position=best_target.position,
@@ -70,5 +96,6 @@ class YOLODetector:
                 confidence=best_target.confidence,
                 all_targets=all_targets
             )
-            
-        return YOLODetectionResult(detected=False, all_targets=[])
+        else:
+            self.lost_frames += 1
+            return YOLODetectionResult(detected=False, all_targets=all_targets)

@@ -101,15 +101,17 @@ class SerialThread(QThread):
                     while not self.write_queue.empty():
                         cmd = self.write_queue.get_nowait()
                         self.serial_port.write(cmd.encode('utf-8'))
-                        # logger.debug(f"[SERIAL TX] '{cmd.strip()}'")
 
-                    # 2. 处理接收数据 (Receiving)
-                    # 先检查 in_waiting，避免 readline 阻塞
+                    # 2. 处理接收数据 (Receiving) 
+                    # 避免在没有数据时 readline 阻塞太久而耽误发送队列
                     if self.serial_port.in_waiting > 0:
-                        data = self.serial_port.readline().decode('utf-8').strip()
+                        data = self.serial_port.readline().decode('utf-8', errors='ignore').strip()
                         if data:
                             logger.info(f"[SERIAL RX] '{data}'")
                             self.data_received_signal.emit(data)
+                    else:
+                        # 没有数据接收时，极短地休眠一下让出CPU，避免100%占用
+                        time.sleep(0.002)
                 
                 except (serial.SerialException, OSError) as e:
                     # 捕获物理断开或权限异常
@@ -126,8 +128,9 @@ class SerialThread(QThread):
                 except Exception as e:
                     logger.error(f"[SERIAL UNKNOWN ERROR] {e}")
 
-            # 避免 CPU 占用过高 (Yield CPU)
-            time.sleep(0.01)
+            else:
+                # 避免没连接串口时 CPU 占用过高 (Yield CPU)
+                time.sleep(0.05)
 
     def stop(self):
         """ 停止线程 """

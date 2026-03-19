@@ -29,13 +29,26 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+// --------------------------------------------------------------------------
+// 工业级双轴伺服闭环变量与串口协议
+// --------------------------------------------------------------------------
+#include <stdlib.h> // atoi
+#include <string.h>
+#include <stdio.h>
 
+typedef enum {
+    STATE_IDLE,
+    STATE_RECEIVING_POS,
+    STATE_RECEIVING_TUNING
+} RxState;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define SERVO_MIN_PULSE 600   // 对应约 0度
 #define SERVO_MAX_PULSE 2400  // 对应约 180度
+#define RX_BUFFER_SIZE 64
+#define PID_INTEGRAL_MAX 200.0f   // 积分限幅
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -46,22 +59,35 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-#include <stdlib.h> // 需要用到 atoi 函数
-#include <string.h>
 
-#define RX_BUFFER_SIZE 32
+// PID 参数 (与上位机初始化对齐)
+volatile float Kp = 0.4f, Ki = 0.16f, Kd = 0.5f;
+
+// 误差状态
+volatile int16_t current_error_x = 0;
+volatile int16_t current_error_y = 0;
+volatile int16_t prev_error_x = 0;
+volatile int16_t prev_error_y = 0;
+volatile int16_t prev_prev_error_x = 0;
+volatile int16_t prev_prev_error_y = 0;
+
+volatile float integral_x = 0.0f;
+volatile float integral_y = 0.0f;
+
+// 舵机脉宽
+volatile float servo_x_pulse = 1500.0f;
+volatile float servo_y_pulse = 1500.0f;
+
+volatile uint8_t current_fire = 0;
+volatile uint8_t vision_timeout_counter = 0; 
+volatile uint8_t new_data_flag = 0;   // 核心改进：防瞎积分的数据锁
+
+// 串口变量
+volatile RxState rx_state = STATE_IDLE;
 uint8_t rx_byte;
-uint8_t rx_buffer[RX_BUFFER_SIZE];
-uint8_t rx_index = 0;
+char rx_buffer[RX_BUFFER_SIZE];
+volatile uint8_t rx_index = 0;
 
-// 舵机当前脉宽 (初始化为中位)
-float servo_x_pulse = 1500.0f; // 用 float 提高计算精度
-float servo_y_pulse = 1500.0f;
-
-// P 控制参数 (需要调试)
-// Kp = 0.1 表示每偏离1个像素，脉宽调整 0.1us (这个值要在 Python 端或这里调)
-// 实际上我们可以直接传“修正量”，把 Kp 放在 Python 里算，或者在这里算。
-// 为了通信简单，我们让 STM32 负责积分（累加位置），Python 负责算比例。
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -110,6 +136,11 @@ int main(void)
   // 启动定时器 PWM 输出
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1); // 启动舵机 X
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2); // 启动舵机 Y
+
+  // 开启 TIM2 的更新中断 (50Hz), 用于 PID 控制循环
+  HAL_NVIC_SetPriority(TIM2_IRQn, 1, 0);
+  HAL_NVIC_EnableIRQ(TIM2_IRQn);
+  __HAL_TIM_ENABLE_IT(&htim2, TIM_IT_UPDATE);
 
   // 开启串口接收中断：告诉 STM32，“准备收这 1 个字节，收到了叫我”
   HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
@@ -194,59 +225,180 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+#define MAX_SERVO_DELTA 30.0f  // 核心提升：每次最大脉宽变化量（限幅步长），防止目标瞬移导致舵机抽搐扫齿
+
+/**
+ * @brief 工业级 PID 核心循环 (50Hz), 由定时器中断周期性挂载
+ * 
+ * 核心设计思想：
+ * 1. 采用“增量式 PID”而非“位置式 PID”，天然免疫因为积分积累带来的积分饱和 (Integral Windup) 问题。
+ * 2. 解耦异步数据通讯：只在拿到确切的新影像帧后计算补偿，杜绝瞎积分。
+ */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  if (htim->Instance == TIM2)
+  {
+      // ==========================================================
+      // [1] 安全看门狗 (Security Watchdog) - 防云台“锁死失控”
+      // ==========================================================
+      if (vision_timeout_counter < 100) { 
+          vision_timeout_counter++;
+      } else {
+          // 超过100个Tick(即2秒)没有收到Python下发指令，认为目标丢失/程序崩溃。
+          current_error_x = 0;
+          current_error_y = 0;
+          
+          // ⚠️极限环境修复：必须同步清空历史状态！
+          // 否则假设上一帧误差还是 50，这里突降为 0，这会导致 P项 `Kp*(0 - 50)` 输出巨大负向猛拉，云台会剧烈抖动。
+          prev_error_x = 0; prev_prev_error_x = 0;
+          prev_error_y = 0; prev_prev_error_y = 0;
+          
+          new_data_flag = 0; // 停机
+      }
+
+      // ==========================================================
+      // [2] 异步数据防抖锁 (Asynchronous Data Lock)
+      // ==========================================================
+      // STM32中断频率极其恒定(50Hz)，但上位机因YOLO算力可能会掉到 30Hz 甚至偶尔卡顿。
+      // 没有这把锁，STM32就会用“过期数据”重复多次积分。
+      if (!new_data_flag) {
+          return; // 暂无新指挥，维持原样不输出增量。
+      }
+      // 确认有新指令，下发计算通行证
+      new_data_flag = 0;
+
+      // ==========================================================
+      // [3] 增量式 PID 姿态解算 (Incremental PID Core)
+      // ==========================================================
+      float delta_x = 0.0f;
+      
+      // 开启死区(Deadzone)：当目标在准星中心 3 像素以内时，不输出增量(不拉扯)，防止因像噪反复震荡。
+      if (abs(current_error_x) >= 3) {
+          /* 
+           * 增量式PID标准公式: ΔU(k) = Kp*[e(k)-e(k-1)] + Ki*e(k) + Kd*[e(k) - 2e(k-1) + e(k-2)] 
+           * 相比位置式直接计算出绝对坐标，这里解算的是“未来20ms云台需要的移动步数和方向 (Velocity)”
+           */
+          delta_x = Kp * (float)(current_error_x - prev_error_x) + 
+                    Ki * (float)current_error_x + 
+                    Kd * (float)(current_error_x - 2 * prev_error_x + prev_prev_error_x);
+      }
+      
+      // ⚠️极限环境修复：无论是否在死区，历史误差状态(State History)必须无条件流转！
+      // 若进入死区时冻结替换，则目标走出死区的第一帧时，e(k) 与 e(k-1) 的时间是不连续的，会引发剧烈的微分暴走(Derivative Kick)。
+      prev_prev_error_x = prev_error_x;
+      prev_error_x = current_error_x;
+
+      float delta_y = 0.0f;
+      if (abs(current_error_y) >= 3) {
+          delta_y = Kp * (float)(current_error_y - prev_error_y) + 
+                    Ki * (float)current_error_y + 
+                    Kd * (float)(current_error_y - 2 * prev_error_y + prev_prev_error_y);
+      }
+      prev_prev_error_y = prev_error_y;
+      prev_error_y = current_error_y;
+
+
+      // ==========================================================
+      // [4] Slew Rate Limiter (加速度/输出变化率限幅) - 专业级标配
+      // ==========================================================
+      // 极力保护机械结构：当目标突然闪现、或者PID算出了几百的极限增量时，强行切断为最大步长，保护舵机不被大电流烧毁或扫齿。
+      if (delta_x > MAX_SERVO_DELTA) delta_x = MAX_SERVO_DELTA;
+      if (delta_x < -MAX_SERVO_DELTA) delta_x = -MAX_SERVO_DELTA;
+      if (delta_y > MAX_SERVO_DELTA) delta_y = MAX_SERVO_DELTA;
+      if (delta_y < -MAX_SERVO_DELTA) delta_y = -MAX_SERVO_DELTA;
+
+
+      // ==========================================================
+      // [5] 执行积分叠加并物理限位 (Execution & Hard-Limits)
+      // ==========================================================
+      // 将本周期的计算增量，叠加在当下的真实物理 PWM 脉宽上。
+      servo_x_pulse += delta_x;
+      servo_y_pulse += delta_y;
+
+      // 绝对死限位，防止撞死壳体 (500~2500 为典型180度舵机安全值)
+      if(servo_x_pulse > SERVO_MAX_PULSE) servo_x_pulse = SERVO_MAX_PULSE;
+      if(servo_x_pulse < SERVO_MIN_PULSE) servo_x_pulse = SERVO_MIN_PULSE;
+      if(servo_y_pulse > SERVO_MAX_PULSE) servo_y_pulse = SERVO_MAX_PULSE;
+      if(servo_y_pulse < SERVO_MIN_PULSE) servo_y_pulse = SERVO_MIN_PULSE;
+
+      // 写出到底层寄存器
+      __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, (uint32_t)servo_x_pulse);
+      __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, (uint32_t)servo_y_pulse);
+  }
+}
+
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   if(huart->Instance == USART1)
   {
-    // 如果收到换行符 '\n'，说明一句话结束了，开始解析
-    if (rx_byte == '\n')
+    if (rx_state == STATE_IDLE)
     {
-      rx_buffer[rx_index] = '\0'; // 添加字符串结束符
-
-      // 解析数据包格式: "x123", "x-50", "y30"
-      char axis = rx_buffer[0]; // 第一个字符是轴号 'x' 或 'y'
-      int error_val = atoi((char*)&rx_buffer[1]); // 从第二个字符开始转成整数
-
-      // --- P-Control 核心逻辑 ---
-      // NewPosition = OldPosition + (Error * Kp)
-      // 我们这里直接接收 (Error * Kp) 后的"Delta"值，这样更灵活
-
-      if (axis == 'x')
-      {
-          // 这里的 error_val 是 Python 算好的 (Error * Kp)
-          // 注意方向：如果摄像头是镜像的，可能需要改成 -=
-          servo_x_pulse += error_val;
-
-          // --- 核心防卡死代码 (Clamping) ---
-          if(servo_x_pulse > SERVO_MAX_PULSE) servo_x_pulse = SERVO_MAX_PULSE;
-          if(servo_x_pulse < SERVO_MIN_PULSE) servo_x_pulse = SERVO_MIN_PULSE;
-
-          __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, (int)servo_x_pulse);
-      }
-      else if (axis == 'y')
-      {
-          servo_y_pulse += error_val;
-
-          // --- 核心防卡死代码 (Clamping) ---
-          if(servo_y_pulse > SERVO_MAX_PULSE) servo_y_pulse = SERVO_MAX_PULSE;
-          if(servo_y_pulse < SERVO_MIN_PULSE) servo_y_pulse = SERVO_MIN_PULSE;
-
-          __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, (int)servo_y_pulse);
-      }
-
-      // 调试：闪灯表示收到有效包
-      HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-
-      // 清空缓冲区索引
-      rx_index = 0;
+        if (rx_byte == '<') {
+            rx_state = STATE_RECEIVING_POS;
+            rx_index = 0;
+        } else if (rx_byte == '{') {
+            rx_state = STATE_RECEIVING_TUNING;
+            rx_index = 0;
+        }
     }
-    else
+    else if (rx_state == STATE_RECEIVING_POS)
     {
-      // 如果还没收到 \n，就存进缓冲区
-      if (rx_index < RX_BUFFER_SIZE - 1)
-      {
-        rx_buffer[rx_index++] = rx_byte;
-      }
+        if (rx_byte == '>') {
+            rx_buffer[rx_index] = '\0';
+            
+            // 解析 <Error_X,Error_Y,Fire>
+            char *token1 = strtok((char*)rx_buffer, ",");
+            char *token2 = strtok(NULL, ",");
+            char *token3 = strtok(NULL, ",");
+            
+            if (token1 && token2 && token3) {
+                current_error_x = atoi(token1);
+                current_error_y = atoi(token2);
+                
+                // 核心改进：通知PID主循环有新数据可以做积分了
+                new_data_flag = 1;
+                
+                vision_timeout_counter = 0; // 喂狗
+            }
+            
+            rx_state = STATE_IDLE;
+        } else {
+            if (rx_index < RX_BUFFER_SIZE - 1) {
+                rx_buffer[rx_index++] = rx_byte;
+            } else {
+                rx_state = STATE_IDLE; // overflow
+            }
+        }
+    }
+    else if (rx_state == STATE_RECEIVING_TUNING)
+    {
+        if (rx_byte == '}') {
+            rx_buffer[rx_index] = '\0';
+            
+            // 解析 {Kp,Ki,Kd}
+            char *token1 = strtok((char*)rx_buffer, ",");
+            char *token2 = strtok(NULL, ",");
+            char *token3 = strtok(NULL, ",");
+            
+            if (token1 && token2 && token3) {
+                Kp = atof(token1);
+                Ki = atof(token2);
+                Kd = atof(token3);
+                
+                // 更换参数后通常需要重置积分
+                integral_x = 0;
+                integral_y = 0;
+            }
+            
+            rx_state = STATE_IDLE;
+        } else {
+            if (rx_index < RX_BUFFER_SIZE - 1) {
+                rx_buffer[rx_index++] = rx_byte;
+            } else {
+                rx_state = STATE_IDLE; // overflow
+            }
+        }
     }
 
     // 重新开启中断接收下一个字节
