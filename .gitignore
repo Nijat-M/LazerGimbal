@@ -6,4 +6,7 @@ __pycache__/
 .vscode/
 gimbal_config.json
 *.log
-.STM32F401/
+
+# STM32 Build Artifacts
+STM32F401/Debug/
+STM32F401/Release/
