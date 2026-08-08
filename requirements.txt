@@ -3,3 +3,4 @@ pyqtdarktheme
 opencv-python
 pyserial
 numpy
+ultralytics

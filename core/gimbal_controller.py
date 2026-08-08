@@ -283,31 +283,37 @@ class GimbalController(QObject):
         pulse_step = int(degree_step * cfg.DEGREE_TO_PULSE)
         logger.info(f"[MANUAL] 角度步长: {degree_step}°, PWM脉冲步长: {pulse_step}")
 
-        if axis == 'x':
-            next_pos = self.servo_x + degree_step
-            if ControlConfig.SERVO_MIN_LIMIT <= next_pos <= ControlConfig.SERVO_MAX_LIMIT:
-                self.servo_x = next_pos
-                cmd = f"x{'+' if pulse_step >= 0 else ''}{pulse_step}"
-                logger.info(f"[MANUAL] 发送 X 轴命令: {cmd} (新位置={self.servo_x:.1f}°)")
-                self.serial_thread.send_command(f"{cmd}\n")
-                self.position_update_signal.emit(self.servo_x, self.servo_y)
-                self.status_update_signal.emit(f"手动移动 X: {self.servo_x:.1f}°")
-            else:
-                logger.warning(f"[LIMIT] X轴已到达限位: {next_pos:.1f}°")
-                self.status_update_signal.emit(f"⚠️ X轴限位: {next_pos:.1f}°")
+        if not self.serial_thread.serial_port or \
+           not self.serial_thread.serial_port.is_open:
+            logger.warning("[WARNING] 串口未连接，无法手动移动")
+            self.status_update_signal.emit("⚠️ 警告: 串口未连接")
+            return
 
-        elif axis == 'y':
-            next_pos = self.servo_y + degree_step
-            if ControlConfig.SERVO_MIN_LIMIT <= next_pos <= ControlConfig.SERVO_MAX_LIMIT:
-                self.servo_y = next_pos
-                cmd = f"y{'+' if pulse_step >= 0 else ''}{pulse_step}"
-                logger.info(f"[MANUAL] 发送 Y 轴命令: {cmd} (新位置={self.servo_y:.1f}°)")
-                self.serial_thread.send_command(f"{cmd}\n")
-                self.position_update_signal.emit(self.servo_x, self.servo_y)
-                self.status_update_signal.emit(f"手动移动 Y: {self.servo_y:.1f}°")
-            else:
-                logger.warning(f"[LIMIT] Y轴已到达限位: {next_pos:.1f}°")
-                self.status_update_signal.emit(f"⚠️ Y轴限位: {next_pos:.1f}°")
+        degree_step = cfg.MANUAL_STEP * direction
+
+        # 应用反转设置
+        if axis == 'x' and self.invert_x:
+            degree_step = -degree_step
+        elif axis == 'y' and self.invert_y:
+            degree_step = -degree_step
+
+        simulated_error = -70 if degree_step > 0 else 70
+
+        def _send_pulse():
+            if axis == 'x':
+                # 1. 触发增量步进脉冲 (符号反转对齐实际舵机方向)
+                self.serial_thread.send_command(f"<{simulated_error},0,0>\n")
+                time.sleep(0.04)  # 留给 STM32 2个周期(50Hz)完成增量计算
+                # 2. 发送 0 误差清空历史状态，防止卡死与看门狗反向猛拉
+                self.serial_thread.send_command("<0,0,0>\n")
+                self.status_update_signal.emit(f"手动移动 X ({'右' if degree_step > 0 else '左'})")
+            elif axis == 'y':
+                self.serial_thread.send_command(f"<0,{simulated_error},0>\n")
+                time.sleep(0.04)
+                self.serial_thread.send_command("<0,0,0>\n")
+                self.status_update_signal.emit(f"手动移动 Y ({'上' if degree_step > 0 else '下'})")
+
+        threading.Thread(target=_send_pulse, daemon=True).start()
 
     def sync_position(self) -> None:
         """

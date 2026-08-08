@@ -28,10 +28,19 @@ class SerialPanel(QGroupBox):
         """初始化UI"""
         layout = QFormLayout(self)
         
-        # 端口选择
-        self.combo_port = QComboBox()
+        # 自动检测可用端口（自定义 ComboBox 展开时自动刷新）
+        class RefreshComboBox(QComboBox):
+            def showPopup(sub_self):
+                sub_self.clear()
+                avail_ports = [p.device for p in serial.tools.list_ports.comports()]
+                if not avail_ports:
+                    avail_ports = ["无可用端口 (No COM Found)"]
+                sub_self.addItems(avail_ports)
+                super().showPopup()
+
+        self.combo_port = RefreshComboBox()
         
-        # 自动检测可用端口
+        # 初始检测
         ports = [port.device for port in serial.tools.list_ports.comports()]
         if not ports:
             ports = [default_port] # 兜底

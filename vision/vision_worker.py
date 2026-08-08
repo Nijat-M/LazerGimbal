@@ -439,12 +439,11 @@ class VisionWorker(QThread):
         pass # 清空绘图逻辑
 
     def _send_image(self, frame: cv2.Mat) -> None:
-        """将 BGR 帧转为 QImage 发送给 UI"""
+        """将 BGR 帧转为 QImage 发送给 UI (原生 Format_BGR888 避免红蓝反转)"""
         try:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            h, w, ch = rgb.shape
-            q_image = QImage(rgb.data, w, h, ch * w,
-                             QImage.Format.Format_RGB888).copy()
+            h, w, ch = frame.shape
+            q_image = QImage(frame.data, w, h, ch * w,
+                             QImage.Format.Format_BGR888).copy()
             self.frame_signal.emit(q_image)
         except Exception as e:
             logger.error(f"[VISION ERROR] send_image failed: {e}")

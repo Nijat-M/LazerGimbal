@@ -17,6 +17,7 @@ class CameraView(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.is_camera_active = False
         self.init_ui()
     
     def init_ui(self):
@@ -41,10 +42,16 @@ class CameraView(QWidget):
         self.lbl_mask.setMinimumSize(320, 240)
         self.lbl_mask.setMaximumHeight(300)
         layout.addWidget(self.lbl_mask, 1)
+
+    def set_camera_active(self, active: bool):
+        """设置相机激活状态"""
+        self.is_camera_active = active
     
     @pyqtSlot(QImage)
     def update_camera_feed(self, qt_img):
         """更新摄像头画面"""
+        if not self.is_camera_active:
+            return
         pixmap = QPixmap.fromImage(qt_img)
         scaled = pixmap.scaled(
             self.lbl_camera.size(), 
@@ -55,9 +62,19 @@ class CameraView(QWidget):
     @pyqtSlot(QImage)
     def update_mask_feed(self, qt_img):
         """更新调试蒙版"""
+        if not self.is_camera_active:
+            return
         pixmap = QPixmap.fromImage(qt_img)
         scaled = pixmap.scaled(
             self.lbl_mask.size(), 
             Qt.AspectRatioMode.KeepAspectRatio
         )
         self.lbl_mask.setPixmap(scaled)
+
+    def show_blank_screen(self, text="相机未运行 (Camera Not Running)"):
+        """清空画面，显示黑屏与提示文字"""
+        self.is_camera_active = False
+        self.lbl_camera.clear()
+        self.lbl_camera.setText(f"<font color='#888888'><h3>📷 {text}</h3></font>")
+        self.lbl_mask.clear()
+        self.lbl_mask.setText("<font color='#666666'>Mask 蒙版 (已停止)</font>")

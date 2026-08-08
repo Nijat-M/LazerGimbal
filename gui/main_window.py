@@ -262,7 +262,14 @@ class MainWindow(QMainWindow):
         if not is_open:
             logger.info("[GUI] 用户触发关闭摄像头")
             self.vision_thread.close_camera()
+            self.camera_view.show_blank_screen("相机未运行 (Camera Not Running)")
             self.status_label.setText("摄像头已关闭")
+        else:
+            logger.info("[GUI] 用户触发开启摄像头")
+            self.camera_view.set_camera_active(True)
+            cam_id = self.camera_panel.get_current_camera_id()
+            w, h = self.camera_panel.get_selected_resolution()
+            self.vision_thread.switch_camera(cam_id, w, h)
     
     def on_mode_changed(self, mode):
         """模式切换"""

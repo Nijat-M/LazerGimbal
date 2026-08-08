@@ -262,3 +262,8 @@ class CameraPanel(QGroupBox):
         if camera_index >= 0 and camera_index < len(self.available_cameras):
             return self.available_cameras[camera_index]
         return 0
+
+    def get_selected_resolution(self):
+        """获取选中的分辨率 (width, height)"""
+        text = self.combo_resolution.currentText()
+        return self._parse_resolution(text)

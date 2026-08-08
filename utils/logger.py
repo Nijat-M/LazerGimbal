@@ -54,7 +54,13 @@ class Logger:
             datefmt='%H:%M:%S'
         )
         
-        # 控制台处理器
+        if hasattr(sys.stdout, 'reconfigure'):
+            try:
+                sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            except Exception:
+                pass
+        
+        # 控制台处理器 (使用 utf-8 编码避免 Windows 极客控制台崩溃)
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
         
@@ -72,7 +78,7 @@ class Logger:
             file_handler.setFormatter(formatter)
             root_logger.addHandler(file_handler)
             
-            print(f"[LOGGER] 📝 日志文件: {log_file}")
+            print(f"[LOGGER] 日志文件: {log_file}")
     
     def debug(self, message, **kwargs):
         """调试信息"""
