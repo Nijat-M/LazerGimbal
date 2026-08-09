@@ -18,12 +18,12 @@
 
 import time
 import threading
-from typing import Tuple
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from config import cfg
 from config.control_config import ControlConfig
 from core.control.error_processor import ErrorProcessor
+from core.control.manual_aim_controller import ManualAimController
 from utils.logger import Logger
 
 logger = Logger("GimbalController")
@@ -39,6 +39,7 @@ class GimbalController(QObject):
     # Qt 信号：通知 GUI 更新状态显示
     status_update_signal = pyqtSignal(str)        # 状态文本
     position_update_signal = pyqtSignal(float, float)  # X, Y 位置（度）
+    manual_target_update_signal = pyqtSignal(float, float)  # 相对中心的 yaw/pitch
 
     def __init__(self, serial_thread):
         """
@@ -61,10 +62,22 @@ class GimbalController(QObject):
         # [处理后的误差] 由视觉线程发来的坐标处理后存储在此
         self.current_error_x: int = 0
         self.current_error_y: int = 0
-        self.last_vision_time: float = time.time()
+        self.last_vision_time: float = time.monotonic()
 
         # [控制开关]
         self.control_enabled: bool = False
+        self.visual_input_enabled: bool = False
+
+        # [FPS 鼠标瞄准]
+        self.manual_aim = ManualAimController(
+            sensitivity=ControlConfig.MOUSE_SENSITIVITY,
+            yaw_limits=(ControlConfig.MOUSE_YAW_MIN, ControlConfig.MOUSE_YAW_MAX),
+            pitch_limits=(ControlConfig.MOUSE_PITCH_MIN, ControlConfig.MOUSE_PITCH_MAX),
+        )
+        self.manual_mouse_enabled: bool = False
+        self.mouse_capture_active: bool = False
+        self.manual_motion_active: bool = False
+        self._motion_lock = threading.RLock()
 
         # [反转设置] 从 ControlConfig 读取默认值
         self.invert_x: bool = ControlConfig.INVERT_X
@@ -79,8 +92,13 @@ class GimbalController(QObject):
         self.control_thread.start()
 
     def stop(self) -> None:
-        """停止控制线程，通常在退出应用时调用"""
-        self.is_running = False
+        """Stop motion and terminate the control thread."""
+        with self._motion_lock:
+            self.is_running = False
+            self.control_enabled = False
+            self.manual_mouse_enabled = False
+            self.mouse_capture_active = False
+            self.stop_motion()
         if self.control_thread.is_alive():
             self.control_thread.join(timeout=1.0)
 
@@ -88,12 +106,30 @@ class GimbalController(QObject):
     # 公共接口（GUI 调用）
     # --------------------------------------------------
 
-    def set_control_enabled(self, enabled: bool) -> None:
-        """启用/禁用 PID 自动控制"""
-        self.control_enabled = enabled
+    def set_control_enabled(self, enabled: bool) -> bool:
+        """Enable or disable automatic visual tracking and report acceptance."""
+        with self._motion_lock:
+            if enabled and self.manual_mouse_enabled:
+                self.status_update_signal.emit("鼠标模式下不能启动自动控制")
+                return False
+            if enabled and not self.visual_input_enabled:
+                self.status_update_signal.emit("摄像头尚未就绪，不能启动自动控制")
+                return False
+
+            self.control_enabled = enabled
+            if not enabled:
+                self.stop_motion()
         status = "控制已启动" if enabled else "控制已停止"
         self.status_update_signal.emit(status)
         logger.info(f"[CONTROLLER] {status}")
+        return True
+
+    def set_visual_input_enabled(self, enabled: bool) -> None:
+        """Accept vision samples only while the current camera is confirmed live."""
+        with self._motion_lock:
+            self.visual_input_enabled = enabled
+            if not enabled:
+                self.stop_motion()
 
     def set_invert(self, invert_x: bool, invert_y: bool) -> None:
         """设置轴向反转"""
@@ -101,6 +137,64 @@ class GimbalController(QObject):
         self.invert_y = invert_y
         ControlConfig.INVERT_X = invert_x
         ControlConfig.INVERT_Y = invert_y
+
+    def set_manual_mouse_mode(self, enabled: bool) -> None:
+        """Switch the controller between visual tracking and mouse aiming."""
+        with self._motion_lock:
+            was_enabled = self.manual_mouse_enabled
+            self.manual_mouse_enabled = enabled
+            self.mouse_capture_active = False
+            self.manual_motion_active = False
+
+            if enabled:
+                self.control_enabled = False
+                self.stop_motion()
+            elif was_enabled:
+                self.stop_motion()
+            target = self.manual_aim.get_target()
+
+        self.manual_target_update_signal.emit(*target)
+        if enabled:
+            self.status_update_signal.emit("鼠标瞄准就绪：点击实时画面开始")
+
+    def set_mouse_capture_active(self, active: bool) -> None:
+        """Arm mouse motion only while the video widget owns the cursor."""
+        with self._motion_lock:
+            active = active and self.manual_mouse_enabled
+            if self.mouse_capture_active == active:
+                return
+            self.mouse_capture_active = active
+            if not active:
+                self.stop_motion()
+        status = "鼠标已捕获，Esc 停止" if active else "鼠标已释放，运动已停止"
+        self.status_update_signal.emit(status)
+
+    def handle_mouse_delta(self, dx: int, dy: int) -> None:
+        """Accumulate high-rate GUI mouse events without sending serial data."""
+        with self._motion_lock:
+            if not self.manual_mouse_enabled or not self.mouse_capture_active:
+                return
+            yaw, pitch = self.manual_aim.add_mouse_delta(dx, dy)
+        self.manual_target_update_signal.emit(yaw, pitch)
+
+    def update_mouse_sensitivity(self, sensitivity: float) -> None:
+        self.manual_aim.set_sensitivity(sensitivity)
+        ControlConfig.MOUSE_SENSITIVITY = sensitivity
+
+    def stop_motion(self, reason: str | None = None) -> None:
+        """Clear pending state and send a prioritized, explicit firmware STOP."""
+        with self._motion_lock:
+            self.current_error_x = 0
+            self.current_error_y = 0
+            self.error_processor.reset()
+            target = self.manual_aim.discard_pending()
+            self.manual_motion_active = False
+            if self.serial_thread:
+                self.serial_thread.send_stop_command()
+        self.manual_target_update_signal.emit(*target)
+        if reason:
+            logger.warning(reason)
+            self.status_update_signal.emit(reason)
 
     def update_pid_tunings(self, kp: float, ki: float, kd: float) -> None:
         """动态更新 PID 参数（调参时由 GUI 调用）"""
@@ -125,6 +219,9 @@ class GimbalController(QObject):
             target_x: 目标在画面中的 X 坐标（像素）
             target_y: 目标在画面中的 Y 坐标（像素）
         """
+        if not self.visual_input_enabled:
+            return
+
         # 计算相对于画面中心的原始误差
         raw_error_x = target_x - VisionConfig_center_x()
         raw_error_y = target_y - VisionConfig_center_y()
@@ -139,7 +236,7 @@ class GimbalController(QObject):
 
         self.current_error_x = processed_x
         self.current_error_y = processed_y
-        self.last_vision_time = time.time()
+        self.last_vision_time = time.monotonic()
 
     def handle_vision_error(self, err_x: int, err_y: int) -> None:
         """
@@ -152,7 +249,9 @@ class GimbalController(QObject):
             err_x: X 轴误差（像素）
             err_y: Y 轴误差（像素）
         """
-        self.last_vision_time = time.time()
+        if not self.visual_input_enabled:
+            return
+        self.last_vision_time = time.monotonic()
 
         # [分辨率归一化]
         norm_x, norm_y = self._normalize_error(err_x, err_y)
@@ -187,156 +286,161 @@ class GimbalController(QObject):
                 time.sleep(sleep_time)
 
     def control_loop(self) -> None:
-        """
-        [核心] PID 控制单次计算与指令下发
-
-
-        所有参数均从 ControlConfig 读取，无硬编码数字。
-        """
+        """Run one fixed-rate automatic or mouse-control update."""
         try:
-            # 1. 检查控制开关
-            if not self.control_enabled:
-                return
-
-            # 2. 检查串口连接
-            if not self.serial_thread.serial_port or \
-               not self.serial_thread.serial_port.is_open:
-                now = time.time()
-                if now - self.last_warn_time > 2.0:
-                    logger.warning("[WARNING] 串口未连接！请先点击'连接'按钮。")
-                    self.status_update_signal.emit("警告: 串口未连接")
-                    self.last_warn_time = now
-                return
-
-            # 3. [安全看门狗] 超时停止控制，防止失控
-            time_since_last_vision = time.time() - self.last_vision_time
-            if time_since_last_vision > ControlConfig.VISION_WATCHDOG_TIMEOUT:
-                if self.current_error_x != 0 or self.current_error_y != 0:
-                    logger.warning(f"视觉信号丢失，停止控制 (超时: {time_since_last_vision:.2f}s)")
-                    self.current_error_x = 0
-                    self.current_error_y = 0
-                    # 发送停止指令
-                    if self.serial_thread and self.serial_thread.serial_port and self.serial_thread.serial_port.is_open:
-                        self.serial_thread.send_command("<0,0,0>\n")
-                return
-
-            # 4. 获取当前误差
-            err_x = self.current_error_x
-            err_y = self.current_error_y
-
-            # 5. [PID 上位机死区拦截] 死区可由用户界面调整，默认为 5 px 左右
-            # 将X和Y轴的死区判断【独立分开】，防止Y轴运动时带动原本已经停稳的X轴震荡！
-            if abs(err_x) < ControlConfig.DEADZONE:
-                err_x = 0
-            
-            if abs(err_y) < ControlConfig.DEADZONE:
-                err_y = 0
-
-            # 6. 处理轴向反转
-            if self.invert_x:
-                err_x = -err_x
-            if self.invert_y:
-                err_y = -err_y
-
-            # 7. 打包成指令发送
-            # 协议格式：<Error_X, Error_Y, 0>
-            # 第三个参数 0 预留给未来的前馈速度 Vel_X (Phase 3)
-            cmd = f"<{err_x},{err_y},0>\n"
-            self.serial_thread.send_command(cmd)
-
-        except Exception as e:
-            logger.error(f"[CONTROLLER ERROR] 控制循环异常: {e}")
+            with self._motion_lock:
+                self._control_loop_locked()
+        except Exception as exc:
+            logger.error(f"[CONTROLLER ERROR] 控制循环异常: {exc}")
             import traceback
             traceback.print_exc()
+
+    def _control_loop_locked(self) -> None:
+        if not self.is_running:
+            return
+        if self.manual_mouse_enabled:
+            self._manual_mouse_control_loop()
+            return
+
+        if not self.control_enabled or not self.visual_input_enabled:
+            return
+
+        if not self._is_serial_connected():
+            self._warn_serial_disconnected()
+            return
+
+        time_since_last_vision = time.monotonic() - self.last_vision_time
+        if time_since_last_vision > ControlConfig.VISION_WATCHDOG_TIMEOUT:
+            if self.current_error_x != 0 or self.current_error_y != 0:
+                self.stop_motion(
+                    f"视觉信号丢失，停止控制 (超时: {time_since_last_vision:.2f}s)"
+                )
+            return
+
+        err_x = self.current_error_x
+        err_y = self.current_error_y
+
+        if abs(err_x) < ControlConfig.DEADZONE:
+            err_x = 0
+        if abs(err_y) < ControlConfig.DEADZONE:
+            err_y = 0
+
+        if self.invert_x:
+            err_x = -err_x
+        if self.invert_y:
+            err_y = -err_y
+
+        self.serial_thread.send_realtime_command(f"<{err_x},{err_y},0>\n")
+
+    def _manual_mouse_control_loop(self) -> None:
+        """Consume accumulated mouse movement at 40 Hz without queue buildup."""
+        if not self.mouse_capture_active:
+            return
+        if not self._is_serial_connected():
+            target = self.manual_aim.discard_pending()
+            self.manual_target_update_signal.emit(*target)
+            self.manual_motion_active = False
+            self._warn_serial_disconnected()
+            return
+
+        gain = ControlConfig.MOUSE_ERROR_PER_DEGREE
+        max_error = ControlConfig.MOUSE_MAX_ERROR
+        yaw_delta, pitch_delta = self.manual_aim.consume_angle_delta(
+            max_abs_delta=max_error / gain,
+            min_abs_delta=1.0 / gain,
+        )
+        if abs(yaw_delta) < 1e-6 and abs(pitch_delta) < 1e-6:
+            if self.manual_motion_active:
+                self.serial_thread.send_stop_command()
+                self.manual_motion_active = False
+            return
+
+        err_x = round(yaw_delta * gain)
+        err_y = round(-pitch_delta * gain)
+        err_x = max(-max_error, min(max_error, err_x))
+        err_y = max(-max_error, min(max_error, err_y))
+
+        if self.invert_x:
+            err_x = -err_x
+        if self.invert_y:
+            err_y = -err_y
+
+        self.serial_thread.send_realtime_command(f"<{err_x},{err_y},0>\n")
+        self.manual_motion_active = True
+
+    def _is_serial_connected(self) -> bool:
+        return bool(self.serial_thread and self.serial_thread.is_connected())
+
+    def _warn_serial_disconnected(self) -> None:
+        now = time.monotonic()
+        if now - self.last_warn_time > 2.0:
+            logger.warning("[WARNING] 串口未连接！请先点击'连接'按钮。")
+            self.status_update_signal.emit("警告: 串口未连接")
+            self.last_warn_time = now
 
     # --------------------------------------------------
     # 手动控制（测试模式）
     # --------------------------------------------------
 
     def manual_move(self, axis: str, direction: int) -> None:
-        """
-        手动移动舵机（测试模式）
-
-        Args:
-            axis: 'x' 或 'y'
-            direction: 1（正向）或 -1（反向）
-        """
+        """Send one short, bounded movement for the legacy button test panel."""
         logger.info(f"[MANUAL] 手动移动请求: 轴={axis}, 方向={direction}")
-
-        if not self.serial_thread.serial_port or \
-           not self.serial_thread.serial_port.is_open:
-            logger.warning("[WARNING] 串口未连接，无法手动移动")
+        if not self._is_serial_connected():
             self.status_update_signal.emit("⚠️ 警告: 串口未连接")
+            return
+        if axis not in ("x", "y") or direction not in (-1, 1):
+            logger.warning("[MANUAL] 忽略无效的手动移动参数")
             return
 
         degree_step = cfg.MANUAL_STEP * direction
-
-        # 应用反转设置
-        if axis == 'x' and self.invert_x:
+        if axis == "x" and self.invert_x:
             degree_step = -degree_step
-            logger.info("[MANUAL] X轴已反转（INVERT_X=True）")
-        elif axis == 'y' and self.invert_y:
-            degree_step = -degree_step
-            logger.info("[MANUAL] Y轴已反转（INVERT_Y=True）")
-
-        # 角度 → PWM 脉冲
-        pulse_step = int(degree_step * cfg.DEGREE_TO_PULSE)
-        logger.info(f"[MANUAL] 角度步长: {degree_step}°, PWM脉冲步长: {pulse_step}")
-
-        if not self.serial_thread.serial_port or \
-           not self.serial_thread.serial_port.is_open:
-            logger.warning("[WARNING] 串口未连接，无法手动移动")
-            self.status_update_signal.emit("⚠️ 警告: 串口未连接")
-            return
-
-        degree_step = cfg.MANUAL_STEP * direction
-
-        # 应用反转设置
-        if axis == 'x' and self.invert_x:
-            degree_step = -degree_step
-        elif axis == 'y' and self.invert_y:
+        elif axis == "y" and self.invert_y:
             degree_step = -degree_step
 
         simulated_error = -70 if degree_step > 0 else 70
+        command = (
+            f"<{simulated_error},0,0>\n"
+            if axis == "x"
+            else f"<0,{simulated_error},0>\n"
+        )
+        self.serial_thread.send_realtime_command(command)
+        threading.Timer(0.05, self.serial_thread.send_stop_command).start()
+        self.status_update_signal.emit(f"手动移动 {axis.upper()}")
 
-        def _send_pulse():
-            if axis == 'x':
-                # 1. 触发增量步进脉冲 (符号反转对齐实际舵机方向)
-                self.serial_thread.send_command(f"<{simulated_error},0,0>\n")
-                time.sleep(0.04)  # 留给 STM32 2个周期(50Hz)完成增量计算
-                # 2. 发送 0 误差清空历史状态，防止卡死与看门狗反向猛拉
-                self.serial_thread.send_command("<0,0,0>\n")
-                self.status_update_signal.emit(f"手动移动 X ({'右' if degree_step > 0 else '左'})")
-            elif axis == 'y':
-                self.serial_thread.send_command(f"<0,{simulated_error},0>\n")
-                time.sleep(0.04)
-                self.serial_thread.send_command("<0,0,0>\n")
-                self.status_update_signal.emit(f"手动移动 Y ({'上' if degree_step > 0 else '下'})")
+    def sync_position(self) -> bool:
+        """Physically center the legacy servos and reset the virtual aim origin."""
+        if not self._is_serial_connected():
+            self.status_update_signal.emit("⚠️ 串口未连接，无法执行归中")
+            return False
 
-        threading.Thread(target=_send_pulse, daemon=True).start()
+        with self._motion_lock:
+            self.current_error_x = 0
+            self.current_error_y = 0
+            self.error_processor.reset()
+            self.manual_motion_active = False
+            self.serial_thread.send_center_command()
+            self.servo_x = float(ControlConfig.SERVO_CENTER)
+            self.servo_y = float(ControlConfig.SERVO_CENTER)
+            target = self.manual_aim.reset_target()
 
-    def sync_position(self) -> None:
-        """
-        重置软件坐标估算为中位（90度）
-
-        用于校准或在失步后重新同步。
-        """
-        self.servo_x = float(ControlConfig.SERVO_CENTER)
-        self.servo_y = float(ControlConfig.SERVO_CENTER)
-        self.error_processor.reset()
+        self.manual_target_update_signal.emit(*target)
         self.position_update_signal.emit(self.servo_x, self.servo_y)
-        self.status_update_signal.emit("位置已重置为中位 (90, 90)")
-    def _normalize_error(self, err_x: int, err_y: int) -> Tuple[int, int]:
-        """将不同分辨率下的误差像素归一化到 640 宽度的基准空间"""
+        self.status_update_signal.emit("云台已发送归中命令 (90, 90)")
+        return True
+
+    def _normalize_error(self, err_x: int, err_y: int) -> tuple[int, int]:
+        """Normalize X and Y independently to the 640x480 reference frame."""
         from config.vision_config import VisionConfig
+
         actual_w = VisionConfig.FRAME_WIDTH
-        if actual_w <= 0:
+        actual_h = VisionConfig.FRAME_HEIGHT
+        if actual_w <= 0 or actual_h <= 0:
             return err_x, err_y
-        
-        # 计算缩放比 (例如 1920 -> 640, scale = 0.333)
-        # 确保 10% 屏宽的误差在任何分辨率下都对应相同的数值
-        scale = 640.0 / actual_w
-        return int(err_x * scale), int(err_y * scale)
+
+        scale_x = 640.0 / actual_w
+        scale_y = 480.0 / actual_h
+        return int(err_x * scale_x), int(err_y * scale_y)
 
 # --------------------------------------------------
 # 辅助函数（避免循环导入，延迟读取 VisionConfig）

@@ -19,6 +19,15 @@ class ControlConfig:
     KD: float = 0.5    # 微分系数 (与STM32上电安全值同步)
     DEADZONE: int = 5  # 拦截死区（像素），在此死区内强制认定为误差0
 
+    # FPS 风格鼠标手动瞄准
+    MOUSE_SENSITIVITY: float = 0.08      # 每个鼠标计数对应的虚拟角度（度）
+    MOUSE_ERROR_PER_DEGREE: float = 50.0 # 旧舵机协议的角度增量→模拟误差转换
+    MOUSE_MAX_ERROR: int = 120           # 单个控制周期的最大模拟误差
+    MOUSE_YAW_MIN: float = -80.0
+    MOUSE_YAW_MAX: float = 80.0
+    MOUSE_PITCH_MIN: float = -45.0
+    MOUSE_PITCH_MAX: float = 45.0
+
     # ==========================================
     # 安全限制 (Safety Limits)
     # ==========================================

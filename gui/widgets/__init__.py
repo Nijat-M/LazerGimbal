@@ -11,6 +11,7 @@ from .serial_panel import SerialPanel
 from .mode_panel import ModePanel
 from .pid_tuner import PIDTuner
 from .control_panel import ControlPanel
+from .mouse_control_panel import MouseControlPanel
 
 __all__ = [
     'CameraView',
@@ -18,5 +19,6 @@ __all__ = [
     'SerialPanel',
     'ModePanel',
     'PIDTuner',
-    'ControlPanel'
+    'ControlPanel',
+    'MouseControlPanel',
 ]
