@@ -61,7 +61,7 @@ class MainWindow(QMainWindow):
     """
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LaserGimbal - 激光云台 v0.3.5")
+        self.setWindowTitle("LaserGimbal - 激光云台 v0.3.7")
         self.resize(1000, 700)
 
         # [核心线程和控制器]

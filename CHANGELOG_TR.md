@@ -4,7 +4,11 @@
   🇬🇧 <a href="CHANGELOG.md">English</a> | 🇹🇷 <a href="CHANGELOG_TR.md">Türkçe</a>
 </div>
 
-Laser Gimbal Pro projesinde yapılan tüm kayda değer değişiklikler bu dosyada belgelenecektir.
+### [v0.3.7] - 2026-08-09
+- **Arayüz ve Kontrol Yenilemesi (GUI & Control Refactor)**: PyQt6 arayüz bileşenleri (Kamera görünümü, Kamera paneli, Seri panel) geliştirilmiş durum göstergeleri ve sinyal yapılarıyla güncellendi.
+- **Gimbal Kontrolcüsü Stabilitesi**: İş parçacığı (thread) döngüsü performansı artırıldı, güvenlik (watchdog) mekanizmaları ve telemetri işleme optimize edildi.
+- **Yapay Zeka Modeli ve Günlükleme**: YOLO26 desteğinin yanında varsayılan YOLOv8 model ağırlıkları (`yolov8n.pt`) entegre edildi, iş parçacıkları genelinde standart günlükleme (logging) sağlandı.
+- **Otomatik Başlatıcı**: Otomatik ortam kurulumu ve bağımlılık başlatması için `run_app.bat` betiği eklendi.
 
 ### [v0.3.6] - 2026-03-19
 - **YOLO26 Takip Motoru (Tracking Engine)**: Bilgisayarlı görü mimarisi YOLOv8'den son teknoloji NMS-Free (Non-Maximum Suppression içermeyen) YOLO26 `yolo26n.pt` modeline yükseltildi. Sınırlayıcı kutu (bounding-box) titremeleri ve algılama gecikmeleri önemli ölçüde azaltıldı.

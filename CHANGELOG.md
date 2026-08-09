@@ -4,7 +4,11 @@
   🇬🇧 <a href="CHANGELOG.md">English</a> | 🇹🇷 <a href="CHANGELOG_TR.md">Türkçe</a>
 </div>
 
-All notable changes to the Laser Gimbal Pro project will be documented in this file.
+### [v0.3.7] - 2026-08-09
+- **GUI & Control Refactor**: Updated PyQt6 interface components (Camera view, Camera panel, Serial panel) with improved stats display and control signals.
+- **Gimbal Controller Stability**: Enhanced thread loop performance, refined watchdog mechanisms, and optimized telemetry handling.
+- **Vision Model & Logging**: Integrated default YOLOv8 model weights (`yolov8n.pt`) alongside YOLO26 support, and standardized logging across vision worker threads.
+- **Automated Launcher**: Added `run_app.bat` script for automated environment setup and dependency initialization.
 
 ### [v0.3.6] - 2026-03-19
 - **YOLO26 Tracking Engine**: Upgraded computer vision architecture from YOLOv8 to the cutting-edge NMS-Free YOLO26 `yolo26n.pt` model, substantially reducing bounding-box jitter and latency.
