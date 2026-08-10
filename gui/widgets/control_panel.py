@@ -57,3 +57,7 @@ class ControlPanel(QWidget):
             )
         
         self.control_toggled.emit(checked)
+
+    def set_control_enabled(self, enabled: bool) -> None:
+        """Synchronize the toggle button with an externally selected mode."""
+        self.btn_control.setChecked(enabled)

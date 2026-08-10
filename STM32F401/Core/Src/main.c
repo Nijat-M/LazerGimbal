@@ -39,7 +39,8 @@
 typedef enum {
     STATE_IDLE,
     STATE_RECEIVING_POS,
-    STATE_RECEIVING_TUNING
+    STATE_RECEIVING_TUNING,
+    STATE_RECEIVING_COMMAND
 } RxState;
 /* USER CODE END PTD */
 
@@ -81,6 +82,7 @@ volatile float servo_y_pulse = 1500.0f;
 volatile uint8_t current_fire = 0;
 volatile uint8_t vision_timeout_counter = 0; 
 volatile uint8_t new_data_flag = 0;   // 核心改进：防瞎积分的数据锁
+volatile uint32_t control_epoch = 0;  // STOP 后使正在计算的旧控制量失效
 
 // 串口变量
 volatile RxState rx_state = STATE_IDLE;
@@ -93,12 +95,36 @@ volatile uint8_t rx_index = 0;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-
+static void StopMotion(void);
+static void CenterServos(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static void StopMotion(void)
+{
+    control_epoch++;
+    current_error_x = 0;
+    current_error_y = 0;
+    prev_error_x = 0;
+    prev_error_y = 0;
+    prev_prev_error_x = 0;
+    prev_prev_error_y = 0;
+    integral_x = 0.0f;
+    integral_y = 0.0f;
+    new_data_flag = 0;
+    current_fire = 0;
+    vision_timeout_counter = 0;
+}
 
+static void CenterServos(void)
+{
+    StopMotion();
+    servo_x_pulse = 1500.0f;
+    servo_y_pulse = 1500.0f;
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 1500);
+    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 1500);
+}
 /* USER CODE END 0 */
 
 /**
@@ -160,10 +186,7 @@ int main(void)
         if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2) == GPIO_PIN_RESET)
         {
              // 归位 (Center)
-             servo_x_pulse = 1500;
-             servo_y_pulse = 1500;
-             __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 1500);
-             __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 1500);
+             CenterServos();
              
              // 简单的 LED 闪烁提示
              HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET); // On
@@ -246,15 +269,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
           vision_timeout_counter++;
       } else {
           // 超过100个Tick(即2秒)没有收到Python下发指令，认为目标丢失/程序崩溃。
-          current_error_x = 0;
-          current_error_y = 0;
-          
-          // ⚠️极限环境修复：必须同步清空历史状态！
-          // 否则假设上一帧误差还是 50，这里突降为 0，这会导致 P项 `Kp*(0 - 50)` 输出巨大负向猛拉，云台会剧烈抖动。
-          prev_error_x = 0; prev_prev_error_x = 0;
-          prev_error_y = 0; prev_prev_error_y = 0;
-          
-          new_data_flag = 0; // 停机
+          StopMotion();
       }
 
       // ==========================================================
@@ -267,6 +282,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
       }
       // 确认有新指令，下发计算通行证
       new_data_flag = 0;
+      uint32_t command_epoch = control_epoch;
 
       // ==========================================================
       // [3] 增量式 PID 姿态解算 (Incremental PID Core)
@@ -312,19 +328,26 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
       // ==========================================================
       // [5] 执行积分叠加并物理限位 (Execution & Hard-Limits)
       // ==========================================================
-      // 将本周期的计算增量，叠加在当下的真实物理 PWM 脉宽上。
-      servo_x_pulse += delta_x;
-      servo_y_pulse += delta_y;
+      // STOP 可抢占 PID 计算。最终提交时短暂关闭中断，保证 STOP
+      // 不会在已经解析完成后又被本周期的旧增量覆盖。
+      uint32_t primask = __get_PRIMASK();
+      __disable_irq();
+      if (command_epoch == control_epoch) {
+          servo_x_pulse += delta_x;
+          servo_y_pulse += delta_y;
 
-      // 绝对死限位，防止撞死壳体 (500~2500 为典型180度舵机安全值)
-      if(servo_x_pulse > SERVO_MAX_PULSE) servo_x_pulse = SERVO_MAX_PULSE;
-      if(servo_x_pulse < SERVO_MIN_PULSE) servo_x_pulse = SERVO_MIN_PULSE;
-      if(servo_y_pulse > SERVO_MAX_PULSE) servo_y_pulse = SERVO_MAX_PULSE;
-      if(servo_y_pulse < SERVO_MIN_PULSE) servo_y_pulse = SERVO_MIN_PULSE;
+          // 绝对死限位，防止撞死壳体
+          if(servo_x_pulse > SERVO_MAX_PULSE) servo_x_pulse = SERVO_MAX_PULSE;
+          if(servo_x_pulse < SERVO_MIN_PULSE) servo_x_pulse = SERVO_MIN_PULSE;
+          if(servo_y_pulse > SERVO_MAX_PULSE) servo_y_pulse = SERVO_MAX_PULSE;
+          if(servo_y_pulse < SERVO_MIN_PULSE) servo_y_pulse = SERVO_MIN_PULSE;
 
-      // 写出到底层寄存器
-      __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, (uint32_t)servo_x_pulse);
-      __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, (uint32_t)servo_y_pulse);
+          __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, (uint32_t)servo_x_pulse);
+          __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, (uint32_t)servo_y_pulse);
+      }
+      if (!primask) {
+          __enable_irq();
+      }
   }
 }
 
@@ -332,7 +355,12 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   if(huart->Instance == USART1)
   {
-    if (rx_state == STATE_IDLE)
+    // STOP 帧可从任何不完整协议状态抢占并重新同步解析器。
+    if (rx_byte == '!') {
+        rx_state = STATE_RECEIVING_COMMAND;
+        rx_index = 0;
+    }
+    else if (rx_state == STATE_IDLE)
     {
         if (rx_byte == '<') {
             rx_state = STATE_RECEIVING_POS;
@@ -398,6 +426,24 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             } else {
                 rx_state = STATE_IDLE; // overflow
             }
+        }
+    }
+    else if (rx_state == STATE_RECEIVING_COMMAND)
+    {
+        if (rx_byte == '\n' || rx_byte == '\r') {
+            rx_buffer[rx_index] = '\0';
+            if (strcmp((char*)rx_buffer, "STOP") == 0) {
+                StopMotion();
+            } else if (strcmp((char*)rx_buffer, "CENTER") == 0) {
+                CenterServos();
+            }
+            rx_state = STATE_IDLE;
+            rx_index = 0;
+        } else if (rx_index < RX_BUFFER_SIZE - 1) {
+            rx_buffer[rx_index++] = rx_byte;
+        } else {
+            rx_state = STATE_IDLE;
+            rx_index = 0;
         }
     }
 

@@ -17,6 +17,7 @@
 
 import os
 import sys
+import threading
 
 # 抑制 OpenCV 警告
 os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
@@ -55,6 +56,7 @@ class VisionWorker(QThread):
     control_signal = pyqtSignal(int, int)   # 误差信号 (TRACKING 模式)
     target_pos_signal = pyqtSignal(int, int)  # 原始坐标 (BLUE_TRACKING 模式)
     stats_signal = pyqtSignal(float, int, int) # (fps, width, height)
+    camera_state_signal = pyqtSignal(int, bool, str) # (request generation, ready, message)
 
     def __init__(self):
         super().__init__()
@@ -83,7 +85,10 @@ class VisionWorker(QThread):
         self.current_fps = 0
 
         # 线程安全标志，用于异步打开摄像头
+        self._camera_request_lock = threading.Lock()
+        self._camera_request_generation = 0
         self._need_reconnect = False
+        self._need_close = False
         self._pending_id = -1
         self._pending_w = 640
         self._pending_h = 480
@@ -102,105 +107,159 @@ class VisionWorker(QThread):
         logger.info(f"[VISION] 视觉线程模式: {mode}")
 
     def switch_camera(self, camera_id: int, width: int, height: int) -> None:
-        """异步请求切换摄像头"""
-        self._pending_id = camera_id
-        self._pending_w = width
-        self._pending_h = height
-        self._need_reconnect = True
-        self.camera_ready = False  # 暂时停止处理逻辑
+        """Queue a generation-tagged camera-open request for the worker thread."""
+        with self._camera_request_lock:
+            self._camera_request_generation += 1
+            generation = self._camera_request_generation
+            self._pending_id = camera_id
+            self._pending_w = width
+            self._pending_h = height
+            self._need_reconnect = True
+            self._need_close = False
+        self.camera_ready = False
+        self.camera_state_signal.emit(generation, False, "正在打开摄像头...")
 
-    def _do_switch_camera(self) -> None:
-        """在后台线程中实际执行打开操作"""
-        camera_id = self._pending_id
-        width = self._pending_w
-        height = self._pending_h
-        
+    def close_camera(self) -> None:
+        """Request closure; only the vision thread may touch VideoCapture."""
+        logger.info("[VISION] 正在关闭摄像头...")
+        with self._camera_request_lock:
+            self._camera_request_generation += 1
+            generation = self._camera_request_generation
+            self._need_close = True
+            self._need_reconnect = False
+        self.camera_ready = False
+        self.camera_state_signal.emit(generation, False, "摄像头已关闭")
+
+    def stop(self, timeout_ms: int = 5000) -> bool:
+        """Request worker-owned cleanup and report whether the thread exited."""
+        with self._camera_request_lock:
+            self._camera_request_generation += 1
+            generation = self._camera_request_generation
+            self._need_close = True
+            self._need_reconnect = False
+        self.is_running = False
+        self.camera_state_signal.emit(generation, False, "视觉线程已停止")
+        self.quit()
+        if not self.isRunning():
+            return True
+        return self.wait(timeout_ms)
+
+    def _take_camera_request(self):
+        with self._camera_request_lock:
+            generation = self._camera_request_generation
+            if self._need_close:
+                self._need_close = False
+                return ("close", generation, -1, 0, 0)
+            if self._need_reconnect:
+                self._need_reconnect = False
+                return (
+                    "open",
+                    generation,
+                    self._pending_id,
+                    self._pending_w,
+                    self._pending_h,
+                )
+        return None
+
+    def _is_camera_request_current(self, generation: int) -> bool:
+        with self._camera_request_lock:
+            return self.is_running and generation == self._camera_request_generation
+
+    def _do_switch_camera(
+        self, generation: int, camera_id: int, width: int, height: int
+    ) -> None:
+        """Open and warm a candidate camera before atomically publishing it."""
         logger.info(f"[VISION] 正在后台打开摄像头: ID={camera_id}, {width}x{height}")
+        self._close_camera_in_worker(emit_frame=False)
 
-        if self.cap is not None and self.cap.isOpened():
-            self.cap.release()
-            self.cap = None
-            time.sleep(0.3)
-
-        self.cap = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
-        if not self.cap.isOpened():
+        candidate = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
+        if not candidate.isOpened():
+            candidate.release()
             logger.info("[VISION] DSHOW后端失败，尝试默认后端...")
-            self.cap = cv2.VideoCapture(camera_id)
+            candidate = cv2.VideoCapture(camera_id)
 
-        if not self.cap.isOpened():
-            logger.error(f"[VISION ERROR] 无法打开摄像头 ID={camera_id}")
-            self.camera_ready = False
+        if not candidate.isOpened():
+            message = f"无法打开摄像头 ID={camera_id}"
+            logger.error(f"[VISION ERROR] {message}")
+            candidate.release()
+            if self._is_camera_request_current(generation):
+                self.camera_state_signal.emit(generation, False, message)
             return
 
-        if self.cap.isOpened():
-            # [核心逻辑] 先设分辨率 -> 强制设 MJPG -> 再次确认分辨率
-            # 这种“补刀”式设置能防止驱动自动重置回慢速模式。
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            
-            # 强制开启 MJPG
-            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
-            
-            # [确认]
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            self.cap.set(cv2.CAP_PROP_FPS, 60)
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        candidate.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        candidate.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        candidate.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        candidate.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        candidate.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        candidate.set(cv2.CAP_PROP_FPS, 60)
+        candidate.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-        # 暖机时间延长，让驱动有足够时间匹配模式
-        time.sleep(1.0) 
+        valid_warmup_frames = 0
         for _ in range(15):
-            self.cap.read() 
+            if not self._is_camera_request_current(generation):
+                candidate.release()
+                return
+            ret, frame = candidate.read()
+            if ret and frame is not None:
+                valid_warmup_frames += 1
 
-        actual_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        actual_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        actual_fps = int(self.cap.get(cv2.CAP_PROP_FPS))
-        actual_fourcc = int(self.cap.get(cv2.CAP_PROP_FOURCC))
-        
-        # 解码 FourCC 编码
-        f_str = "".join([chr((actual_fourcc >> 8 * i) & 0xFF) for i in range(4)]) if actual_fourcc > 0 else "DEFAULT"
+        if valid_warmup_frames == 0:
+            message = f"摄像头 ID={camera_id} 未返回有效画面"
+            logger.error(f"[VISION ERROR] {message}")
+            candidate.release()
+            if self._is_camera_request_current(generation):
+                self.camera_state_signal.emit(generation, False, message)
+            return
 
+        actual_w = int(candidate.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_h = int(candidate.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        actual_fps = int(candidate.get(cv2.CAP_PROP_FPS))
+        actual_fourcc = int(candidate.get(cv2.CAP_PROP_FOURCC))
+        f_str = (
+            "".join(chr((actual_fourcc >> 8 * i) & 0xFF) for i in range(4))
+            if actual_fourcc > 0
+            else "DEFAULT"
+        )
+
+        if not self._is_camera_request_current(generation):
+            candidate.release()
+            return
+
+        self.cap = candidate
         self.frame_width = actual_w
         self.frame_height = actual_h
-
-        logger.info(f"[VISION] 优化模式就绪: {actual_w}x{actual_h} @ {actual_fps}fps, 编码: {f_str}")
-
-        self.frame_width = actual_w
-        self.frame_height = actual_h
-
-        logger.info(f"[VISION] 硬件实际反馈: {actual_w}x{actual_h} @ {actual_fps}fps, 编码: {f_str}")
-
-        # 动态更新全局配置
         VisionConfig.FRAME_WIDTH = actual_w
         VisionConfig.FRAME_HEIGHT = actual_h
         VisionConfig.CENTER_X = actual_w // 2
         VisionConfig.CENTER_Y = actual_h // 2
 
-        logger.info(f"[VISION] ✓ 摄像头就绪: {actual_w}x{actual_h} @ {actual_fps}fps")
-
+        logger.info(
+            f"[VISION] ✓ 摄像头就绪: {actual_w}x{actual_h} "
+            f"@ {actual_fps}fps, 编码: {f_str}"
+        )
         if 0 < actual_fps < VisionConfig.TARGET_FPS:
             logger.warning(f"[VISION] 环境光照可能不足，实际帧率: {actual_fps}")
 
         self.camera_ready = True
+        self.camera_state_signal.emit(
+            generation,
+            True,
+            f"摄像头就绪: {actual_w}x{actual_h} @ {actual_fps}fps",
+        )
 
-    def stop(self) -> None:
-        """停止线程"""
-        self.is_running = False
-        self.quit()
-        self.wait()
-
-    def close_camera(self) -> None:
-        """手动关闭摄像头"""
-        logger.info("[VISION] 正在关闭摄像头...")
+    def _close_camera_in_worker(self, emit_frame: bool = True) -> None:
         self.camera_ready = False
-        if self.cap is not None and self.cap.isOpened():
+        if self.cap is not None:
             self.cap.release()
             self.cap = None
-        
-        # 发送一张黑屏蒙版告知UI已关闭
-        black_frame = QImage(self.frame_width, self.frame_height, QImage.Format.Format_RGB888)
-        black_frame.fill(0)
-        self.frame_signal.emit(black_frame)
+        if emit_frame:
+            black_frame = QImage(
+                self.frame_width,
+                self.frame_height,
+                QImage.Format.Format_RGB888,
+            )
+            black_frame.fill(0)
+            self.frame_signal.emit(black_frame)
         logger.info("[VISION] 摄像头已关闭")
 
     # --------------------------------------------------
@@ -213,10 +272,15 @@ class VisionWorker(QThread):
         error_count = 0
 
         while self.is_running:
-            # 检查是否需要（重）连摄像头 -> 异步操作防止UI卡死
-            if self._need_reconnect:
-                self._do_switch_camera()
-                self._need_reconnect = False
+            request = self._take_camera_request()
+            if request is not None:
+                action, generation, camera_id, width, height = request
+                if action == "close":
+                    self._close_camera_in_worker()
+                else:
+                    self._do_switch_camera(
+                        generation, camera_id, width, height
+                    )
                 continue
 
             if not self.camera_ready or self.cap is None or not self.cap.isOpened():
@@ -229,6 +293,13 @@ class VisionWorker(QThread):
                 error_count += 1
                 if error_count <= 5:
                     logger.error(f"[VISION ERROR] 读取帧失败 ({error_count}/5)")
+                    if error_count == 5:
+                        self.camera_ready = False
+                        with self._camera_request_lock:
+                            generation = self._camera_request_generation
+                        self.camera_state_signal.emit(
+                            generation, False, "摄像头画面中断"
+                        )
                 elif error_count == 100:
                     logger.error("[VISION ERROR] 持续读取失败，请检查摄像头连接")
                     error_count = 0
@@ -266,8 +337,7 @@ class VisionWorker(QThread):
             # 通过依赖 OpenCV 底层帧数阻塞，这解决了画面延迟和操作响应慢的根本问题。
 
         logger.info("[VISION] 线程退出，释放摄像头")
-        if self.cap is not None:
-            self.cap.release()
+        self._close_camera_in_worker(emit_frame=False)
 
     # --------------------------------------------------
     # 处理逻辑（纯视觉，不含任何控制决策）

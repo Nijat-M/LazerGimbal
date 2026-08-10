@@ -1,138 +1,176 @@
 # -*- coding: utf-8 -*-
-import sys
-import time
-import serial
+"""Asynchronous serial transport with priority stop and latest-wins motion."""
+
 import queue
+import sys
+import threading
+import time
+
+import serial
 from PyQt6.QtCore import QThread, pyqtSignal
 
-# 尝试导入 Config
 try:
     from config import cfg
 except ImportError:
     sys.path.append("..")
     from config import cfg
 from utils.logger import Logger
+
 logger = Logger("SerialThread")
 
 
 class SerialThread(QThread):
-    """
-    串口通信线程 (Serial Communication Thread)
-    
-    [原理 Principle]
-    GUI 界面运行在主线程 (Main Thread)。如果在主线程中直接进行串口读写 (特别是读取)，
-    可能会因为等待数据而阻塞 (Block) 界面，导致界面“假死”。
-    
-    解决方案: 使用 QThread 创建一个子线程，专门负责串口 I/O。
-    子线程与主线程之间通过 信号(Signal) 和 槽(Slot) 机制进行安全通信。
-    """
-    
-    # [信号定义 Signals]
-    # 用于向主线程发送通知，这是线程安全的通信方式。
-    connection_state_signal = pyqtSignal(bool, str)  # 连接状态变更 (成功/失败, 消息)
-    data_received_signal = pyqtSignal(str)           # 收到串口数据
+    connection_state_signal = pyqtSignal(bool, str)
+    data_received_signal = pyqtSignal(str)
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.serial_port = None
         self.is_running = True
-        
-        # [线程安全队列 Thread-Safe Queue]
-        # 主线程调用 send_command 时，只是把指令放入队列。
-        # 子线程在 run() 循环中取出指令发送。
-        # 这就是 "生产者-消费者" (Producer-Consumer) 模式。
         self.write_queue = queue.Queue()
+        self.urgent_queue = queue.Queue()
+        self._latest_lock = threading.Lock()
+        self._latest_realtime_command = None
+        self._read_buffer = ""
 
     def connect_serial(self, port_name, baud_rate):
-        """
-        连接串口
-        """
         try:
             if self.serial_port and self.serial_port.is_open:
                 self.serial_port.close()
 
-            # 初始化 PySerial 对象
             self.serial_port = serial.Serial(
                 port=port_name,
                 baudrate=baud_rate,
-                timeout=cfg.TIMEOUT
+                timeout=cfg.TIMEOUT,
+                write_timeout=0.2,
             )
-            
+
             if self.serial_port.is_open:
                 msg = f"已连接至 {port_name}"
                 logger.info(f"[SERIAL] {msg}")
                 self.connection_state_signal.emit(True, msg)
                 return True
-        except serial.SerialException as e:
-            error_msg = f"连接失败: {str(e)}"
+        except serial.SerialException as exc:
+            error_msg = f"连接失败: {exc}"
             logger.error(f"[SERIAL ERROR] {error_msg}")
             self.connection_state_signal.emit(False, error_msg)
-            return False
         return False
 
-    def disconnect_serial(self):
-        """
-        断开串口
-        """
+    def disconnect_serial(self) -> None:
+        self.clear_pending_commands()
         if self.serial_port and self.serial_port.is_open:
             self.serial_port.close()
             self.connection_state_signal.emit(False, "串口已断开")
 
-    def send_command(self, command: str):
-        """
-        发送指令 (生产者)
-        将指令放入队列，立即返回，不阻塞 GUI。
-        """
-        if not command.endswith('\n'):
-            command += '\n'
-        self.write_queue.put(command)
+    def is_connected(self) -> bool:
+        return bool(self.serial_port and self.serial_port.is_open)
 
-    def run(self):
-        """
-        线程主循环 (消费者)
-        不断检查:
-        1. 发送队列是否有新指令? -> 发送
-        2. 串口是否有新数据? -> 接收
-        """
+    def send_command(self, command: str) -> None:
+        """Queue a discrete command such as tuning or configuration."""
+        self.write_queue.put(self._normalize_command(command))
+
+    def send_realtime_command(self, command: str) -> None:
+        """Replace any unsent motion command with the newest command."""
+        with self._latest_lock:
+            self._latest_realtime_command = self._normalize_command(command)
+
+    def send_stop_command(self) -> None:
+        """Discard unsent motion and prioritize an explicit firmware STOP."""
+        self._send_urgent_motion_command("!STOP\n")
+
+    def send_center_command(self) -> None:
+        """Discard unsent motion and physically center both legacy servos."""
+        self._send_urgent_motion_command("!CENTER\n")
+
+    def _send_urgent_motion_command(self, command: str) -> None:
+        with self._latest_lock:
+            self._latest_realtime_command = None
+        self._clear_queue(self.urgent_queue)
+        self.urgent_queue.put(command)
+
+    def clear_pending_commands(self) -> None:
+        with self._latest_lock:
+            self._latest_realtime_command = None
+        self._clear_queue(self.urgent_queue)
+        self._clear_queue(self.write_queue)
+
+    def run(self) -> None:
         while self.is_running:
-            if self.serial_port and self.serial_port.is_open:
-                try:
-                    # 1. 处理发送队列 (Sending)
-                    while not self.write_queue.empty():
-                        cmd = self.write_queue.get_nowait()
-                        self.serial_port.write(cmd.encode('utf-8'))
-
-                    # 2. 处理接收数据 (Receiving) 
-                    # 避免在没有数据时 readline 阻塞太久而耽误发送队列
-                    if self.serial_port.in_waiting > 0:
-                        data = self.serial_port.readline().decode('utf-8', errors='ignore').strip()
-                        if data:
-                            logger.info(f"[SERIAL RX] '{data}'")
-                            self.data_received_signal.emit(data)
-                    else:
-                        # 没有数据接收时，极短地休眠一下让出CPU，避免100%占用
-                        time.sleep(0.002)
-                
-                except (serial.SerialException, OSError) as e:
-                    # 捕获物理断开或权限异常
-                    error_msg = f"检测到物理断开或硬件异常: {e}"
-                    logger.error(f"[SERIAL ERROR] {error_msg}")
-                    # 在本线程内关闭并通知 UI
-                    self.serial_port.close()
-                    self.connection_state_signal.emit(False, error_msg)
-                    # 清空队列防止积压
-                    while not self.write_queue.empty():
-                        try: self.write_queue.get_nowait()
-                        except: pass
-                
-                except Exception as e:
-                    logger.error(f"[SERIAL UNKNOWN ERROR] {e}")
-
-            else:
-                # 避免没连接串口时 CPU 占用过高 (Yield CPU)
+            if not self.is_connected():
                 time.sleep(0.05)
+                continue
 
-    def stop(self):
-        """ 停止线程 """
+            try:
+                self._drain_queue(self.urgent_queue)
+                self._drain_queue(self.write_queue, limit=8)
+
+                with self._latest_lock:
+                    realtime_command = self._latest_realtime_command
+                    self._latest_realtime_command = None
+                if realtime_command is not None:
+                    self._write(realtime_command)
+
+                port = self.serial_port
+                if port is None:
+                    continue
+                waiting = port.in_waiting
+                if waiting > 0:
+                    chunk = port.read(waiting).decode(
+                        "utf-8", errors="ignore"
+                    )
+                    self._handle_received_chunk(chunk)
+                else:
+                    time.sleep(0.002)
+
+            except (serial.SerialException, OSError) as exc:
+                error_msg = f"检测到物理断开或硬件异常: {exc}"
+                logger.error(f"[SERIAL ERROR] {error_msg}")
+                if self.serial_port:
+                    self.serial_port.close()
+                self.clear_pending_commands()
+                self.connection_state_signal.emit(False, error_msg)
+            except Exception as exc:
+                logger.error(f"[SERIAL UNKNOWN ERROR] {exc}")
+
+    def stop(self) -> None:
         self.is_running = False
-        self.wait()
+        if self.serial_port and self.serial_port.is_open:
+            self.serial_port.close()
+        self.wait(1000)
+
+    def _drain_queue(self, command_queue: queue.Queue, limit=None) -> None:
+        sent = 0
+        while limit is None or sent < limit:
+            try:
+                command = command_queue.get_nowait()
+            except queue.Empty:
+                break
+            self._write(command)
+            sent += 1
+
+    def _write(self, command: str) -> None:
+        port = self.serial_port
+        if port is None or not port.is_open:
+            raise serial.SerialException("Serial port is not connected")
+        port.write(command.encode("utf-8"))
+
+    def _handle_received_chunk(self, chunk: str) -> None:
+        self._read_buffer += chunk.replace("\r", "\n")
+        while "\n" in self._read_buffer:
+            line, self._read_buffer = self._read_buffer.split("\n", 1)
+            line = line.strip()
+            if line:
+                logger.info(f"[SERIAL RX] '{line}'")
+                self.data_received_signal.emit(line)
+
+    @staticmethod
+    def _normalize_command(command: str) -> str:
+        return command if command.endswith("\n") else command + "\n"
+
+    @staticmethod
+    def _clear_queue(command_queue: queue.Queue) -> None:
+        while True:
+            try:
+                command_queue.get_nowait()
+            except queue.Empty:
+                return

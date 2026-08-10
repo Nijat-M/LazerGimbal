@@ -16,11 +16,14 @@
 """
 
 import sys
+import time
+
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QLabel, QMessageBox, QScrollArea
 )
-from PyQt6.QtCore import pyqtSlot, Qt
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QCloseEvent
 
 from utils.logger import Logger
 logger = Logger("GUI")
@@ -36,16 +39,19 @@ try:
     from gui.test_panel import TestModePanel
     from gui.widgets import (
         CameraView, CameraPanel, SerialPanel, ModePanel,
-        PIDTuner, ControlPanel
+        PIDTuner, ControlPanel, MouseControlPanel
     )
 except ImportError:
     sys.path.append("..")
     from config import cfg
     from config.control_config import ControlConfig
+    from core.serial_thread import SerialThread
+    from core.gimbal_controller import GimbalController
+    from vision.vision_worker import VisionWorker
     from gui.test_panel import TestModePanel
     from gui.widgets import (
-        CameraView, CameraPanel, SerialPanel, ModePanel, 
-        PIDTuner, ControlPanel
+        CameraView, CameraPanel, SerialPanel, ModePanel,
+        PIDTuner, ControlPanel, MouseControlPanel
     )
 
 class MainWindow(QMainWindow):
@@ -68,6 +74,7 @@ class MainWindow(QMainWindow):
         self.serial_thread = SerialThread()
         self.vision_thread = VisionWorker()
         self.controller = GimbalController(self.serial_thread)
+        self.camera_request_generation = -1
 
         # [初始化]
         self.init_ui()
@@ -160,6 +167,13 @@ class MainWindow(QMainWindow):
         self.test_panel.setMaximumHeight(150)  # 限制最大高度
         right_layout.addWidget(self.test_panel)
 
+        # 7. 鼠标手动瞄准面板（默认隐藏）
+        self.mouse_control_panel = MouseControlPanel(
+            initial_sensitivity=ControlConfig.MOUSE_SENSITIVITY
+        )
+        self.mouse_control_panel.setVisible(False)
+        right_layout.addWidget(self.mouse_control_panel)
+
         # 状态栏
         self.status_label = QLabel("系统就绪")
         self.status_label.setStyleSheet("color: gray; padding: 5px;")
@@ -182,11 +196,27 @@ class MainWindow(QMainWindow):
         self.vision_thread.mask_signal.connect(self.camera_view.update_mask_feed)
         # 实时信息更新
         self.vision_thread.stats_signal.connect(self.camera_panel.update_vision_stats)
+        self.vision_thread.camera_state_signal.connect(self.on_camera_state_changed)
         # 视觉 -> 控制器（两条信号路径）
         # TRACKING 模式：发送两点误差（激光 vs 蓝色目标）
         self.vision_thread.control_signal.connect(self.controller.handle_vision_error)
         # BLUE_TRACKING 模式：发送蓝色目标原始坐标（误差由控制器计算）
         self.vision_thread.target_pos_signal.connect(self.controller.handle_target_position)
+
+        # 实时画面 -> FPS 鼠标瞄准控制器
+        self.camera_view.mouse_delta_signal.connect(self.controller.handle_mouse_delta)
+        self.camera_view.mouse_capture_changed_signal.connect(
+            self.controller.set_mouse_capture_active
+        )
+        self.camera_view.mouse_capture_changed_signal.connect(
+            self.mouse_control_panel.set_capture_state
+        )
+        self.controller.manual_target_update_signal.connect(
+            self.mouse_control_panel.update_target
+        )
+        self.mouse_control_panel.sensitivity_changed.connect(
+            self.controller.update_mouse_sensitivity
+        )
         
         # ===== 串口线程 =====
         self.serial_thread.connection_state_signal.connect(self.on_connection_status_changed)
@@ -228,7 +258,6 @@ class MainWindow(QMainWindow):
         """串口连接切换"""
         if checked:
             logger.info(f"[GUI] 连接串口: {port}")
-            self.controller.sync_position()
             self.serial_thread.connect_serial(port, cfg.BAUD_RATE)
             if not self.serial_thread.isRunning():
                 self.serial_thread.start()
@@ -249,44 +278,70 @@ class MainWindow(QMainWindow):
         if success:
             self.status_label.setStyleSheet("color: #00ff00; padding: 5px;")
         else:
+            self.camera_view.release_mouse_control()
+            self.controller.stop_motion("串口连接丢失，运动已停止")
             self.status_label.setStyleSheet("color: red; padding: 5px;")
             self.serial_panel.set_connection_status(False, message)
     def on_camera_changed(self, camera_id, width, height):
         """摄像头切换"""
         logger.info(f"[GUI] 摄像头切换: ID={camera_id}, Resolution={width}x{height}")
         self.vision_thread.switch_camera(camera_id, width, height)
-        self.status_label.setText(f"摄像头: Camera {camera_id} @ {width}x{height}")
+        self.status_label.setText(f"正在打开 Camera {camera_id} @ {width}x{height}")
+
+    def on_camera_state_changed(
+        self, generation: int, ready: bool, message: str
+    ) -> None:
+        """Ignore stale camera results and arm mouse input only for live frames."""
+        if generation < self.camera_request_generation:
+            return
+        self.camera_request_generation = generation
+        self.camera_view.set_camera_active(ready)
+        self.controller.set_visual_input_enabled(ready)
+        if not ready:
+            self.control_panel.set_control_enabled(False)
+            self.camera_view.release_mouse_control()
+            self.controller.stop_motion(f"{message}，运动已停止")
+        self.status_label.setText(message)
 
     def on_camera_toggled(self, is_open: bool):
         """摄像头开关触发"""
         if not is_open:
             logger.info("[GUI] 用户触发关闭摄像头")
+            self.camera_view.release_mouse_control()
+            self.controller.stop_motion("摄像头已关闭，运动已停止")
             self.vision_thread.close_camera()
             self.camera_view.show_blank_screen("相机未运行 (Camera Not Running)")
             self.status_label.setText("摄像头已关闭")
         else:
             logger.info("[GUI] 用户触发开启摄像头")
-            self.camera_view.set_camera_active(True)
+            self.camera_view.set_camera_active(False)
             cam_id = self.camera_panel.get_current_camera_id()
             w, h = self.camera_panel.get_selected_resolution()
             self.vision_thread.switch_camera(cam_id, w, h)
     
     def on_mode_changed(self, mode):
-        """模式切换"""
-        print(f"[GUI] 工作模式切换: {mode}")
-        
-        # 更新 UI 可见性
-        self.test_panel.setVisible(mode == "TEST")
-        
-        # 视觉线程：测试模式下不需要视觉处理，设为 IDLE
-        vision_mode = "IDLE" if mode == "TEST" else mode
-        if mode == "TEST":
-            print(f"[GUI] 视觉线程已暂停（TEST 模式下不需要视觉追踪）")
-        else:
-            print(f"[GUI] 视觉线程模式: {vision_mode}")
-        
+        """Switch modes while keeping automatic and manual motion exclusive."""
+        logger.info(f"[GUI] 工作模式切换: {mode}")
+
+        is_test = mode == "TEST"
+        is_mouse = mode == "MANUAL_MOUSE"
+        self.test_panel.setVisible(is_test)
+        self.mouse_control_panel.setVisible(is_mouse)
+
+        # Every mode transition first disarms the previous motion source.
+        self.camera_view.release_mouse_control()
+        self.control_panel.set_control_enabled(False)
+        self.controller.set_manual_mouse_mode(is_mouse)
+        self.camera_view.set_mouse_control_enabled(is_mouse)
+
+        # Manual modes still display live video but do not run target detection.
+        vision_mode = "IDLE" if mode in ("TEST", "MANUAL_MOUSE") else mode
         self.vision_thread.set_mode(vision_mode)
-        self.status_label.setText(f"模式: {mode}")
+        self.status_label.setText(
+            "鼠标瞄准：点击实时画面开始，Esc 停止"
+            if is_mouse
+            else f"模式: {mode}"
+        )
     
     def on_pid_changed(self, kp, ki, kd):
         """PID 参数改变"""
@@ -324,15 +379,18 @@ class MainWindow(QMainWindow):
     
     def on_control_toggled(self, checked):
         """控制开关"""
-        self.controller.set_control_enabled(checked)
+        accepted = self.controller.set_control_enabled(checked)
+        if checked and not accepted:
+            self.control_panel.set_control_enabled(False)
     
     def on_reset_position(self):
         """重置位置"""
-        self.controller.sync_position()
+        if not self.controller.sync_position():
+            return
         QMessageBox.information(
             self, 
             "重置完成", 
-            "软件坐标已重置为中位 (90°, 90°)"
+            "已向 STM32 发送物理归中命令 (90°, 90°)"
         )
     
     def on_manual_move(self, axis, direction):
@@ -350,20 +408,30 @@ class MainWindow(QMainWindow):
             x, y = args
             self.status_label.setText(f"Servo: X={x:.1f}°, Y={y:.1f}°")
 
-    def closeEvent(self, event):
-        """关闭窗口时清理资源"""
-        print("[GUI] 关闭窗口，停止线程...")
-        
-        # 通知线程停止
-        if hasattr(self, 'vision_thread') and self.vision_thread.isRunning():
-            self.vision_thread.is_running = False
-            # 给出最多 1000 毫秒的时间，避免死等 OpenCV 释放导致未响应卡死
-            self.vision_thread.wait(1000)
-        
-        if hasattr(self, 'serial_thread') and self.serial_thread.isRunning():
-            self.serial_thread.is_running = False
-            self.serial_thread.wait(1000)
+    def closeEvent(self, a0: QCloseEvent | None) -> None:
+        """Release input, stop motion, and terminate background workers."""
+        logger.info("[GUI] 关闭窗口，停止线程...")
+        self.camera_view.release_mouse_control()
+        self.controller.stop()
 
-        
-        event.accept()
+        if self.serial_thread.isRunning():
+            # Give the priority STOP a short opportunity to leave the queue.
+            time.sleep(0.03)
+            self.serial_thread.stop()
+        else:
+            self.serial_thread.disconnect_serial()
+
+        if self.vision_thread.isRunning() and not self.vision_thread.stop(5000):
+            logger.error("[GUI] 视觉线程未能在 5 秒内退出，取消窗口销毁")
+            QMessageBox.warning(
+                self,
+                "关闭尚未完成",
+                "摄像头线程仍在释放资源，窗口暂时不会销毁。请稍后重试。",
+            )
+            if a0 is not None:
+                a0.ignore()
+            return
+
+        if a0 is not None:
+            a0.accept()
 
