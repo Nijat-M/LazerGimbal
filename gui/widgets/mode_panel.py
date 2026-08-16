@@ -42,7 +42,7 @@ class ModePanel(QGroupBox):
         # 设置提示文本
         self.rb_tracking.setToolTip("红色激光追踪蓝色物体")
         self.rb_blue_tracking.setToolTip("让蓝色物体居中在画面中央")
-        self.rb_yolo_tracking.setToolTip("使用 YOLOv8 使得人体居中在画面中央")
+        self.rb_yolo_tracking.setToolTip("使用 YOLO26 端到端深度学习模型使得人体居中在画面中央")
         self.rb_mouse_manual.setToolTip("点击实时画面捕获鼠标，像 FPS 游戏一样手动瞄准")
         
         self.mode_group.addButton(self.rb_idle, 0)
@@ -101,6 +101,19 @@ class ModePanel(QGroupBox):
         # 发射信号
         self.mode_changed.emit(mode)
     
+    def get_current_mode(self) -> str:
+        """获取当前选中的模式字符串"""
+        btn_id = self.mode_group.checkedId()
+        mode_map = {
+            0: "IDLE",
+            1: "TRACKING",
+            2: "BLUE_TRACKING",
+            3: "TEST",
+            4: "YOLO_TRACKING",
+            5: "MANUAL_MOUSE",
+        }
+        return mode_map.get(btn_id, "IDLE")
+
     def set_mode(self, mode: str):
         """通过代码切换当前选中的模式"""
         if mode == "TRACKING":

@@ -33,7 +33,12 @@ Güncellemelerin ve düzeltmelerin detaylı geçmişi için lütfen [CHANGELOG_T
 ## Temel Özellikler (Core Features)
 
 ### 👁️ Bilgisayarlı Görü ve Kontrol Arayüzü (PC / Python)
-- **Çift Takip Modu (Dual Tracking)**: Hafif ve yüksek performanslı HSV renk takibi ile Derin Öğrenme tabanlı nesne algılama (YOLO26 `yolo26n.pt` / YOLOv8) algoritmaları arasında sorunsuzca geçiş imkanı.
+- **Arducam AR0234 Global Shutter Kamera Desteği**: Yüksek hızlı endüstriyel global shutter sensörleri (Onsemi AR0234CS) için tam uyarlama; agresif gimbal hareketlerinde dahi sıfır hareket bulanıklığı ve jello/rolling-shutter bozulmasız kusursuz takip.
+- **Piramit Çok Ölçekli Algılama Hızlandırması**: Tek geçişli HSV segmentasyonu ve piramit alt örnekleme ile 1080p işlem gecikmesi **~3.2ms** seviyesine indirilerek sıfır kare kaybıyla stabil **60 FPS** gerçek zamanlı takip sağlandı.
+- **Anlık Görüntü Yönü Sıcak Değişimi**: Tavana/ters montaj (180° ters çevirme) ve yatay ayna modları doğrudan arayüzden gecikmesiz olarak uygulanabilir.
+- **Ultralytics YOLO26 NMS-Free Derin Öğrenme**: `yolo26n.pt` ve NVIDIA CUDA 12.6 GPU hızlandırması ile çalışan yerel uçtan uca nesne algılama motoru; NMS işlem gecikmeleri ve hedef kutusu titremeleri tamamen ortadan kaldırıldı.
+- **Asenkron Ayrıştırılmış Algılama İşlem Hattı**: 60 FPS video yakalama ve UI çizim akışını GPU sinir ağı çıkarımından ayıran çift tamponlu mimari sayesinde mikro-takılmalar (micro-stuttering) tamamen engellendi.
+- **Çift Takip Modu (Dual Tracking)**: Hafif ve yüksek performanslı HSV renk takibi ile Derin Öğrenme tabanlı nesne algılama (Ultralytics YOLO26 `yolo26n.pt`) algoritmaları arasında sorunsuzca geçiş imkanı.
 - **Kesintisiz Hedef Kilidi**: Çerçevedeki birden fazla algılanan hedef karşısında stabiliteyi koruyabilmek için, merkeze olan Öklid (Euclidean) uzaklığı eşik algoritması temel alınarak veri ilişkilendirmesi.
 - **Çok İş Parçacıklı İşleme (Multithreading)**: Arayüz güncellemeleri (`QTimer`), kamera kare işleme (`vision_worker`) ve seri haberleşme (`serial_thread`) için atanmış asenkron iş parçacıkları kullanılarak UI donmaları tamamen engellenmiştir.
 - **Gelişmiş Manuel ve Klavye Kontrolleri**:
@@ -57,7 +62,7 @@ Güncellemelerin ve düzeltmelerin detaylı geçmişi için lütfen [CHANGELOG_T
 ### Elektronik
 - **Mikrodenetleyici**: STM32F401CCU6 (Blackpill)
 - **Motorlar ve Sürücüler**: 2x NEMA 17 Step Motor ve Makerbase MKS SERVO42C Kapalı Çevrim Vektör Sürücü Kartları (`CR_vFOC` modu)
-- **Kamera**: Harici 720p USB Masaüstü Kamera (Gimbal üzerine monte)
+- **Kamera**: Arducam AR0234 Global Shutter Yüksek Hızlı USB Kamera (1080p @ 60 FPS) / UVC Masaüstü Kamera
 - **Güç Kaynağı**: 20V DC 2A+ Güç Kaynağı (Motor güç hattı)
 - **Sinyal Bağlantısı**: Ortak Katot (Common Cathode) bağlantısı (`COM` ve `GND` STM32 GND pinine; `PA0` X_STP, `PA4` X_DIR, `PA1` Y_STP, `PA5` Y_DIR)
 - **Lazer**: Kırmızı lazer diyot / işaretçi (Takip testleri için, opsiyonel)

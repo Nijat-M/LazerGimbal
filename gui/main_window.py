@@ -224,6 +224,8 @@ class MainWindow(QMainWindow):
         # ===== 摄像头面板 =====
         self.camera_panel.camera_changed.connect(self.on_camera_changed)
         self.camera_panel.camera_toggled.connect(self.on_camera_toggled)
+        self.camera_panel.flip_changed.connect(self.vision_thread.set_flip_mode)
+        self.camera_panel.open_settings_requested.connect(self.vision_thread.open_camera_settings)
         
         # ===== 控制器 =====
         self.controller.status_update_signal.connect(self.update_status)

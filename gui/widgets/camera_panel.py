@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 import cv2
+from config.vision_config import VisionConfig
 
 
 class CameraPanel(QGroupBox):
@@ -27,6 +28,8 @@ class CameraPanel(QGroupBox):
     # 信号：摄像头切换和关闭
     camera_changed = pyqtSignal(int, int, int)  # (camera_id, width, height)
     camera_toggled = pyqtSignal(bool)           # 开启/关闭信号
+    flip_changed = pyqtSignal(str)              # 画面翻转信号 ("NONE", "180", "V", "H")
+    open_settings_requested = pyqtSignal()      # 请求打开 DirectShow 相机硬件属性面板
 
     def __init__(self, default_id=0, parent=None):
         super().__init__("摄像头设置 (Camera Settings)", parent)
@@ -39,44 +42,66 @@ class CameraPanel(QGroupBox):
     def init_ui(self, default_id):
         """初始化UI"""
         layout = QFormLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
         
-        # 摄像头选择下拉框
+        # 1. 摄像头选择下拉框
         self.combo_camera = QComboBox()
         self.combo_camera.setToolTip("选择要使用的摄像头设备")
         
-        # 分辨率选择
+        # 2. 分辨率选择（聚焦于工业级最稳妥的 60 FPS 档位）
         self.combo_resolution = QComboBox()
         self.combo_resolution.addItems([
-            "640x480 (标准-4:3)",
-            "1280x720 (高清-16:9)",
-            "1920x1080 (全高清-高速诱导)"
+            "640x480 (标清推荐 - 60 FPS 极速响应)",
+            "1280x720 (高清平衡 - 60 FPS 视野更宽)",
+            "1920x1080 (全高清 - 60 FPS 细节丰富)"
         ])
         self.combo_resolution.setCurrentIndex(0)  # 默认 640x480
-        self.combo_resolution.setToolTip("1080p 选项可诱导摄像头开启高速 MJPG 模式（即使硬件仅支持 720p）")
+        self.combo_resolution.setToolTip("选择工作分辨率（640x480 延迟最低、PID 闭环响应最快）")
         
-        # 开启/关闭按钮
+        # 3. 画面方向/翻转选择 (即时热切换)
+        self.combo_flip = QComboBox()
+        self.combo_flip.addItem("正常 (Normal)", "NONE")
+        self.combo_flip.addItem("180° 翻转 (倒装安装)", "180")
+        self.combo_flip.addItem("垂直翻转 (Vertical)", "V")
+        self.combo_flip.addItem("水平镜像 (Horizontal)", "H")
+        initial_flip_idx = self.combo_flip.findData(getattr(VisionConfig, "FLIP_MODE", "NONE"))
+        if initial_flip_idx >= 0:
+            self.combo_flip.setCurrentIndex(initial_flip_idx)
+        self.combo_flip.currentIndexChanged.connect(self._on_flip_changed)
+        self.combo_flip.setToolTip("选择后立即生效，无需重启摄像头")
+
+        # 4. 主操作按钮组
         self.btn_toggle = QPushButton("开启摄像头 (Open)")
         self.btn_toggle.clicked.connect(self._on_toggle_clicked)
-        self.btn_toggle.setStyleSheet("background-color: #007bff; color: white;")
+        self.btn_toggle.setStyleSheet("background-color: #007bff; color: white; padding: 5px;")
         self.btn_toggle.setToolTip("打开或关闭摄像头的读取线程")
 
-        # 应用按钮（仅用于手动切换）
         self.btn_apply = QPushButton("切换设置 (Apply)")
         self.btn_apply.clicked.connect(self._on_apply_clicked)
-        self.btn_apply.setStyleSheet("background-color: #5cb85c; color: white;")
-        self.btn_apply.setToolTip("在摄像头处于开启时，应用新的分辨率或摄像头")
+        self.btn_apply.setStyleSheet("background-color: #5cb85c; color: white; padding: 5px;")
+        self.btn_apply.setToolTip("切换分辨率或摄像头设备后点击生效")
         
-        # 重新检测按钮
-        self.btn_refresh = QPushButton("🔄 重新检测")
-        self.btn_refresh.clicked.connect(self.detect_cameras)
-        self.btn_refresh.setToolTip("重新扫描可用摄像头")
-        
-        # 布局组合
-        btn_layout = QHBoxLayout()
-        btn_layout.addWidget(self.btn_toggle)
-        btn_layout.addWidget(self.btn_apply)
+        btn_main_layout = QHBoxLayout()
+        btn_main_layout.addWidget(self.btn_toggle)
+        btn_main_layout.addWidget(self.btn_apply)
 
-        # 状态标签
+        # 5. 硬件与辅助工具按钮组
+        self.btn_settings = QPushButton("⚙️ 曝光/增益调参")
+        self.btn_settings.clicked.connect(self._on_settings_clicked)
+        self.btn_settings.setStyleSheet("background-color: #495057; color: white; padding: 4px;")
+        self.btn_settings.setToolTip("打开 DirectShow / 工业相机原生驱动面板，微调曝光时间与增益")
+
+        self.btn_refresh = QPushButton("🔄 刷新设备")
+        self.btn_refresh.clicked.connect(self.detect_cameras)
+        self.btn_refresh.setStyleSheet("padding: 4px;")
+        self.btn_refresh.setToolTip("重新扫描连接的 USB 摄像头")
+        
+        btn_tool_layout = QHBoxLayout()
+        btn_tool_layout.addWidget(self.btn_settings)
+        btn_tool_layout.addWidget(self.btn_refresh)
+
+        # 6. 状态标签
         self.lbl_status = QLabel("未开启 - 请点击开启摄像头")
         self.lbl_status.setStyleSheet("color: gray; font-size: 10px;")
         self.lbl_status.setWordWrap(True)
@@ -97,9 +122,9 @@ class CameraPanel(QGroupBox):
         layout.addRow("实时状态:", self.lbl_vision_stats)
         layout.addRow("设备:", self.combo_camera)
         layout.addRow("分辨率:", self.combo_resolution)
-        layout.addRow(btn_layout)
-        
-        layout.addRow(self.btn_refresh)
+        layout.addRow("画面方向:", self.combo_flip)
+        layout.addRow(btn_main_layout)
+        layout.addRow(btn_tool_layout)
         layout.addRow(self.lbl_status)
     
     def detect_cameras(self):
@@ -166,7 +191,20 @@ class CameraPanel(QGroupBox):
             self.camera_toggled.emit(False)
             self.lbl_status.setText("摄像头已关闭")
             self.lbl_status.setStyleSheet("color: gray; font-size: 10px;")
-    
+
+    def _on_flip_changed(self, index: int):
+        """画面翻转下拉框选择改变"""
+        mode = self.combo_flip.currentData()
+        if mode:
+            self.flip_changed.emit(mode)
+
+    def _on_settings_clicked(self):
+        """点击打开 DirectShow 原生工业相机调参面板"""
+        if not self.is_camera_open:
+            self.lbl_status.setText("请先开启摄像头再调节硬件参数！")
+            self.lbl_status.setStyleSheet("color: orange; font-size: 10px;")
+            return
+        self.open_settings_requested.emit()
     
     def _try_open_camera(self, camera_id):
         """尝试打开指定摄像头"""
@@ -174,6 +212,7 @@ class CameraPanel(QGroupBox):
             cap = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
             
             if cap.isOpened():
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
                 cap.set(cv2.CAP_PROP_FPS, 60)
                 ret, frame = cap.read()
                 

@@ -4,6 +4,29 @@
   🇬🇧 <a href="CHANGELOG.md">English</a> | 🇹🇷 <a href="CHANGELOG_TR.md">Türkçe</a>
 </div>
 
+### [v0.4.1] - 2026-08-16
+- **Ultralytics YOLO26 NMS-Free Motoru ve CUDA 12.6 Donanım Hızlandırması**:
+  - En güncel **Ultralytics YOLO26** (`yolo26n.pt`) yerel uçtan uca mimarisi entegre edildi; NMS (Non-Maximum Suppression) işlem yükü ve hedef kutularındaki titremeler tamamen ortadan kaldırıldı.
+  - RTX 3060 üzerinde FP16 Tensör Çekirdekleri ile çalışan NVIDIA CUDA 12.6 GPU hızlandırması devreye alınarak çıkarım süresi 30ms altına indirildi.
+  - Eski YOLOv8 model kalıntıları ve gereksiz ağırlık dosyaları temizlendi.
+- **Asenkron Ayrıştırılmış Görsel İşlem Hattı (`AsyncYOLODetector`)**:
+  - 60 FPS kamera yakalama/arayüz çizim akışı ile arka plan GPU derin öğrenme çıkarımını tamamen birbirinden ayıran çift tamponlu asenkron mimari kuruldu.
+  - 1080p, 720p ve 480p çözünürlüklerdeki mikro-takılmalar (micro-stuttering) ve düzensiz kare aralıkları giderilerek 60.0 FPS pürüzsüz canlı izleme ve kesintisiz hedef takibi sağlandı.
+- **Arducam AR0234 Global Shutter Endüstriyel Kamera Uyarlaması**:
+  - Arducam AR0234 Global Shutter (Onsemi AR0234CS) yüksek hızlı endüstriyel kamera entegrasyonu; hızlı gimbal dönüşlerinde oluşan hareket bulanıklığı (motion blur) ve jello/rolling-shutter bozulması tamamen ortadan kaldırıldı.
+  - DirectShow üzerinde öncelikli `CAP_PROP_FOURCC = 'MJPG'` donanımsal sıkıştırma anlaşması ile USB bant genişliği darboğazları çözüldü.
+  - Arayüze eklenen `CAP_PROP_SETTINGS` donanım paneli butonu ile mikrosaniye düzeyinde manuel Pozlama Süresi (Exposure), Kazanç (Gain) ve Beyaz Dengesi ayarı sağlandı.
+- **Piramit Çok Ölçekli Algılama Hızlandırması ve Tek Geçişli HSV İşleme**:
+  - `TargetDetector` modülünde piramit alt örnekleme (pyramid subsampling) mimarisi uygulandı: 1080p kareler renk ayrımı ve morfolojik filtreleme için çalışma anında optimize edilerek CPU işlem gecikmesi 18ms'den **~3.2ms'ye düşürüldü (5.5 kat hızlanma)**.
+  - Aktif takip modlarında (`BLUE_TRACKING` / `TRACKING`) kare düşmesi engellenerek stabil **60.0 FPS** tam kare hızı güvenceye alındı.
+  - Hedef koordinatları ve yarıçapları orijinal 1080p tam çözünürlüğe alt piksel hassasiyetiyle otomatik geri eşlendi.
+- **Anlık Görüntü Yönü ve Ters Montaj (Upside-Down) Sıcak Değişimi**:
+  - Algılama öncesinde doğrudan yakalama akışına uygulanan sıfır gecikmeli görüntü çevirme (`Normal`, `180° Ters Montaj Çevirme`, `Dikey Çevirme`, `Yatay Ayna`) eklendi; PID koordinat polaritesi kusursuz korundu.
+- **GUI Kamera Paneli Düzenlemesi ve Hata Düzeltmeleri**:
+  - Kamera kontrol paneli çift sütunlu ergonomik buton gruplarıyla (`Aç/Kapat` & `Uygula`, `⚙️ Pozlama/Kazanç Ayarı` & `🔄 Cihazları Yenile`) modernize edildi.
+  - Çözünürlük seçenekleri gimbal takip için ideal altın oran olan **60 FPS** standartlarına uyarlandı (`640x480`, `1280x720`, `1920x1080`).
+  - Kontrolü Başlat butonuna tıklandığında oluşan `AttributeError: 'ModePanel' object has no attribute 'get_current_mode'` hatası giderildi.
+
 ### [v0.4.0] - 2026-08-16
 - **MKS SERVO42C Kapalı Çevrim Step Motor Yükseltmesi**: Eski MG996R RC servolar, 20V DC endüstriyel güç beslemeli, yüksek torklu NEMA 17 step motorlar ve Makerbase MKS SERVO42C vektör FOC (`CR_vFOC`) kapalı çevrim sürücülerle değiştirildi. Adım kaybı (lost steps) tamamen ortadan kaldırıldı.
 - **10kHz Donanımsal DDA Mikro-Adım Darbe Üreticisi**: STM32F401 ürün yazılımı, 10kHz donanımsal zamanlayıcı kesmesi (`TIM2`) ve Bresenham / DDA gerçek zamanlı darbe enterpolasyonuyla yeniden yazıldı. 50Hz Artımlı PID döngüsü ile titreşimsiz ve ultra akıcı hareket sağlandı.

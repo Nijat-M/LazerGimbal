@@ -23,7 +23,7 @@ import threading
 os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
 
 # 核心修改：在 Windows 下，必须先加载 torch（YOLO 会加载）再加载 cv2，否则可能导致 c10.dll 初始化失败
-from vision.yolo_detector import YOLODetector
+from vision.yolo_detector import AsyncYOLODetector, YOLODetector
 
 import cv2
 import time
@@ -78,6 +78,7 @@ class VisionWorker(QThread):
         # 状态跟踪（避免重复打印）
         self.blue_object_detected = False   # 蓝色物体检测状态
         self.laser_tracking_status = None  # 记录当前追踪状态
+        self.flip_mode: str = getattr(VisionConfig, "FLIP_MODE", "NONE")
 
         # FPS 计算相关
         self.prev_time = time.time()
@@ -97,14 +98,29 @@ class VisionWorker(QThread):
     # 公共接口
     # --------------------------------------------------
 
+    def set_flip_mode(self, flip_mode: str) -> None:
+        """设置画面翻转模式: 'NONE'(正常), '180'(180°倒装翻转), 'V'(垂直翻转), 'H'(水平镜像)"""
+        self.flip_mode = flip_mode
+        VisionConfig.FLIP_MODE = flip_mode
+        logger.info(f"[VISION] 画面翻转模式更新为: {flip_mode}")
+
     def set_mode(self, mode: str) -> None:
         """设置工作模式"""
         self.mode = mode
         if mode == "YOLO_TRACKING" and self.yolo_detector is None:
-            logger.info("[VISION] 正在初始化 YOLOv8 模型...")
-            self.yolo_detector = YOLODetector("vision/models/yolov8n.pt")  # 从新的规范路径加载
-            logger.info("[VISION] YOLOv8 模型初始化完成。")
+            logger.info("[VISION] 正在初始化 YOLO26 异步深度学习引擎...")
+            self.yolo_detector = AsyncYOLODetector("vision/models/yolo26n.pt")
+            logger.info("[VISION] YOLO26 异步引擎初始化完成。")
         logger.info(f"[VISION] 视觉线程模式: {mode}")
+
+    def open_camera_settings(self) -> None:
+        """打开 Windows DirectShow 原生相机属性设置面板 (调节全局快门曝光/增益等)"""
+        if self.cap is not None and self.cap.isOpened():
+            try:
+                logger.info("[VISION] 正在打开 DirectShow 相机属性调节面板...")
+                self.cap.set(cv2.CAP_PROP_SETTINGS, 1)
+            except Exception as e:
+                logger.error(f"[VISION ERROR] 打开相机设置面板失败: {e}")
 
     def switch_camera(self, camera_id: int, width: int, height: int) -> None:
         """Queue a generation-tagged camera-open request for the worker thread."""
@@ -186,12 +202,13 @@ class VisionWorker(QThread):
                 self.camera_state_signal.emit(generation, False, message)
             return
 
-        candidate.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        candidate.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        # 核心优化：先设置 FOURCC 为 MJPG 硬件压缩，再协商分辨率与高帧率
+        target_fps = getattr(VisionConfig, "TARGET_FPS", 60)
         candidate.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         candidate.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         candidate.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        candidate.set(cv2.CAP_PROP_FPS, 60)
+        candidate.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        candidate.set(cv2.CAP_PROP_FPS, target_fps)
         candidate.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
         valid_warmup_frames = 0
@@ -308,6 +325,14 @@ class VisionWorker(QThread):
 
             error_count = 0
 
+            # 画面方向翻转（在所有检测算法与绘制之前处理）
+            if self.flip_mode == "180":
+                frame = cv2.flip(frame, -1)
+            elif self.flip_mode == "V":
+                frame = cv2.flip(frame, 0)
+            elif self.flip_mode == "H":
+                frame = cv2.flip(frame, 1)
+
             try:
                 # 计算 FPS (在处理模式前计算，确保 stats_signal 发送的是当前帧的FPS)
                 curr_time = time.time()
@@ -350,7 +375,7 @@ class VisionWorker(QThread):
         误差 = 蓝色目标位置 - 红色激光位置（两点相对误差）
         直接发送误差，由 GimbalController.handle_vision_error 处理。
         """
-        laser_result, blue_result = self.detector.detect_laser_and_blue(frame)
+        laser_result, blue_result, debug_mask = self.detector.detect_laser_and_blue(frame)
 
         # 绘制检测结果
         if blue_result.detected:
@@ -384,10 +409,8 @@ class VisionWorker(QThread):
                 logger.info("[VISION] 未检测到目标")
                 self.laser_tracking_status = "none"
 
-        # 调试蒙版
-        debug_mask = self.detector.get_debug_mask(frame)
+        # 发送单次计算的高速调试蒙版
         self._send_mask(debug_mask)
-        # self._send_image(frame)  # 已经在 run() 统一发送了
 
 
     def _process_blue_tracking(self, frame: cv2.Mat) -> None:
@@ -397,7 +420,7 @@ class VisionWorker(QThread):
         发送蓝色目标的原始像素坐标（不是误差），
         由 GimbalController.handle_target_position 计算误差并处理。
         """
-        blue_result = self.detector.detect_blue_object(frame)
+        blue_result, mask_blue = self.detector.detect_blue_object(frame)
 
         # 画面中心十字线
         cx = self.frame_width // 2
@@ -415,9 +438,6 @@ class VisionWorker(QThread):
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
             cv2.arrowedLine(frame, (cx, cy), pos, (0, 255, 0), 2)
 
-            # 显示坐标信息（已移至全局 Overlay 或精简）
-            pass
-
             # 发送原始坐标（不是误差！）→ handle_target_position
             self.target_pos_signal.emit(pos[0], pos[1])
 
@@ -429,9 +449,7 @@ class VisionWorker(QThread):
                 logger.info("[VISION] ✗ 未找到蓝色目标")
                 self.blue_object_detected = False
 
-        # 调试蒙版（蓝色检测范围）
-        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        mask_blue = cv2.inRange(hsv, VisionConfig.HSV_BLUE_LOWER, VisionConfig.HSV_BLUE_UPPER)
+        # 发送单次计算的高速调试蒙版
         self._send_mask(mask_blue)
 
 
@@ -440,12 +458,13 @@ class VisionWorker(QThread):
         YOLO_TRACKING 模式：YOLO 物体居中追踪
         
         发送目标的原始像素坐标，由 GimbalController 计算误差。
+        采用后台异步并发架构，主视觉线程零阻塞，保证相机以 60 FPS 满速流畅采集与显示。
         """
         if self.yolo_detector is None:
             return
-            
-        # 设置目标类别为 None（不限制类别），这样就可以框出猫、手机等所有COCO类别物体了
-        result = self.yolo_detector.detect_target(frame, target_class=None) 
+
+        # 非阻塞提交并获取最新目标锁定结果（主线程耗时 <0.01ms）
+        result = self.yolo_detector.detect_target(frame, target_class=None)
 
         # 画面中心十字线
         cx = self.frame_width // 2
