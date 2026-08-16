@@ -4,6 +4,16 @@
   🇬🇧 <a href="CHANGELOG.md">English</a> | 🇹🇷 <a href="CHANGELOG_TR.md">Türkçe</a>
 </div>
 
+### [v0.4.2] - 2026-08-16
+- **Tam Yerel USB CDC (12 Mbps) Geçişi ve Bluetooth Kodlarının Tamamen Temizlenmesi**:
+  - STM32F401 donanım bellenimi eski Bluetooth UART (115.2 kbps) yapısından **STM32 Yerel USB CDC Sanal COM Port (12 Mbps Full-Speed)** mimarisine başarıyla taşındı.
+  - STM32 saat ağacı (Clock Tree) 25MHz HSE üzerinden tam **48.0 MHz USB saati** sağlayacak şekilde yeniden yapılandırıldı ($PLLM=25, PLLN=336, PLLP=4, PLLQ=7$).
+  - Resmi ST USB Device Core & CDC sınıfı ara yazılımları entegre edilerek mikrosaniye gecikmeli çift yönlü veri akışı sağlandı.
+  - Eski Bluetooth / USART1 bellenim kodları (`usart.c`, `usart.h`, `HAL_UART` sürücü modülleri ve kesme işleyicileri) tamamen kaldırılarak STM32 üzerindeki `PA9` ve `PA10` pinleri gelecekteki endüstriyel genişletmeler için tamamen serbest bırakıldı.
+- **Akıllı Donanım Tanıma ve Duyarlı GUI Arayüzü**:
+  - `SerialPanel` kart düzeni ve otomatik metin sarma ile yeniden tasarlandı; farklı DPI ve ekran ölçeklerinde metin kırpılması tamamen engellendi.
+  - STMicroelectronics USB CDC (VID: `0x0483`, PID: `0x5740`) akıllı USB donanım eşleme ve otomatik port seçimi eklendi.
+
 ### [v0.4.1] - 2026-08-16
 - **Ultralytics YOLO26 NMS-Free Motoru ve CUDA 12.6 Donanım Hızlandırması**:
   - En güncel **Ultralytics YOLO26** (`yolo26n.pt`) yerel uçtan uca mimarisi entegre edildi; NMS (Non-Maximum Suppression) işlem yükü ve hedef kutularındaki titremeler tamamen ortadan kaldırıldı.

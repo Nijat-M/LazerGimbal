@@ -3,6 +3,7 @@
   ******************************************************************************
   * @file           : main.c
   * @brief          : Main program body - MKS SERVO42C Closed-Loop Stepper Engine
+  *                   with High-Speed USB CDC & USART Dual Telemetry
   ******************************************************************************
   * @attention
   *
@@ -19,8 +20,9 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "tim.h"
-#include "usart.h"
 #include "gpio.h"
+#include "usb_device.h"
+#include "usbd_cdc_if.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -83,9 +85,8 @@ volatile uint16_t vision_timeout_counter = 0;
 volatile uint8_t new_data_flag = 0;   // 异步数据锁：拿到新图像帧才做增量
 volatile uint32_t control_epoch = 0;  // 抢占式急停纪元锁
 
-// 串口接收变量
+// 通讯接收状态机变量 (USB CDC 高速通道)
 volatile RxState rx_state = STATE_IDLE;
-uint8_t rx_byte;
 char rx_buffer[RX_BUFFER_SIZE];
 volatile uint8_t rx_index = 0;
 
@@ -96,6 +97,7 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 static void StopMotion(void);
 static void ResetPosition(void);
+void Process_Protocol_Byte(uint8_t byte);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -137,6 +139,109 @@ static void ResetPosition(void)
     HAL_Delay(100);
     HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);   // Off
 }
+
+/**
+ * @brief 统一协议解析器 (全双工支持 USB CDC 与 USART)
+ * @param byte 接收到的单字节
+ */
+void Process_Protocol_Byte(uint8_t byte)
+{
+    // STOP 抢占指令
+    if (byte == '!') {
+        rx_state = STATE_RECEIVING_COMMAND;
+        rx_index = 0;
+    }
+    else if (rx_state == STATE_IDLE)
+    {
+        if (byte == '<') {
+            rx_state = STATE_RECEIVING_POS;
+            rx_index = 0;
+        } else if (byte == '{') {
+            rx_state = STATE_RECEIVING_TUNING;
+            rx_index = 0;
+        }
+    }
+    else if (rx_state == STATE_RECEIVING_POS)
+    {
+        if (byte == '>') {
+            rx_buffer[rx_index] = '\0';
+            
+            // 解析 <Error_X,Error_Y,Fire>
+            char *token1 = strtok((char*)rx_buffer, ",");
+            char *token2 = strtok(NULL, ",");
+            char *token3 = strtok(NULL, ",");
+            
+            if (token1 && token2 && token3) {
+                int parsed_x = atoi(token1);
+                int parsed_y = atoi(token2);
+                
+                // 工业级物理输入限幅：防止乱码或意外超大误差导致电机失控
+                if (parsed_x > 400) parsed_x = 400;
+                if (parsed_x < -400) parsed_x = -400;
+                if (parsed_y > 400) parsed_y = 400;
+                if (parsed_y < -400) parsed_y = -400;
+
+                current_error_x = (int16_t)parsed_x;
+                current_error_y = (int16_t)parsed_y;
+                current_fire = (uint8_t)atoi(token3);
+                
+                new_data_flag = 1;
+                vision_timeout_counter = 0; // 喂狗
+            }
+            
+            rx_state = STATE_IDLE;
+        } else {
+            if (rx_index < RX_BUFFER_SIZE - 1) {
+                rx_buffer[rx_index++] = byte;
+            } else {
+                rx_state = STATE_IDLE; // overflow
+            }
+        }
+    }
+    else if (rx_state == STATE_RECEIVING_TUNING)
+    {
+        if (byte == '}') {
+            rx_buffer[rx_index] = '\0';
+            
+            // 解析 {Kp,Ki,Kd}
+            char *token1 = strtok((char*)rx_buffer, ",");
+            char *token2 = strtok(NULL, ",");
+            char *token3 = strtok(NULL, ",");
+            
+            if (token1 && token2 && token3) {
+                Kp = (float)atof(token1);
+                Ki = (float)atof(token2);
+                Kd = (float)atof(token3);
+            }
+            
+            rx_state = STATE_IDLE;
+        } else {
+            if (rx_index < RX_BUFFER_SIZE - 1) {
+                rx_buffer[rx_index++] = byte;
+            } else {
+                rx_state = STATE_IDLE; // overflow
+            }
+        }
+    }
+    else if (rx_state == STATE_RECEIVING_COMMAND)
+    {
+        if (byte == '\n' || byte == '\r') {
+            rx_buffer[rx_index] = '\0';
+            if (strcmp((char*)rx_buffer, "STOP") == 0) {
+                StopMotion();
+            } else if (strcmp((char*)rx_buffer, "CENTER") == 0) {
+                ResetPosition();
+            }
+            rx_state = STATE_IDLE;
+            rx_index = 0;
+        } else if (rx_index < RX_BUFFER_SIZE - 1) {
+            rx_buffer[rx_index++] = byte;
+        } else {
+            rx_state = STATE_IDLE;
+            rx_index = 0;
+        }
+    }
+}
 /* USER CODE END 0 */
 
 /**
@@ -169,13 +274,11 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_TIM2_Init();
-  MX_USART1_UART_Init();
+  MX_USB_DEVICE_Init();
+  
   /* USER CODE BEGIN 2 */
   // 启动 TIM2 10kHz 高频微步时钟中断
   HAL_TIM_Base_Start_IT(&htim2);
-
-  // 开启串口接收中断 (115200bps)
-  HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -223,16 +326,20 @@ void SystemClock_Config(void)
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
+  * 25MHz HSE:
+  *   VCO_in  = 25MHz / 25 = 1.0 MHz
+  *   VCO_out = 1.0MHz * 336 = 336.0 MHz
+  *   SYSCLK  = 336.0MHz / 4 = 84.0 MHz (F401 Max)
+  *   USB_CLK = 336.0MHz / 7 = 48.0 MHz (Exact USB Full-Speed)
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 84;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 4;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 25;
+  RCC_OscInitStruct.PLL.PLLN = 336;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV4;
+  RCC_OscInitStruct.PLL.PLLQ = 7;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -257,12 +364,6 @@ void SystemClock_Config(void)
 
 /**
  * @brief 10kHz 硬件微步插补与 50Hz 增量 PID 核心中断回调
- * 
- * 核心设计原理：
- * 1. 【10kHz 极速 DDA 插补】: 以 100μs 粒度非阻塞生成高精度步进脉冲，均匀平摊在 20ms 时间窗内，
- *    彻底消除步进电机的离散敲击震动与噪音，运转如丝般顺滑。
- * 2. 【50Hz 增量式 PID】: 相比位置式 PID，增量式天然免疫积分饱和，直接解算出速度微步增量 ΔSteps。
- * 3. 【全双工安全看门狗】: 2秒无上位机指令自动停机锁轴，防丢控乱转。
  */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
@@ -379,113 +480,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   }
 }
 
-/**
- * @brief 串口中断接收状态机 (115200bps)
- */
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-  if(huart->Instance == USART1)
-  {
-    // STOP 抢占指令
-    if (rx_byte == '!') {
-        rx_state = STATE_RECEIVING_COMMAND;
-        rx_index = 0;
-    }
-    else if (rx_state == STATE_IDLE)
-    {
-        if (rx_byte == '<') {
-            rx_state = STATE_RECEIVING_POS;
-            rx_index = 0;
-        } else if (rx_byte == '{') {
-            rx_state = STATE_RECEIVING_TUNING;
-            rx_index = 0;
-        }
-    }
-    else if (rx_state == STATE_RECEIVING_POS)
-    {
-        if (rx_byte == '>') {
-            rx_buffer[rx_index] = '\0';
-            
-            // 解析 <Error_X,Error_Y,Fire>
-            char *token1 = strtok((char*)rx_buffer, ",");
-            char *token2 = strtok(NULL, ",");
-            char *token3 = strtok(NULL, ",");
-            
-            if (token1 && token2 && token3) {
-                int parsed_x = atoi(token1);
-                int parsed_y = atoi(token2);
-                
-                // 工业级物理输入限幅：防止乱码或意外超大误差导致电机失控
-                if (parsed_x > 400) parsed_x = 400;
-                if (parsed_x < -400) parsed_x = -400;
-                if (parsed_y > 400) parsed_y = 400;
-                if (parsed_y < -400) parsed_y = -400;
-
-                current_error_x = (int16_t)parsed_x;
-                current_error_y = (int16_t)parsed_y;
-                current_fire = (uint8_t)atoi(token3);
-                
-                new_data_flag = 1;
-                vision_timeout_counter = 0; // 喂狗
-            }
-            
-            rx_state = STATE_IDLE;
-        } else {
-            if (rx_index < RX_BUFFER_SIZE - 1) {
-                rx_buffer[rx_index++] = rx_byte;
-            } else {
-                rx_state = STATE_IDLE; // overflow
-            }
-        }
-    }
-    else if (rx_state == STATE_RECEIVING_TUNING)
-    {
-        if (rx_byte == '}') {
-            rx_buffer[rx_index] = '\0';
-            
-            // 解析 {Kp,Ki,Kd}
-            char *token1 = strtok((char*)rx_buffer, ",");
-            char *token2 = strtok(NULL, ",");
-            char *token3 = strtok(NULL, ",");
-            
-            if (token1 && token2 && token3) {
-                Kp = (float)atof(token1);
-                Ki = (float)atof(token2);
-                Kd = (float)atof(token3);
-            }
-            
-            rx_state = STATE_IDLE;
-        } else {
-            if (rx_index < RX_BUFFER_SIZE - 1) {
-                rx_buffer[rx_index++] = rx_byte;
-            } else {
-                rx_state = STATE_IDLE; // overflow
-            }
-        }
-    }
-    else if (rx_state == STATE_RECEIVING_COMMAND)
-    {
-        if (rx_byte == '\n' || rx_byte == '\r') {
-            rx_buffer[rx_index] = '\0';
-            if (strcmp((char*)rx_buffer, "STOP") == 0) {
-                StopMotion();
-            } else if (strcmp((char*)rx_buffer, "CENTER") == 0) {
-                ResetPosition();
-            }
-            rx_state = STATE_IDLE;
-            rx_index = 0;
-        } else if (rx_index < RX_BUFFER_SIZE - 1) {
-            rx_buffer[rx_index++] = rx_byte;
-        } else {
-            rx_state = STATE_IDLE;
-            rx_index = 0;
-        }
-    }
-
-    // 重新开启中断接收下一个字节
-    HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
-  }
-}
 /* USER CODE END 4 */
 
 /**
@@ -495,24 +489,13 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
   NVIC_SystemReset();
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
-/**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-

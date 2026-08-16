@@ -107,8 +107,8 @@ class MainWindow(QMainWindow):
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll_area.setMinimumWidth(420)  # 设置最小宽度
-        scroll_area.setMaximumWidth(480)  # 增加最大宽度，留出滚动条空间
+        scroll_area.setMinimumWidth(440)  # 设置最小宽度
+        scroll_area.setMaximumWidth(580)  # 增加最大宽度，确保内容不被截断并留出滚动条空间
         
         # 设置滚动条样式，使其更加美观且不挡住内容
         scroll_area.setStyleSheet("""

@@ -4,6 +4,16 @@
   🇬🇧 <a href="CHANGELOG.md">English</a> | 🇹🇷 <a href="CHANGELOG_TR.md">Türkçe</a>
 </div>
 
+### [v0.4.2] - 2026-08-16
+- **Complete Native USB CDC (12 Mbps) Migration & Bluetooth Deprecation**:
+  - Successfully migrated STM32F401 hardware firmware from legacy Bluetooth UART (115.2 kbps) to **STM32 Native USB CDC Virtual COM Port (12 Mbps Full-Speed)**.
+  - Re-engineered STM32 clock tree for exact **48.0 MHz USB clock** via 25MHz HSE ($PLLM=25, PLLN=336, PLLP=4, PLLQ=7$).
+  - Integrated official ST USB Device Core & CDC class middlewares, implementing bidirectional microsecond-latency control streaming.
+  - Thoroughly purged all legacy Bluetooth / USART1 firmware code (`usart.c`, `usart.h`, `HAL_UART` driver modules, and ISR handlers), completely freeing `PA9` and `PA10` pins on STM32 for future industrial expansion.
+- **Intelligent GUI Hardware Recognition & Responsive Layout**:
+  - Re-designed `SerialPanel` with card layout and automatic word-wrapping, eliminating text clipping across varying display scaling factors.
+  - Added smart USB device identification matching STMicroelectronics USB CDC (VID: `0x0483`, PID: `0x5740`) with automatic port pre-selection and real-time connection state indicators.
+
 ### [v0.4.1] - 2026-08-16
 - **Ultralytics YOLO26 NMS-Free Engine & CUDA 12.6 Hardware Acceleration**:
   - Fully integrated the latest **Ultralytics YOLO26** (`yolo26n.pt`) native end-to-end framework, completely eliminating NMS (Non-Maximum Suppression) post-processing overhead and target bounding jitter.

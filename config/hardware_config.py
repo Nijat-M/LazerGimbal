@@ -19,10 +19,10 @@ class HardwareConfig:
     """硬件相关参数 (Hardware Parameters)"""
     
     # ==========================
-    # 串口配置
+    # 串口/USB 配置
     # ==========================
-    SERIAL_PORT = "COM3"    # 串口号（根据实际情况修改）
-    BAUD_RATE = 115200        # 波特率（需与 STM32 程序一致）
+    SERIAL_PORT = "COM5"    # 默认 USB 虚拟串口号
+    BAUD_RATE = 115200      # 传输波特率
     TIMEOUT = 1             # 读取超时时间（秒）
     
     # ==========================
