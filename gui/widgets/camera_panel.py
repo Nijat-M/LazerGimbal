@@ -32,7 +32,7 @@ class CameraPanel(QGroupBox):
     open_settings_requested = pyqtSignal()      # 请求打开 DirectShow 相机硬件属性面板
 
     def __init__(self, default_id=0, parent=None):
-        super().__init__("摄像头设置 (Camera Settings)", parent)
+        super().__init__("Camera Settings", parent)
         self.available_cameras = []
         self.is_camera_open = False
         self.init_ui(default_id)
@@ -47,62 +47,62 @@ class CameraPanel(QGroupBox):
         
         # 1. 摄像头选择下拉框
         self.combo_camera = QComboBox()
-        self.combo_camera.setToolTip("选择要使用的摄像头设备")
+        self.combo_camera.setToolTip("Select camera device")
         
         # 2. 分辨率选择（聚焦于工业级最稳妥的 60 FPS 档位）
         self.combo_resolution = QComboBox()
         self.combo_resolution.addItems([
-            "640x480 (标清推荐 - 60 FPS 极速响应)",
-            "1280x720 (高清平衡 - 60 FPS 视野更宽)",
-            "1920x1080 (全高清 - 60 FPS 细节丰富)"
+            "640x480 (SD Recommended - 60 FPS fast response)",
+            "1280x720 (HD Balanced - 60 FPS wider view)",
+            "1920x1080 (FHD - 60 FPS high detail)"
         ])
         self.combo_resolution.setCurrentIndex(0)  # 默认 640x480
-        self.combo_resolution.setToolTip("选择工作分辨率（640x480 延迟最低、PID 闭环响应最快）")
+        self.combo_resolution.setToolTip("Select resolution (640x480 lowest latency)")
         
         # 3. 画面方向/翻转选择 (即时热切换)
         self.combo_flip = QComboBox()
-        self.combo_flip.addItem("正常 (Normal)", "NONE")
-        self.combo_flip.addItem("180° 翻转 (倒装安装)", "180")
-        self.combo_flip.addItem("垂直翻转 (Vertical)", "V")
-        self.combo_flip.addItem("水平镜像 (Horizontal)", "H")
+        self.combo_flip.addItem("Normal", "NONE")
+        self.combo_flip.addItem("180° Flip (Inverted)", "180")
+        self.combo_flip.addItem("Vertical Flip", "V")
+        self.combo_flip.addItem("Horizontal Mirror", "H")
         initial_flip_idx = self.combo_flip.findData(getattr(VisionConfig, "FLIP_MODE", "NONE"))
         if initial_flip_idx >= 0:
             self.combo_flip.setCurrentIndex(initial_flip_idx)
         self.combo_flip.currentIndexChanged.connect(self._on_flip_changed)
-        self.combo_flip.setToolTip("选择后立即生效，无需重启摄像头")
+        self.combo_flip.setToolTip("Takes effect immediately")
 
         # 4. 主操作按钮组
-        self.btn_toggle = QPushButton("开启摄像头 (Open)")
+        self.btn_toggle = QPushButton("Open Camera")
         self.btn_toggle.clicked.connect(self._on_toggle_clicked)
         self.btn_toggle.setStyleSheet("background-color: #007bff; color: white; padding: 5px;")
-        self.btn_toggle.setToolTip("打开或关闭摄像头的读取线程")
+        self.btn_toggle.setToolTip("Start or stop camera thread")
 
-        self.btn_apply = QPushButton("切换设置 (Apply)")
+        self.btn_apply = QPushButton("Apply Settings")
         self.btn_apply.clicked.connect(self._on_apply_clicked)
         self.btn_apply.setStyleSheet("background-color: #5cb85c; color: white; padding: 5px;")
-        self.btn_apply.setToolTip("切换分辨率或摄像头设备后点击生效")
+        self.btn_apply.setToolTip("Apply after changing resolution or device")
         
         btn_main_layout = QHBoxLayout()
         btn_main_layout.addWidget(self.btn_toggle)
         btn_main_layout.addWidget(self.btn_apply)
 
         # 5. 硬件与辅助工具按钮组
-        self.btn_settings = QPushButton("⚙️ 曝光/增益调参")
+        self.btn_settings = QPushButton("⚙️ Exposure/Gain")
         self.btn_settings.clicked.connect(self._on_settings_clicked)
         self.btn_settings.setStyleSheet("background-color: #495057; color: white; padding: 4px;")
-        self.btn_settings.setToolTip("打开 DirectShow / 工业相机原生驱动面板，微调曝光时间与增益")
+        self.btn_settings.setToolTip("Open DirectShow panel for exposure/gain")
 
-        self.btn_refresh = QPushButton("🔄 刷新设备")
+        self.btn_refresh = QPushButton("🔄 Refresh Devices")
         self.btn_refresh.clicked.connect(self.detect_cameras)
         self.btn_refresh.setStyleSheet("padding: 4px;")
-        self.btn_refresh.setToolTip("重新扫描连接的 USB 摄像头")
+        self.btn_refresh.setToolTip("Rescan connected USB cameras")
         
         btn_tool_layout = QHBoxLayout()
         btn_tool_layout.addWidget(self.btn_settings)
         btn_tool_layout.addWidget(self.btn_refresh)
 
         # 6. 状态标签
-        self.lbl_status = QLabel("未开启 - 请点击开启摄像头")
+        self.lbl_status = QLabel("Not Open - Please click Open Camera")
         self.lbl_status.setStyleSheet("color: gray; font-size: 10px;")
         self.lbl_status.setWordWrap(True)
         
@@ -119,17 +119,17 @@ class CameraPanel(QGroupBox):
         """)
         self.lbl_vision_stats.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        layout.addRow("实时状态:", self.lbl_vision_stats)
-        layout.addRow("设备:", self.combo_camera)
-        layout.addRow("分辨率:", self.combo_resolution)
-        layout.addRow("画面方向:", self.combo_flip)
+        layout.addRow("Live Stats:", self.lbl_vision_stats)
+        layout.addRow("Device:", self.combo_camera)
+        layout.addRow("Resolution:", self.combo_resolution)
+        layout.addRow("Orientation:", self.combo_flip)
         layout.addRow(btn_main_layout)
         layout.addRow(btn_tool_layout)
         layout.addRow(self.lbl_status)
     
     def detect_cameras(self):
         """检测可用摄像头"""
-        self.lbl_status.setText("正在检测摄像头...")
+        self.lbl_status.setText("Detecting cameras...")
         self.lbl_status.setStyleSheet("color: orange; font-size: 10px;")
         
         # 延迟执行，避免阻塞UI
@@ -158,38 +158,38 @@ class CameraPanel(QGroupBox):
         if self.available_cameras:
             num_cameras = len(self.available_cameras)
             if num_cameras == 1:
-                # 只有一个摄像头，自动选择
+                # 只有一cameras，自动选择
                 self.combo_camera.setCurrentIndex(0)
-                msg = f"✓ 已检测到 Camera {self.available_cameras[0]}"
+                msg = f"✓ Detected Camera {self.available_cameras[0]}"
             else:
-                msg = f"✓ 已检测到 {num_cameras} 个摄像头"
+                msg = f"✓ Detected {num_cameras} cameras"
             
             self.lbl_status.setText(msg)
             self.lbl_status.setStyleSheet("color: green; font-size: 10px;")
         else:
-            msg = "未检测到摄像头！请检查设备连接"
+            msg = "No cameras detected! Check connection"
             self.lbl_status.setText(msg)
             self.lbl_status.setStyleSheet("color: red; font-size: 10px;")
     
     def _on_toggle_clicked(self):
         """开启或关闭摄像头"""
         if not self.available_cameras:
-            self.lbl_status.setText("没有可用的摄像头！请重试")
+            self.lbl_status.setText("No available cameras! Try again")
             self.lbl_status.setStyleSheet("color: red; font-size: 10px;")
             return
             
         self.is_camera_open = not self.is_camera_open
         
         if self.is_camera_open:
-            self.btn_toggle.setText("关闭摄像头 (Close)")
+            self.btn_toggle.setText("Close Camera")
             self.btn_toggle.setStyleSheet("background-color: #dc3545; color: white;")
             self.camera_toggled.emit(True)
             self._on_apply_clicked()  # 触发发送 camera_changed
         else:
-            self.btn_toggle.setText("开启摄像头 (Open)")
+            self.btn_toggle.setText("Open Camera")
             self.btn_toggle.setStyleSheet("background-color: #007bff; color: white;")
             self.camera_toggled.emit(False)
-            self.lbl_status.setText("摄像头已关闭")
+            self.lbl_status.setText("Camera closed")
             self.lbl_status.setStyleSheet("color: gray; font-size: 10px;")
 
     def _on_flip_changed(self, index: int):
@@ -201,7 +201,7 @@ class CameraPanel(QGroupBox):
     def _on_settings_clicked(self):
         """点击打开 DirectShow 原生工业相机调参面板"""
         if not self.is_camera_open:
-            self.lbl_status.setText("请先开启摄像头再调节硬件参数！")
+            self.lbl_status.setText("Please open camera before tuning hardware!")
             self.lbl_status.setStyleSheet("color: orange; font-size: 10px;")
             return
         self.open_settings_requested.emit()
@@ -239,12 +239,12 @@ class CameraPanel(QGroupBox):
     def _on_apply_clicked(self):
         """应用设置按钮点击（手动切换）"""
         if not self.available_cameras:
-            self.lbl_status.setText("没有可用摄像头！")
+            self.lbl_status.setText("No available cameras!")
             self.lbl_status.setStyleSheet("color: red; font-size: 10px;")
             return
             
         if not self.is_camera_open:
-            self.lbl_status.setText("请先开启摄像头再切换设置")
+            self.lbl_status.setText("Please open camera before applying settings")
             self.lbl_status.setStyleSheet("color: orange; font-size: 10px;")
             return
         
@@ -267,7 +267,7 @@ class CameraPanel(QGroupBox):
         fps_part = f"@{old_text.split('@')[1]}" if "@" in old_text else ")"
         self.combo_camera.setItemText(camera_index, f"Camera {camera_id} ({width}x{height}{fps_part}")
         
-        self.lbl_status.setText(f"✓ 已切换到 Camera {camera_id} ({width}x{height})")
+        self.lbl_status.setText(f"✓ Switched to Camera {camera_id} ({width}x{height})")
         self.lbl_status.setStyleSheet("color: green; font-size: 10px;")
     
     def _parse_resolution(self, text):

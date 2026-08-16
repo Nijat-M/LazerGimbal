@@ -18,7 +18,7 @@ class TestModePanel(QGroupBox):
     keyboard_control_toggled = pyqtSignal(bool)         # 键盘控制开关
 
     def __init__(self, parent=None):
-        super().__init__("手动控制 (Manual Control)", parent)
+        super().__init__("Manual Control", parent)
         self.init_ui()
 
     def init_ui(self):
@@ -61,18 +61,18 @@ class TestModePanel(QGroupBox):
         main_layout.addLayout(grid_layout)
 
         # 键盘控制开关选项（默认关闭，需要勾选才激活）
-        self.cb_keyboard = QCheckBox("🎮 启用键盘操控 (WASD / 方向键)")
+        self.cb_keyboard = QCheckBox("🎮 Enable Keyboard Control (WASD/Arrows)")
         self.cb_keyboard.setChecked(False)
         self.cb_keyboard.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.cb_keyboard.toggled.connect(self.keyboard_control_toggled.emit)
         main_layout.addWidget(self.cb_keyboard)
     
     def _emit_start(self, axis, direction, name):
-        logger.info(f"[TEST_PANEL] 按钮按下: {name} (轴={axis}, 方向={direction})")
+        logger.info(f"[TEST_PANEL] Button pressed: {name} (axis={axis}, dir={direction})")
         self.start_continuous_signal.emit(axis, direction)
 
     def _emit_stop(self):
-        logger.info("[TEST_PANEL] 按钮松开，停止移动")
+        logger.info("[TEST_PANEL] Button released, stopping")
         self.stop_continuous_signal.emit()
 
 

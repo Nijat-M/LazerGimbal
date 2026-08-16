@@ -22,7 +22,7 @@ class SerialPanel(QGroupBox):
     connection_toggled = pyqtSignal(bool, str)
     
     def __init__(self, default_port=None, parent=None):
-        super().__init__("通信连接 (USB Communication)", parent)
+        super().__init__("USB Communication", parent)
         self.is_connected = False
         self.init_ui(default_port)
     
@@ -34,7 +34,7 @@ class SerialPanel(QGroupBox):
         
         # 1. 端口选择行 (水平布局)
         port_row = QHBoxLayout()
-        port_label = QLabel("端口 (Port):")
+        port_label = QLabel("Port:")
         port_label.setStyleSheet("font-weight: bold; min-width: 75px;")
         
         # 自动检测可用端口 ComboBox (彻底过滤蓝牙)
@@ -56,7 +56,7 @@ class SerialPanel(QGroupBox):
                         valid_ports.append(p)
                 
                 if not valid_ports:
-                    sub_self.addItem("未检测到 USB 设备 (No Port)", None)
+                    sub_self.addItem("No USB Device (No Port)", None)
                     return
 
                 usb_found_index = -1
@@ -64,7 +64,7 @@ class SerialPanel(QGroupBox):
                     is_stm32_usb = (p.vid == 0x0483 and p.pid == 0x5740) or ("STMicroelectronics" in str(p.description)) or ("0483:5740" in str(p.hwid))
                     
                     if is_stm32_usb:
-                        label = f"{p.device} (⚡ STM32 原生 USB)"
+                        label = f"{p.device} (⚡ STM32 Native USB)"
                         if usb_found_index == -1:
                             usb_found_index = idx
                     else:
@@ -120,7 +120,7 @@ class SerialPanel(QGroupBox):
         status_layout.setContentsMargins(2, 2, 2, 2)
         status_layout.setSpacing(0)
         
-        self.lbl_channel_type = QLabel("通道: 检测中...")
+        self.lbl_channel_type = QLabel("Channel: Detecting...")
         self.lbl_channel_type.setWordWrap(True)
         self.lbl_channel_type.setStyleSheet("color: #38bdf8; font-weight: bold; font-size: 12px;")
         status_layout.addWidget(self.lbl_channel_type)
@@ -130,7 +130,7 @@ class SerialPanel(QGroupBox):
         self.combo_port.currentIndexChanged.connect(self._update_channel_badge)
 
         # 3. 连接控制按钮
-        self.btn_connect = QPushButton("⚡ 连接设备 (Connect)")
+        self.btn_connect = QPushButton("⚡ Connect")
         self.btn_connect.setCheckable(True)
         self.btn_connect.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_connect.setStyleSheet("""
@@ -161,13 +161,13 @@ class SerialPanel(QGroupBox):
             
         current_text = self.combo_port.currentText()
         if "⚡ STM32" in current_text:
-            self.lbl_channel_type.setText("⚡ STM32 原生 USB (12 Mbps 全速全双工)")
+            self.lbl_channel_type.setText("⚡ STM32 Native USB (12 Mbps Full Speed)")
             self.lbl_channel_type.setStyleSheet("color: #4ade80; font-weight: bold; font-size: 12px;")
         elif "未检测到" in current_text:
-            self.lbl_channel_type.setText("⚠️ 未检测到 STM32 USB 连接")
+            self.lbl_channel_type.setText("⚠️ No STM32 USB connection detected")
             self.lbl_channel_type.setStyleSheet("color: #f87171; font-weight: bold; font-size: 12px;")
         else:
-            self.lbl_channel_type.setText("🔌 标准 USB 串行端口")
+            self.lbl_channel_type.setText("🔌 Standard USB Serial Port")
             self.lbl_channel_type.setStyleSheet("color: #94a3b8; font-size: 12px;")
 
     def _on_connect_clicked(self):
@@ -178,9 +178,9 @@ class SerialPanel(QGroupBox):
         checked = self.btn_connect.isChecked()
         
         if checked:
-            self.btn_connect.setText("⏳ 正在建立连接...")
+            self.btn_connect.setText("⏳ Establishing connection...")
         else:
-            self.btn_connect.setText("⚡ 连接设备 (Connect)")
+            self.btn_connect.setText("⚡ Connect")
             self.is_connected = False
             self._update_channel_badge()
         
@@ -192,11 +192,11 @@ class SerialPanel(QGroupBox):
         self.is_connected = success
         if success:
             self.btn_connect.setChecked(True)
-            self.btn_connect.setText("🔌 断开连接 (Disconnect)")
+            self.btn_connect.setText("🔌 Disconnect")
             port_name = self.combo_port.currentData() or ""
-            self.lbl_channel_type.setText(f"✓ 已连接 {port_name} (12 Mbps 全速传输中)")
+            self.lbl_channel_type.setText(f"✓ Connected {port_name} (12 Mbps 全速传输中)")
             self.lbl_channel_type.setStyleSheet("color: #22c55e; font-weight: bold; font-size: 12px;")
         else:
             self.btn_connect.setChecked(False)
-            self.btn_connect.setText("⚡ 连接设备 (Connect)")
+            self.btn_connect.setText("⚡ Connect")
             self._update_channel_badge()
