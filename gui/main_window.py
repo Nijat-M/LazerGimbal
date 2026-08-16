@@ -197,10 +197,7 @@ class MainWindow(QMainWindow):
         # 实时信息更新
         self.vision_thread.stats_signal.connect(self.camera_panel.update_vision_stats)
         self.vision_thread.camera_state_signal.connect(self.on_camera_state_changed)
-        # 视觉 -> 控制器（两条信号路径）
-        # TRACKING 模式：发送两点误差（激光 vs 蓝色目标）
-        self.vision_thread.control_signal.connect(self.controller.handle_vision_error)
-        # BLUE_TRACKING 模式：发送蓝色目标原始坐标（误差由控制器计算）
+        # 物体追踪模式发送目标原始坐标，误差由控制器计算
         self.vision_thread.target_pos_signal.connect(self.controller.handle_target_position)
 
         # 实时画面 -> FPS 鼠标瞄准控制器
@@ -411,13 +408,14 @@ class MainWindow(QMainWindow):
             self.status_label.setText(status)
     
     def on_reset_position(self):
-        """重置位置"""
+        """停止电机并重置相对原点。"""
         if not self.controller.sync_position():
             return
         QMessageBox.information(
             self, 
-            "重置完成", 
-            "已向 STM32 发送物理归中命令 (90°, 90°)"
+            "重置完成",
+            "电机已停止，当前位置已设为相对原点。\n"
+            "当前硬件没有原点开关，因此不会自动物理归中。"
         )
     
     def on_manual_move(self, axis, direction):
@@ -441,7 +439,7 @@ class MainWindow(QMainWindow):
         elif len(args) == 2:
             # 位置信息 (x, y)
             x, y = args
-            self.status_label.setText(f"Servo: X={x:.1f}°, Y={y:.1f}°")
+            self.status_label.setText(f"Relative origin: X={x:.1f}°, Y={y:.1f}°")
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """键盘方向键 (↑/↓/←/→) 与 (W/S/A/D) 快捷操控云台（仅在勾选开启时生效）"""
@@ -454,16 +452,16 @@ class MainWindow(QMainWindow):
 
         key = event.key()
         if key in (Qt.Key.Key_Up, Qt.Key.Key_W):
-            self.controller.start_manual_continuous('y', -1)
-            event.accept()
-        elif key in (Qt.Key.Key_Down, Qt.Key.Key_S):
             self.controller.start_manual_continuous('y', 1)
             event.accept()
+        elif key in (Qt.Key.Key_Down, Qt.Key.Key_S):
+            self.controller.start_manual_continuous('y', -1)
+            event.accept()
         elif key in (Qt.Key.Key_Left, Qt.Key.Key_A):
-            self.controller.start_manual_continuous('x', 1)
+            self.controller.start_manual_continuous('x', -1)
             event.accept()
         elif key in (Qt.Key.Key_Right, Qt.Key.Key_D):
-            self.controller.start_manual_continuous('x', -1)
+            self.controller.start_manual_continuous('x', 1)
             event.accept()
         else:
             super().keyPressEvent(event)

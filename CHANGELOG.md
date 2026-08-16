@@ -4,6 +4,18 @@
   🇬🇧 <a href="CHANGELOG.md">English</a> | 🇹🇷 <a href="CHANGELOG_TR.md">Türkçe</a>
 </div>
 
+### [v0.4.4] - 2026-08-16
+- **Industrial Visual Servo Closed-Loop Architecture & Adaptive Differential Braking**:
+  - Re-engineered STM32 firmware motion control from legacy incremental PID to a high-speed **Position-to-Velocity Visual Servo** control law with active differential braking.
+  - Implemented **Adaptive Dual-Zone Differential Damping**: applies low damping ($D=25.0f$) during high-speed chasing for zero-drag acceleration, and automatically engages heavy damping ($D=160.0f$) within the central 25px zone for instant, overshoot-free crosshair lock-on.
+- **Dry Friction Breakaway Feedforward for Unbearinged Chassis**:
+  - Added dynamic stiction compensation (`FRICTION_BREAKAWAY_RATE_X = 120.0f`) with linear center attenuation (<15px), eliminating start-up deadband sluggishness on pan axes without bearings while preventing slow-speed hunting/oscillation.
+- **Hardware Performance Unleashed (9000 steps/s & 10000 steps/s²)**:
+  - Boosted firmware speed limits to `MAX_STEP_RATE = 9000.0f` (~1000°/s) and `MAX_STEP_ACCEL = 10000.0f`, delivering ultra-responsive high-speed target tracking.
+- **60 FPS Real-Time Control Pipeline Synchronization**:
+  - Synchronized Python host control loop to **60.0 Hz** (`CONTROL_LOOP_HZ = 60.0`) matching the 60 FPS camera capture frequency.
+  - Decoupled X/Y tracking scales and added Y-axis center damping and soft travel limits.
+
 ### [v0.4.2] - 2026-08-16
 - **Complete Native USB CDC (12 Mbps) Migration & Bluetooth Deprecation**:
   - Successfully migrated STM32F401 hardware firmware from legacy Bluetooth UART (115.2 kbps) to **STM32 Native USB CDC Virtual COM Port (12 Mbps Full-Speed)**.

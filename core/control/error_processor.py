@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 误差处理器 (Error Processor)
 
@@ -18,14 +18,16 @@ class ErrorProcessor:
     零延迟误差处理器
     """
 
-    def __init__(self, max_pixel_jump: int = 300):
+    def __init__(self, max_pixel_jump: int = 350, max_pixel_jump_y: int = 120):
         """
         初始化误差处理器
 
         Args:
-            max_pixel_jump: 允许的单帧最大像素跳变（防异常框）
+            max_pixel_jump: 允许的单帧X轴最大像素跳变（防异常框）
+            max_pixel_jump_y: 允许的单帧Y轴最大像素跳变（防俯仰突变冲击）
         """
-        self.max_pixel_jump = max_pixel_jump
+        self.max_pixel_jump_x = max_pixel_jump
+        self.max_pixel_jump_y = max_pixel_jump_y
         self.last_x = 0
         self.last_y = 0
 
@@ -40,13 +42,13 @@ class ErrorProcessor:
         Returns:
             (processed_x, processed_y): 处理后的误差（像素）
         """
-        # 突变拦截逻辑：如果两帧之间目标误差瞬间跳变极大（比如YOLO出Bug闪了一下）
-        # 则强制限制最大跳变步长，防止微分项(Kd)瞬间爆炸
-        if abs(raw_x - self.last_x) > self.max_pixel_jump:
-            raw_x = self.last_x + (self.max_pixel_jump if raw_x > self.last_x else -self.max_pixel_jump)
+        # 突变拦截逻辑：如果两帧之间目标误差瞬间跳变极大（比如识别噪点闪了一下）
+        # 则限制最大跳变步长，防止微分项(Kd)瞬间爆炸
+        if abs(raw_x - self.last_x) > self.max_pixel_jump_x:
+            raw_x = self.last_x + (self.max_pixel_jump_x if raw_x > self.last_x else -self.max_pixel_jump_x)
             
-        if abs(raw_y - self.last_y) > self.max_pixel_jump:
-            raw_y = self.last_y + (self.max_pixel_jump if raw_y > self.last_y else -self.max_pixel_jump)
+        if abs(raw_y - self.last_y) > self.max_pixel_jump_y:
+            raw_y = self.last_y + (self.max_pixel_jump_y if raw_y > self.last_y else -self.max_pixel_jump_y)
 
         self.last_x = raw_x
         self.last_y = raw_y

@@ -2,7 +2,7 @@
 """
 模式选择面板 (Mode Selection Panel)
 
-工作模式：待机、自动追踪、按钮测试和 FPS 风格鼠标瞄准。
+工作模式：待机、蓝色物体追踪、YOLO 追踪、按钮测试和 FPS 风格鼠标瞄准。
 """
 
 from PyQt6.QtWidgets import (
@@ -16,7 +16,7 @@ class ModePanel(QGroupBox):
     """模式选择面板"""
     
     # 信号：模式改变
-    mode_changed = pyqtSignal(str)  # "IDLE", "TRACKING", "TEST"
+    mode_changed = pyqtSignal(str)
     
     def __init__(self, parent=None):
         super().__init__("工作模式 (Mode)", parent)
@@ -31,7 +31,6 @@ class ModePanel(QGroupBox):
         
         # 工作模式单选框
         self.rb_idle = QRadioButton("待机 (IDLE)")
-        self.rb_tracking = QRadioButton("激光追踪 (Laser Tracking)")
         self.rb_blue_tracking = QRadioButton("蓝色物体追踪 (Blue Object)")
         self.rb_yolo_tracking = QRadioButton("YOLO 人体追踪 (YOLO Tracking)")
         self.rb_test = QRadioButton("测试模式 (Test Mode)")
@@ -40,23 +39,20 @@ class ModePanel(QGroupBox):
         self.rb_idle.setChecked(True)
         
         # 设置提示文本
-        self.rb_tracking.setToolTip("红色激光追踪蓝色物体")
         self.rb_blue_tracking.setToolTip("让蓝色物体居中在画面中央")
         self.rb_yolo_tracking.setToolTip("使用 YOLO26 端到端深度学习模型使得人体居中在画面中央")
         self.rb_mouse_manual.setToolTip("点击实时画面捕获鼠标，像 FPS 游戏一样手动瞄准")
         
         self.mode_group.addButton(self.rb_idle, 0)
-        self.mode_group.addButton(self.rb_tracking, 1)
-        self.mode_group.addButton(self.rb_blue_tracking, 2)
-        self.mode_group.addButton(self.rb_yolo_tracking, 4)
+        self.mode_group.addButton(self.rb_blue_tracking, 1)
+        self.mode_group.addButton(self.rb_yolo_tracking, 2)
         self.mode_group.addButton(self.rb_test, 3)
-        self.mode_group.addButton(self.rb_mouse_manual, 5)
+        self.mode_group.addButton(self.rb_mouse_manual, 4)
         
         # 连接信号
         self.mode_group.idToggled.connect(self._on_mode_toggled)
         
         layout.addWidget(self.rb_idle)
-        layout.addWidget(self.rb_tracking)
         layout.addWidget(self.rb_blue_tracking)
         layout.addWidget(self.rb_yolo_tracking)
         layout.addWidget(self.rb_test)
@@ -69,11 +65,10 @@ class ModePanel(QGroupBox):
         
         mode_map = {
             0: "IDLE",
-            1: "TRACKING",
-            2: "BLUE_TRACKING",
+            1: "BLUE_TRACKING",
+            2: "YOLO_TRACKING",
             3: "TEST",
-            4: "YOLO_TRACKING",
-            5: "MANUAL_MOUSE",
+            4: "MANUAL_MOUSE",
         }
         mode = mode_map.get(btn_id, "IDLE")
         
@@ -106,19 +101,16 @@ class ModePanel(QGroupBox):
         btn_id = self.mode_group.checkedId()
         mode_map = {
             0: "IDLE",
-            1: "TRACKING",
-            2: "BLUE_TRACKING",
+            1: "BLUE_TRACKING",
+            2: "YOLO_TRACKING",
             3: "TEST",
-            4: "YOLO_TRACKING",
-            5: "MANUAL_MOUSE",
+            4: "MANUAL_MOUSE",
         }
         return mode_map.get(btn_id, "IDLE")
 
     def set_mode(self, mode: str):
         """通过代码切换当前选中的模式"""
-        if mode == "TRACKING":
-            self.rb_tracking.setChecked(True)
-        elif mode == "BLUE_TRACKING":
+        if mode == "BLUE_TRACKING":
             self.rb_blue_tracking.setChecked(True)
         elif mode == "YOLO_TRACKING":
             self.rb_yolo_tracking.setChecked(True)

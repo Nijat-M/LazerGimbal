@@ -48,12 +48,12 @@ Güncellemelerin ve düzeltmelerin detaylı geçmişi için lütfen [CHANGELOG_T
 - **Tek Tıkla Akıllı Takip Başlatma**: Seri port ve kamera durumunu doğrulayarak hedef takibini sorunsuz başlatan "Kontrolü Başlat" butonu.
 
 ### ⚙️ Gerçek Zamanlı Hareket Kontrolü (STM32 MCU / C)
-- **10kHz Donanımsal DDA Mikro-Adım Darbe Üreticisi**: `TIM2` donanım kesmesinde 100μs çözünürlüklü Bresenham / DDA darbe dağıtıcısı ile sessiz, pürüzsüz mikro-adım sürüşü (16 mikro-adım = 3200 darbe/tur).
-- **50Hz Artımlı PID Motor Kontrolü**: Her 20ms'de hız artımlarını ($\Delta\text{Steps}$) hesaplar, integral birikmesine (windup) karşı doğal korumalıdır.
+- **10kHz Sürekli Fazlı DDA Darbe Üreticisi**: Kesirli adımları kontrol döngüleri arasında koruyarak düşük takip hızlarında sıfır ve tek darbe arasında sıçramayı önler.
+- **50Hz Artımlı PID Motor Kontrolü**: Mevcut görsel PID korunurken ayrı motor katmanı güvenli hız ve ivme sınırlarını uygular.
 - **5 Katmanlı Endüstriyel Güvenlik ve Hata Koruma Mimarisi**:
   1. **Dalgalanma Otomatik İyileşme (Auto-Healing Reset)**: Hata yakalayıcılar (`HardFault_Handler` / `Error_Handler`) motor pinlerini anında 0V'a çeker ve ani voltaj sıçramalarında 1ms'de otomatik yeniden başlatma (`NVIC_SystemReset()`) uygular.
-  2. **Donanımsal Görsel Bekçi (Watchdog)**: Veri akışı koptuğunda 2.0 saniye içinde motor darbelerini durdurur ve şaftı kilitler.
-  3. **Hız Değişim Sınırlayıcı (Slew Rate Limiter)**: Döngü başına maksimum adım sınırı (`MAX_STEPS_PER_CYCLE = 80`) ile motorun kontrolden çıkmasını matematiksel olarak engeller.
+  2. **Donanımsal Görsel Bekçi (Watchdog)**: STM32 veri akışı 500ms kesildiğinde STEP çıkışını durdurur; PC ise 250ms eski kalan görsel komutları keser.
+  3. **Motor Hareket Sınırlayıcı**: İlk testler için takip hızını `200 steps/s`, ivmeyi `400 steps/s²` ile sınırlar; yön değiştirmeden önce sıfır hıza iner ve görüntü merkezine 160 piksel kala kademeli yavaşlar.
   4. **UART Koordinat Sınırlaması**: Seri gürültülere karşı giriş hatası $\pm 400\text{px}$ ile sınırlandırılmıştır.
   5. **500ms Bloklanmayan Durum Bildirim LED'i (`PC13`)**: Donanımın çalıştığını gösteren canlı kalp atışı (heartbeat) göstergesi.
 

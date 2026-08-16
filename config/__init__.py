@@ -100,18 +100,6 @@ class ConfigManager:
     def CENTER_Y(self) -> int: return VisionConfig.CENTER_Y
 
     @property
-    def HSV_RED_LOWER1(self): return VisionConfig.HSV_RED_LOWER1
-
-    @property
-    def HSV_RED_UPPER1(self): return VisionConfig.HSV_RED_UPPER1
-
-    @property
-    def HSV_RED_LOWER2(self): return VisionConfig.HSV_RED_LOWER2
-
-    @property
-    def HSV_RED_UPPER2(self): return VisionConfig.HSV_RED_UPPER2
-
-    @property
     def HSV_BLUE_LOWER(self): return VisionConfig.HSV_BLUE_LOWER
 
     @property

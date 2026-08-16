@@ -41,8 +41,8 @@ class PIDTuner(QWidget):
     # 信号：重置PID
     reset_requested = pyqtSignal()
     
-    def __init__(self, initial_kp=0.4, initial_ki=0.0, initial_kd=0.2, 
-                 initial_deadzone=5, invert_x=True, invert_y=True, parent=None):
+    def __init__(self, initial_kp=0.60, initial_ki=0.16, initial_kd=0.50, 
+                 initial_deadzone=5, invert_x=False, invert_y=True, parent=None):
         super().__init__(parent)
         
         self.kp = initial_kp
@@ -309,10 +309,10 @@ class PIDTuner(QWidget):
     
     def _on_reset_clicked(self):
         """重置按钮点击（恢复出厂默认值）"""
-        # 直接使用硬编码的出厂安全值，避免被动态修改污染
-        default_kp = 0.3
-        default_ki = 0.0
-        default_kd = 0.45
+        # 直接使用出厂安全值，与下位机默认值同步
+        default_kp = 0.60
+        default_ki = 0.16
+        default_kd = 0.50
 
         reply = QMessageBox.question(
             self,

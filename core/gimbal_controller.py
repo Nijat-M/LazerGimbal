@@ -4,7 +4,7 @@
 
 [职责 Responsibility]
 1. PID控制循环（固定频率 40Hz）
-2. 舵机位置状态管理（软件坐标估算）
+2. 步进电机相对原点状态管理
 3. 视觉误差接收与处理（通过 ErrorProcessor）
 4. 安全保护机制（看门狗、死区、软限位）
 
@@ -52,9 +52,9 @@ class GimbalController(QObject):
 
         self.serial_thread = serial_thread
 
-        # [舵机位置状态] 软件坐标估算（假设初始中位90度）
-        self.servo_x: float = 90.0
-        self.servo_y: float = 90.0
+        # 当前硬件没有绝对位置反馈；仅记录软件相对原点。
+        self.servo_x: float = 0.0
+        self.servo_y: float = 0.0
 
         # [误差处理器] 负责缩放和滤波（统一从 ControlConfig 读取参数）
         self.error_processor = ErrorProcessor()
@@ -225,48 +225,23 @@ class GimbalController(QObject):
             target_x: 目标在画面中的 X 坐标（像素）
             target_y: 目标在画面中的 Y 坐标（像素）
         """
-        if not self.visual_input_enabled:
-            return
+        with self._motion_lock:
+            if not self.visual_input_enabled:
+                return
 
-        # 计算相对于画面中心的原始误差
-        raw_error_x = target_x - VisionConfig_center_x()
-        raw_error_y = target_y - VisionConfig_center_y()
+            # 计算相对于画面中心的原始误差
+            raw_error_x = target_x - VisionConfig_center_x()
+            raw_error_y = target_y - VisionConfig_center_y()
 
-        # [分辨率归一化] 核心改进：
-        # 将不同分辨率下的误差（像素）统一缩放到 640x480 空间。
-        # 这样 PID 参数和 SPEED_LEVELS 就不需要根据分辨率重新调整。
-        norm_x, norm_y = self._normalize_error(raw_error_x, raw_error_y)
+            # 将不同分辨率下的误差统一缩放到 640x480 空间。
+            norm_x, norm_y = self._normalize_error(raw_error_x, raw_error_y)
+            processed_x, processed_y = self.error_processor.process(norm_x, norm_y)
 
-        # 通过 ErrorProcessor 缩放 + 滤波
-        processed_x, processed_y = self.error_processor.process(norm_x, norm_y)
+            # X/Y 与时间戳作为同一个视觉样本原子提交。
+            self.current_error_x = processed_x
+            self.current_error_y = processed_y
+            self.last_vision_time = time.monotonic()
 
-        self.current_error_x = processed_x
-        self.current_error_y = processed_y
-        self.last_vision_time = time.monotonic()
-
-    def handle_vision_error(self, err_x: int, err_y: int) -> None:
-        """
-        接收视觉线程的误差信号（兼容旧接口）
-
-        此接口保留用于 TRACKING 模式（激光追蓝色目标），
-        该模式下 worker 直接计算两点间误差，无需再做原始坐标转换。
-
-        Args:
-            err_x: X 轴误差（像素）
-            err_y: Y 轴误差（像素）
-        """
-        if not self.visual_input_enabled:
-            return
-        self.last_vision_time = time.monotonic()
-
-        # [分辨率归一化]
-        norm_x, norm_y = self._normalize_error(err_x, err_y)
-
-        # 通过 ErrorProcessor 缩放 + 滤波
-        processed_x, processed_y = self.error_processor.process(norm_x, norm_y)
-
-        self.current_error_x = processed_x
-        self.current_error_y = processed_y
 
     # --------------------------------------------------
     # 核心控制循环
@@ -275,11 +250,11 @@ class GimbalController(QObject):
     def _run_control_loop(self) -> None:
         """
         运行在独立线程中的控制主循环。
-        通过精确睡眠维持指定的控制频率（如40Hz），彻底与 GUI 事件循环解耦。
+        通过精确睡眠维持 60Hz 实时控制频率，与 60 FPS 视觉帧率严格同步。
         """
-        target_dt = 1.0 / 40.0  # 40Hz -> 0.025s
-        
         while self.is_running:
+            loop_hz = float(getattr(ControlConfig, "CONTROL_LOOP_HZ", 60.0))
+            target_dt = 1.0 / max(10.0, loop_hz)
             start_time = time.perf_counter()
             
             # 执行单次计算和发送
@@ -313,20 +288,13 @@ class GimbalController(QObject):
                 return
             axis = self._manual_jog_axis
             direction = self._manual_jog_dir
-            # 仅强化 X 轴连续转动速度 (X轴: 180)，Y 轴保持原样最佳手感 (Y轴: 35)
-            speed_error = 180 if axis == "x" else 35
+            # X 轴连续速度 260 (高速敏捷)，Y 轴保持 40 (柔和)
+            speed_error = 260 if axis == "x" else 40
             simulated_error = speed_error * direction
-            if axis == "x" and self.invert_x:
-                simulated_error = -simulated_error
-            elif axis == "y" and self.invert_y:
-                simulated_error = -simulated_error
 
             command = f"<{simulated_error},0,0>\n" if axis == "x" else f"<0,{simulated_error},0>\n"
             self.serial_thread.send_realtime_command(command)
             return
-
-
-
 
         if self.manual_mouse_enabled:
             self._manual_mouse_control_loop()
@@ -355,10 +323,32 @@ class GimbalController(QObject):
         if abs(err_y) < ControlConfig.DEADZONE:
             err_y = 0
 
+        # 反转设置 (视觉坐标系下: X轴默认不变，Y轴图像向下为正因而取反)
         if self.invert_x:
             err_x = -err_x
         if self.invert_y:
             err_y = -err_y
+
+        # 应用 X/Y 轴独立追踪缩放（针对机械特性进行差分动态分配）
+        scale_x = getattr(ControlConfig, "TRACKING_SCALE_X", 1.20)
+        scale_y = getattr(ControlConfig, "TRACKING_SCALE_Y", 0.45)
+        max_err_x = getattr(ControlConfig, "TRACKING_MAX_ERROR_X", 360)
+        max_err_y = getattr(ControlConfig, "TRACKING_MAX_ERROR_Y", 50)
+
+        # Y 轴过冲抑制（防上下来回摆动震荡）：进入中心缓冲区时平滑过渡减速
+        abs_y = abs(err_y)
+        y_settle_zone = 15
+        if abs_y < y_settle_zone:
+            scale_y_effective = scale_y * (abs_y / y_settle_zone)
+        else:
+            scale_y_effective = scale_y
+
+        err_x = round(err_x * scale_x)
+        err_y = round(err_y * scale_y_effective)
+
+        # 幅值安全截断保护 (防止Y轴打到机械限位)
+        err_x = max(-max_err_x, min(max_err_x, err_x))
+        err_y = max(-max_err_y, min(max_err_y, err_y))
 
         self.serial_thread.send_realtime_command(f"<{err_x},{err_y},0>\n")
 
@@ -422,13 +412,9 @@ class GimbalController(QObject):
             logger.warning("[MANUAL] 忽略无效的手动移动参数")
             return
 
-        # X 轴调大至 90 (明显步距)，Y 轴完全恢复原样最佳手感 (25)
-        step_error = 90 if axis == "x" else 25
+        # X 轴调至 120 (清晰步距)，Y 轴手感保持 25
+        step_error = 120 if axis == "x" else 25
         simulated_error = step_error * direction
-        if axis == "x" and self.invert_x:
-            simulated_error = -simulated_error
-        elif axis == "y" and self.invert_y:
-            simulated_error = -simulated_error
 
         command = (
             f"<{simulated_error},0,0>\n"
@@ -474,9 +460,9 @@ class GimbalController(QObject):
 
 
     def sync_position(self) -> bool:
-        """Physically center the legacy servos and reset the virtual aim origin."""
+        """Stop both motors and treat the current pose as the relative origin."""
         if not self._is_serial_connected():
-            self.status_update_signal.emit("⚠️ 串口未连接，无法执行归中")
+            self.status_update_signal.emit("⚠️ 串口未连接，无法重置控制状态")
             return False
 
         with self._motion_lock:
@@ -485,13 +471,13 @@ class GimbalController(QObject):
             self.error_processor.reset()
             self.manual_motion_active = False
             self.serial_thread.send_center_command()
-            self.servo_x = float(ControlConfig.SERVO_CENTER)
-            self.servo_y = float(ControlConfig.SERVO_CENTER)
+            self.servo_x = 0.0
+            self.servo_y = 0.0
             target = self.manual_aim.reset_target()
 
         self.manual_target_update_signal.emit(*target)
         self.position_update_signal.emit(self.servo_x, self.servo_y)
-        self.status_update_signal.emit("云台已发送归中命令 (90, 90)")
+        self.status_update_signal.emit("电机已停止，当前位置已设为相对原点")
         return True
 
     def _normalize_error(self, err_x: int, err_y: int) -> tuple[int, int]:

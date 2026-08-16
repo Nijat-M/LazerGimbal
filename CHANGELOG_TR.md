@@ -4,6 +4,17 @@
   🇬🇧 <a href="CHANGELOG.md">English</a> | 🇹🇷 <a href="CHANGELOG_TR.md">Türkçe</a>
 </div>
 
+### [v0.4.4] - 2026-08-16
+- **Endüstriyel Görsel Servo Kapalı Çevrim Mimarisi ve Uyarlanabilir Diferansiyel Frenleme**:
+  - STM32 bellenim hareket kontrolü eski artımsal PID yapısından yüksek hızlı **Konumdan Hıza Görsel Servo (Position-to-Velocity Visual Servo)** ve aktif diferansiyel frenleme modeline dönüştürüldü.
+  - **Uyarlanabilir Çift Bölgeli Diferansiyel Sönümleme**: Yüksek hızlı takip sırasında düşük sönümleme ($D=25.0f$) uygulayarak sürtünmesiz ivmelenme sağlarken, merkezdeki 25px hedefe girildiğinde otomatik olarak ağır sönümleme ($D=160.0f$) devreye sokularak aşım (overshoot) olmadan anında hedefe kilitlenme sağlandı.
+- **Rulmansız Tabanlar İçin Kuru Sürtünme Ayrılma İleri Beslemesi (Stiction Compensation)**:
+  - Rulmansız X ekseni tabanındaki kuru sürtünmeyi aşmak için dinamik ileri besleme (`FRICTION_BREAKAWAY_RATE_X = 120.0f`) ve merkezde lineer sönümleme (<15px) eklendi; kalkış gecikmesi giderilirken düşük hızdaki salınımlar tamamen yok edildi.
+- **Donanım Performansının Zirvesi (9000 steps/s ve 10000 steps/s²)**:
+  - Bellenim hız sınırları `MAX_STEP_RATE = 9000.0f` (~1000°/s) ve `MAX_STEP_ACCEL = 10000.0f` seviyesine çıkarılarak ultra tepkisel ve yüksek hızlı hedef takibi sağlandı.
+- **60 FPS Gerçek Zamanlı Kontrol Senkronizasyonu**:
+  - Python kontrol döngüsü 60 FPS kamera frekansıyla 1:1 uyumlu olacak şekilde **60.0 Hz** (`CONTROL_LOOP_HZ = 60.0`) olarak güncellendi; X/Y ölçekleri ayrıştırıldı ve Y ekseni mekanik koruma sönümlemesi eklendi.
+
 ### [v0.4.2] - 2026-08-16
 - **Tam Yerel USB CDC (12 Mbps) Geçişi ve Bluetooth Kodlarının Tamamen Temizlenmesi**:
   - STM32F401 donanım bellenimi eski Bluetooth UART (115.2 kbps) yapısından **STM32 Yerel USB CDC Sanal COM Port (12 Mbps Full-Speed)** mimarisine başarıyla taşındı.

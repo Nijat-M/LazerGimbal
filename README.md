@@ -48,12 +48,12 @@ Please see [CHANGELOG.md](CHANGELOG.md) for a detailed history of updates and fi
 - **One-Click Tracking Linkage**: Intelligent "Start Control" button validates serial and camera readiness and seamlessly activates target tracking.
 
 ### ⚙️ Real-Time Motion Control (STM32 MCU / C)
-- **10kHz Hardware DDA Microstep Pulse Generator**: 100μs granularity Bresenham / DDA pulse distributor on `TIM2` hardware interrupt, delivering whisper-quiet, ultra-smooth microstepping (16 microsteps = 3200 pulses/rev).
-- **50Hz Incremental PID Engine**: Computes velocity microstep deltas ($\Delta\text{Steps}$) every 20ms, natively immune to integral windup.
+- **10kHz Continuous-Phase DDA Pulse Generator**: Preserves fractional steps across control cycles so low tracking speeds remain smooth instead of alternating between zero and one pulse.
+- **50Hz Incremental PID Engine**: Retains the existing visual PID while a dedicated motor layer applies conservative speed and acceleration limits.
 - **5-Layer Industrial Safety & Fault Protection**:
   1. **Surge Auto-Healing Reset**: Exception handlers (`HardFault_Handler` / `Error_Handler`) instantly clamp motor pins to 0V and trigger a 1ms auto-reboot (`NVIC_SystemReset()`) to recover from back-EMF or voltage transients.
-  2. **Hardware Visual Watchdog**: 2.0-second timeout automatically halts pulses and locks motor shafts if telemetry is lost.
-  3. **Velocity Slew Rate Limiter**: Maximum step limit (`MAX_STEPS_PER_CYCLE = 80`) mathematically prevents mechanical runaway.
+  2. **Hardware Visual Watchdog**: 500ms telemetry timeout stops STEP output, while the PC stops stale visual commands after 250ms.
+  3. **Motor Motion Limiter**: Uses conservative initial limits of `200 steps/s` and `400 steps/s²`, forces zero-speed direction changes, and slows proportionally within 160 pixels of frame center.
   4. **UART Coordinate Clamping**: Input error bounded to $\pm 400\text{px}$ to shield against serial noise.
   5. **500ms Non-Blocking Heartbeat LED (`PC13`)**: Instant visual feedback of MCU execution status.
 

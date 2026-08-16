@@ -14,9 +14,10 @@ class ControlConfig:
     # ==========================================
     # 控制参数 (Control Parameters)
     # ==========================================
-    KP: float = 0.4    # 比例系数 (与STM32上电安全值同步)
-    KI: float = 0.16   # 积分系数 (与STM32上电安全值同步)
-    KD: float = 0.5    # 微分系数 (与STM32上电安全值同步)
+    CONTROL_LOOP_HZ: float = 60.0 # 控制循环频率 (60Hz，与60FPS相机帧率完美同步)
+    KP: float = 0.60   # 比例系数 (敏捷跟手，平稳无过冲)
+    KI: float = 0.16   # 积分系数 (消除稳态静差)
+    KD: float = 0.50   # 微分系数 (高速阻尼，抑制摆动)
     DEADZONE: int = 5  # 拦截死区（像素），在此死区内强制认定为误差0
 
     # FPS 风格鼠标手动瞄准
@@ -29,13 +30,21 @@ class ControlConfig:
     MOUSE_PITCH_MAX: float = 45.0
 
     # ==========================================
-    # 安全限制 (Safety Limits)
+    # 安全限制与追踪参数 (Safety Limits & Tracking Tunings)
     # ==========================================
-    VISION_WATCHDOG_TIMEOUT: float = 1.0  # 视觉信号看门狗超时（秒）
+    VISION_WATCHDOG_TIMEOUT: float = 0.25  # 目标坐标超过250ms未更新时立即停止
 
-    # 轴向反转（摄像头方向与云台方向相反时设为True）
-    INVERT_X: bool = True
+    # 轴向反转（默认：X轴不反转，Y轴反转）
+    # 视觉坐标中，目标在右侧(+X)需向右转(+err)，故X轴默认不反转；
+    # 目标在上方(-Y)需向上抬头(+err)，故Y轴默认取反。
+    INVERT_X: bool = False
     INVERT_Y: bool = True
+
+    # 追踪误差缩放与安全限幅（针对新电机与机械俯仰行程优化）
+    TRACKING_SCALE_X: float = 1.20       # X 轴追踪误差缩放系数（配合下位机直接速度闭环）
+    TRACKING_SCALE_Y: float = 0.45       # Y 轴追踪误差缩放系数（保持平稳，防过冲保护限位）
+    TRACKING_MAX_ERROR_X: int = 360      # X 轴单周期最大追踪误差（匹配 1600 steps/s 高转速）
+    TRACKING_MAX_ERROR_Y: int = 50       # Y 轴单周期最大追踪误差
 
     # 舵机软件限位（度）
     SERVO_MIN_LIMIT: int = 0

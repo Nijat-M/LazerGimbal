@@ -29,7 +29,7 @@
 #include <stdlib.h> // abs, atoi, atof
 #include <string.h>
 #include <stdio.h>
-#include <math.h>   // fabsf, roundf
+#include <math.h>   // fabsf
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -45,9 +45,16 @@ typedef enum {
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define RX_BUFFER_SIZE 64
-#define PID_SUBTICKS_PER_CYCLE 200    // 10kHz 采样下，200 ticks = 20ms = 50Hz PID 周期
-#define MAX_STEPS_PER_CYCLE 80.0f     // 单个 20ms 周期最大步数 (80步/20ms = 4000 steps/s 速度保护限幅)
-#define DEADZONE_PIXELS 3             // 准星死区 (像素)
+#define STEP_TIMER_HZ 10000.0f            // TIM2 STEP 脉冲调度频率
+#define PID_CONTROL_HZ 50.0f              // 保留现有 50Hz PID 解算频率
+#define PID_SUBTICKS_PER_CYCLE 200U       // 10kHz / 200 = 50Hz
+#define MAX_STEP_RATE 9000.0f             // 最大 9000 steps/s (高达 ~1000°/s 极速追击)
+#define MAX_STEP_ACCEL 10000.0f           // 最大加速度 10000 steps/s^2 (毫秒级起步与强力制动)
+#define FRICTION_BREAKAWAY_RATE_X 120.0f  // X 轴克服静摩擦起步前馈 (中心区平滑线性衰减)
+#define MAX_RATE_CHANGE_PER_CYCLE (MAX_STEP_ACCEL / PID_CONTROL_HZ)
+#define TRACKING_SLOW_ZONE_PIXELS 20.0f   // 准星中心 20px 核心区
+#define VISION_TIMEOUT_CYCLES 24U         // 含最多20ms对齐延迟，总超时不超过500ms
+#define DEADZONE_PIXELS 5                 // 与上位机默认死区一致
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -60,30 +67,39 @@ typedef enum {
 /* USER CODE BEGIN PV */
 
 // PID 参数 (与上位机 GUI 实时同步)
-volatile float Kp = 0.4f, Ki = 0.16f, Kd = 0.5f;
+volatile float Kp = 0.60f, Ki = 0.16f, Kd = 0.50f;
 
-// 视觉误差状态
-volatile int16_t current_error_x = 0;
-volatile int16_t current_error_y = 0;
-volatile int16_t prev_error_x = 0;
-volatile int16_t prev_error_y = 0;
-volatile int16_t prev_prev_error_x = 0;
-volatile int16_t prev_prev_error_y = 0;
+// USB 发布完整待处理包，TIM2 通过递增序号原子消费。
+volatile int16_t pending_error_x = 0;
+volatile int16_t pending_error_y = 0;
+volatile uint8_t pending_fire = 0;
+volatile uint32_t rx_packet_sequence = 0;
+uint32_t consumed_packet_sequence = 0;
 
-// 10kHz 高频 DDA 脉冲分发器变量
+// 仅由 TIM2 修改的当前视觉误差与 PID 历史
+int16_t current_error_x = 0;
+int16_t current_error_y = 0;
+int16_t prev_error_x = 0;
+int16_t prev_error_y = 0;
+int16_t prev_prev_error_x = 0;
+int16_t prev_prev_error_y = 0;
+
+// 电机速度规划与 10kHz 连续相位 DDA 状态
 volatile uint16_t pid_subtick_counter = 0;
-volatile uint16_t steps_to_send_x = 0;
-volatile uint16_t steps_to_send_y = 0;
-volatile uint16_t step_accumulator_x = 0;
-volatile uint16_t step_accumulator_y = 0;
+volatile float target_step_rate_x = 0.0f;
+volatile float target_step_rate_y = 0.0f;
+volatile float current_step_rate_x = 0.0f;
+volatile float current_step_rate_y = 0.0f;
+volatile float step_phase_x = 0.0f;
+volatile float step_phase_y = 0.0f;
 volatile uint8_t pulse_active_x = 0;
 volatile uint8_t pulse_active_y = 0;
 
 // 运行控制与安全标志
-volatile uint8_t current_fire = 0;
-volatile uint16_t vision_timeout_counter = 0;
-volatile uint8_t new_data_flag = 0;   // 异步数据锁：拿到新图像帧才做增量
-volatile uint32_t control_epoch = 0;  // 抢占式急停纪元锁
+uint8_t current_fire = 0;
+uint16_t vision_timeout_counter = 0;
+uint8_t stop_holdoff_cycles = 0;
+volatile uint8_t stop_requested = 0;  // 仅由 TIM2 消费并执行的急停请求
 
 // 通讯接收状态机变量 (USB CDC 高速通道)
 volatile RxState rx_state = STATE_IDLE;
@@ -95,27 +111,84 @@ volatile uint8_t rx_index = 0;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-static void StopMotion(void);
+static float LimitTrackingRate(float pid_step_delta, int16_t error);
+static float RampMotorRate(float current_rate, float target_rate);
+static void RequestStop(void);
+static void ApplyStopMotion(void);
 static void ResetPosition(void);
 void Process_Protocol_Byte(uint8_t byte);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-static void StopMotion(void)
+static float LimitTrackingRate(float target_rate, int16_t error)
 {
-    control_epoch++;
+    if (!isfinite(target_rate)) {
+        return 0.0f;
+    }
+
+    float abs_error = fabsf((float)error);
+    if (abs_error < (float)DEADZONE_PIXELS) {
+        return 0.0f;
+    }
+
+    float rate_limit = MAX_STEP_RATE;
+    if (abs_error < TRACKING_SLOW_ZONE_PIXELS) {
+        rate_limit *= abs_error / TRACKING_SLOW_ZONE_PIXELS;
+    }
+
+    if (target_rate > rate_limit) target_rate = rate_limit;
+    if (target_rate < -rate_limit) target_rate = -rate_limit;
+    return target_rate;
+}
+
+static float RampMotorRate(float current_rate, float target_rate)
+{
+    if (!isfinite(current_rate) || !isfinite(target_rate)) {
+        return 0.0f;
+    }
+    if (target_rate > MAX_STEP_RATE) target_rate = MAX_STEP_RATE;
+    if (target_rate < -MAX_STEP_RATE) target_rate = -MAX_STEP_RATE;
+
+    // 换向时必须先减速到零，禁止 STEP/DIR 瞬间反转。
+    if ((current_rate > 0.0f && target_rate < 0.0f) ||
+        (current_rate < 0.0f && target_rate > 0.0f)) {
+        target_rate = 0.0f;
+    }
+
+    float difference = target_rate - current_rate;
+    float next_rate = target_rate;
+    if (fabsf(difference) > MAX_RATE_CHANGE_PER_CYCLE) {
+        next_rate = current_rate + ((difference > 0.0f) ?
+                                    MAX_RATE_CHANGE_PER_CYCLE :
+                                    -MAX_RATE_CHANGE_PER_CYCLE);
+    }
+
+    if (next_rate > MAX_STEP_RATE) next_rate = MAX_STEP_RATE;
+    if (next_rate < -MAX_STEP_RATE) next_rate = -MAX_STEP_RATE;
+    return next_rate;
+}
+
+static void RequestStop(void)
+{
+    stop_requested = 1;
+}
+
+static void ApplyStopMotion(void)
+{
     current_error_x = 0;
     current_error_y = 0;
     prev_error_x = 0;
     prev_error_y = 0;
     prev_prev_error_x = 0;
     prev_prev_error_y = 0;
-    new_data_flag = 0;
-    steps_to_send_x = 0;
-    steps_to_send_y = 0;
-    step_accumulator_x = 0;
-    step_accumulator_y = 0;
+    consumed_packet_sequence = rx_packet_sequence;
+    target_step_rate_x = 0.0f;
+    target_step_rate_y = 0.0f;
+    current_step_rate_x = 0.0f;
+    current_step_rate_y = 0.0f;
+    step_phase_x = 0.0f;
+    step_phase_y = 0.0f;
     
     // 强制拉低脉冲引脚
     if (pulse_active_x) {
@@ -129,15 +202,16 @@ static void StopMotion(void)
     
     current_fire = 0;
     vision_timeout_counter = 0;
+    stop_holdoff_cycles = 3; // 丢弃 STOP 后约 60ms 内可能仍在传输的旧运动包
+    stop_requested = 0;
 }
 
 static void ResetPosition(void)
 {
-    StopMotion();
-    // 简单的 LED 闪烁提示
-    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET); // On
-    HAL_Delay(100);
-    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);   // Off
+    // 当前硬件没有原点开关；该命令只停止并重置控制状态。
+    // 禁止在 USB 接收中断中调用 HAL_Delay，否则会阻塞 SysTick。
+    RequestStop();
+    HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 }
 
 /**
@@ -181,12 +255,12 @@ void Process_Protocol_Byte(uint8_t byte)
                 if (parsed_y > 400) parsed_y = 400;
                 if (parsed_y < -400) parsed_y = -400;
 
-                current_error_x = (int16_t)parsed_x;
-                current_error_y = (int16_t)parsed_y;
-                current_fire = (uint8_t)atoi(token3);
-                
-                new_data_flag = 1;
-                vision_timeout_counter = 0; // 喂狗
+                // 先写完整待处理数据，最后递增序号作为原子发布点。
+                // TIM2 即使在写入中途抢占，也只会看到上一个完整序号。
+                pending_error_x = (int16_t)parsed_x;
+                pending_error_y = (int16_t)parsed_y;
+                pending_fire = (uint8_t)atoi(token3);
+                rx_packet_sequence++;
             }
             
             rx_state = STATE_IDLE;
@@ -209,9 +283,19 @@ void Process_Protocol_Byte(uint8_t byte)
             char *token3 = strtok(NULL, ",");
             
             if (token1 && token2 && token3) {
-                Kp = (float)atof(token1);
-                Ki = (float)atof(token2);
-                Kd = (float)atof(token3);
+                float new_kp = (float)atof(token1);
+                float new_ki = (float)atof(token2);
+                float new_kd = (float)atof(token3);
+
+                // 只接受 GUI 支持范围内的有限参数，防止 NaN/Inf 绕过限速。
+                if (isfinite(new_kp) && isfinite(new_ki) && isfinite(new_kd) &&
+                    new_kp >= 0.0f && new_kp <= 2.0f &&
+                    new_ki >= 0.0f && new_ki <= 1.0f &&
+                    new_kd >= 0.0f && new_kd <= 1.0f) {
+                    Kp = new_kp;
+                    Ki = new_ki;
+                    Kd = new_kd;
+                }
             }
             
             rx_state = STATE_IDLE;
@@ -228,7 +312,7 @@ void Process_Protocol_Byte(uint8_t byte)
         if (byte == '\n' || byte == '\r') {
             rx_buffer[rx_index] = '\0';
             if (strcmp((char*)rx_buffer, "STOP") == 0) {
-                StopMotion();
+                RequestStop();
             } else if (strcmp((char*)rx_buffer, "CENTER") == 0) {
                 ResetPosition();
             }
@@ -381,22 +465,31 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
           pulse_active_y = 0;
       }
 
+      // 急停状态只由最高优先级 TIM2 修改，确保之后不再产生上升沿。
+      if (stop_requested) {
+          ApplyStopMotion();
+          return;
+      }
+
       // ==========================================================
-      // [2] Bresenham / DDA 均匀脉冲分配器 (Rising Edge)
+      // [2] 连续相位 DDA 脉冲分配器 (Rising Edge)
+      // 小数步跨 PID 周期保留，低速时不再发生 0/1 步量化跳变。
       // ==========================================================
-      if (steps_to_send_x > 0) {
-          step_accumulator_x += steps_to_send_x;
-          if (step_accumulator_x >= PID_SUBTICKS_PER_CYCLE) {
-              step_accumulator_x -= PID_SUBTICKS_PER_CYCLE;
+      float abs_rate_x = fabsf(current_step_rate_x);
+      if (abs_rate_x > 0.0f) {
+          step_phase_x += abs_rate_x;
+          if (step_phase_x >= STEP_TIMER_HZ) {
+              step_phase_x -= STEP_TIMER_HZ;
               HAL_GPIO_WritePin(GPIOA, X_STP_Pin, GPIO_PIN_SET);
               pulse_active_x = 1;
           }
       }
 
-      if (steps_to_send_y > 0) {
-          step_accumulator_y += steps_to_send_y;
-          if (step_accumulator_y >= PID_SUBTICKS_PER_CYCLE) {
-              step_accumulator_y -= PID_SUBTICKS_PER_CYCLE;
+      float abs_rate_y = fabsf(current_step_rate_y);
+      if (abs_rate_y > 0.0f) {
+          step_phase_y += abs_rate_y;
+          if (step_phase_y >= STEP_TIMER_HZ) {
+              step_phase_y -= STEP_TIMER_HZ;
               HAL_GPIO_WritePin(GPIOA, Y_STP_Pin, GPIO_PIN_SET);
               pulse_active_y = 1;
           }
@@ -410,71 +503,91 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
       {
           pid_subtick_counter = 0;
 
-          // ------------------------------------------------------
-          // 3.1 安全看门狗 (2秒无有效视觉包自动挂起)
-          // ------------------------------------------------------
-          if (vision_timeout_counter < 100) {
-              vision_timeout_counter++;
-          } else {
-              StopMotion();
-          }
-
-          // ------------------------------------------------------
-          // 3.2 异步数据防瞎积分锁
-          // ------------------------------------------------------
-          if (!new_data_flag) {
-              // 暂无新视觉帧，平滑刹车停发脉冲
-              steps_to_send_x = 0;
-              steps_to_send_y = 0;
-              step_accumulator_x = 0;
-              step_accumulator_y = 0;
+          // STOP 后短暂丢弃串口中可能已经在途的旧运动包。
+          if (stop_holdoff_cycles > 0U) {
+              consumed_packet_sequence = rx_packet_sequence;
+              stop_holdoff_cycles--;
+              vision_timeout_counter = 0;
               return;
           }
-          new_data_flag = 0;
-          uint32_t command_epoch = control_epoch;
 
-          // ------------------------------------------------------
-          // 3.3 增量式 PID 解算 (X 轴 & Y 轴)
-          // ------------------------------------------------------
-          float delta_x = 0.0f;
-          if (abs(current_error_x) >= DEADZONE_PIXELS) {
-              delta_x = Kp * (float)(current_error_x - prev_error_x) + 
-                        Ki * (float)current_error_x + 
-                        Kd * (float)(current_error_x - 2 * prev_error_x + prev_prev_error_x);
+          uint32_t latest_sequence = rx_packet_sequence;
+          if (latest_sequence != consumed_packet_sequence) {
+              // TIM2 优先级高于 USB；序号变化意味着待处理包已经完整写入。
+              int16_t error_x = pending_error_x;
+              int16_t error_y = pending_error_y;
+              uint8_t fire = pending_fire;
+              consumed_packet_sequence = latest_sequence;
+
+              current_error_x = error_x;
+              current_error_y = error_y;
+              current_fire = fire;
+              vision_timeout_counter = 0;
+
+              // --------------------------------------------------
+              // 3.1 工业级视觉伺服闭环速度规划 (自适应动态阻尼 + 平滑过渡前馈)
+              // --------------------------------------------------
+              float raw_rate_x = 0.0f;
+              if (abs(error_x) >= DEADZONE_PIXELS) {
+                  float abs_err_x = fabsf((float)error_x);
+                  float error_diff_x = (float)(error_x - prev_error_x);
+
+                  // 自适应微分阻尼：远距离低阻尼(25.0f)全速狂飙，近距离重度阻尼(160.0f)强效急刹定点
+                  float d_gain_x = (abs_err_x < 25.0f) ? 160.0f : 25.0f;
+                  raw_rate_x = (Kp * (float)error_x * 55.0f) + (Kd * error_diff_x * d_gain_x);
+
+                  // 动态静摩擦前馈：在准星中心 15px 内平滑衰减至 0，彻底消除慢速过冲往复摆动！
+                  float breakaway_x = (abs_err_x < 15.0f) ? (FRICTION_BREAKAWAY_RATE_X * (abs_err_x / 15.0f)) : FRICTION_BREAKAWAY_RATE_X;
+                  if (raw_rate_x > 0.0f) {
+                      raw_rate_x += breakaway_x;
+                  } else if (raw_rate_x < 0.0f) {
+                      raw_rate_x -= breakaway_x;
+                  }
+              }
+              prev_prev_error_x = prev_error_x;
+              prev_error_x = error_x;
+
+              float raw_rate_y = 0.0f;
+              if (abs(error_y) >= DEADZONE_PIXELS) {
+                  float error_diff_y = (float)(error_y - prev_error_y);
+                  // Y 轴保持柔和舒适手感 (18.0f / 70.0f)
+                  raw_rate_y = (Kp * (float)error_y * 18.0f) + (Kd * error_diff_y * 70.0f);
+              }
+              prev_prev_error_y = prev_error_y;
+              prev_error_y = error_y;
+
+              target_step_rate_x = LimitTrackingRate(raw_rate_x, error_x);
+              target_step_rate_y = LimitTrackingRate(raw_rate_y, error_y);
+          } else {
+              // 40Hz 上位机与 50Hz 固件之间的空周期保持目标速度；
+              // 最后一包到达后最多 500ms 执行硬停止。
+              vision_timeout_counter++;
+              if (vision_timeout_counter >= VISION_TIMEOUT_CYCLES) {
+                  ApplyStopMotion();
+                  return;
+              }
           }
-          prev_prev_error_x = prev_error_x;
-          prev_error_x = current_error_x;
 
-          float delta_y = 0.0f;
-          if (abs(current_error_y) >= DEADZONE_PIXELS) {
-              delta_y = Kp * (float)(current_error_y - prev_error_y) + 
-                        Ki * (float)current_error_y + 
-                        Kd * (float)(current_error_y - 2 * prev_error_y + prev_prev_error_y);
+          // ------------------------------------------------------
+          // 3.4 电机执行层：加速度限制，并在换向前先减速到零
+          // ------------------------------------------------------
+          current_step_rate_x = RampMotorRate(current_step_rate_x, target_step_rate_x);
+          current_step_rate_y = RampMotorRate(current_step_rate_y, target_step_rate_y);
+
+          if (current_step_rate_x > 0.0f) {
+              HAL_GPIO_WritePin(GPIOA, X_DIR_Pin, GPIO_PIN_SET);
+          } else if (current_step_rate_x < 0.0f) {
+              HAL_GPIO_WritePin(GPIOA, X_DIR_Pin, GPIO_PIN_RESET);
+          } else {
+              step_phase_x = 0.0f;
           }
-          prev_prev_error_y = prev_error_y;
-          prev_error_y = current_error_y;
 
-          // ------------------------------------------------------
-          // 3.4 加速度 / 速度限幅 (Slew Rate Limiter)
-          // ------------------------------------------------------
-          if (delta_x > MAX_STEPS_PER_CYCLE) delta_x = MAX_STEPS_PER_CYCLE;
-          if (delta_x < -MAX_STEPS_PER_CYCLE) delta_x = -MAX_STEPS_PER_CYCLE;
-          if (delta_y > MAX_STEPS_PER_CYCLE) delta_y = MAX_STEPS_PER_CYCLE;
-          if (delta_y < -MAX_STEPS_PER_CYCLE) delta_y = -MAX_STEPS_PER_CYCLE;
-
-          // ------------------------------------------------------
-          // 3.5 提交方向与微步脉冲数
-          // ------------------------------------------------------
-          if (command_epoch == control_epoch) {
-              // 设置 X 轴方向 (PA4)
-              HAL_GPIO_WritePin(GPIOA, X_DIR_Pin, (delta_x >= 0.0f) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-              // 设置 Y 轴方向 (PA5)
-              HAL_GPIO_WritePin(GPIOA, Y_DIR_Pin, (delta_y >= 0.0f) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-
-              steps_to_send_x = (uint16_t)roundf(fabsf(delta_x));
-              steps_to_send_y = (uint16_t)roundf(fabsf(delta_y));
-              step_accumulator_x = 0;
-              step_accumulator_y = 0;
+          if (current_step_rate_y > 0.0f) {
+              HAL_GPIO_WritePin(GPIOA, Y_DIR_Pin, GPIO_PIN_SET);
+          } else if (current_step_rate_y < 0.0f) {
+              HAL_GPIO_WritePin(GPIOA, Y_DIR_Pin, GPIO_PIN_RESET);
+          } else {
+              step_phase_y = 0.0f;
           }
       }
   }

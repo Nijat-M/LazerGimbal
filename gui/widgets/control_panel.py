@@ -36,9 +36,9 @@ class ControlPanel(QWidget):
         self.btn_control.toggled.connect(self._on_control_toggled)
         layout.addWidget(self.btn_control)
         
-        # 重置位置按钮
-        self.btn_reset = QPushButton("重置位置 (Reset)")
-        self.btn_reset.setToolTip("重置软件坐标为中位 (90°, 90°)")
+        # 停止电机并将当前位置设为软件相对原点
+        self.btn_reset = QPushButton("重置原点 (Reset)")
+        self.btn_reset.setToolTip("停止电机并将当前位置设为相对原点，不执行物理归中")
         self.btn_reset.clicked.connect(self.reset_requested.emit)
         layout.addWidget(self.btn_reset)
     

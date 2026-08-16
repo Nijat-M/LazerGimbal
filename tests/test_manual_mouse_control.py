@@ -1,6 +1,8 @@
 import threading
+import time
 import unittest
 
+from config.control_config import ControlConfig
 from core.control.manual_aim_controller import ManualAimController
 from core.gimbal_controller import GimbalController
 from core.serial_thread import SerialThread
@@ -129,6 +131,14 @@ class BlockingFakeSerialThread(FakeSerialThread):
 
 
 class GimbalMouseIntegrationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        ControlConfig.INVERT_X = False
+        ControlConfig.INVERT_Y = True
+
+    def tearDown(self) -> None:
+        ControlConfig.INVERT_X = False
+        ControlConfig.INVERT_Y = True
+
     def test_mouse_delta_generates_one_bounded_realtime_command(self) -> None:
         transport = FakeSerialThread()
         controller = GimbalController(transport)
@@ -161,6 +171,25 @@ class GimbalMouseIntegrationTests(unittest.TestCase):
         controller.handle_target_position(400, 300)
         self.assertNotEqual((controller.current_error_x, controller.current_error_y), (0, 0))
 
+    def test_stale_vision_error_stops_tracking(self) -> None:
+        transport = FakeSerialThread()
+        controller = GimbalController(transport)
+        controller.is_running = False
+        controller.control_thread.join(timeout=1.0)
+        controller.is_running = True
+        controller.set_visual_input_enabled(True)
+        self.assertTrue(controller.set_control_enabled(True))
+        controller.current_error_x = 100
+        controller.current_error_y = -50
+        controller.last_vision_time = (
+            time.monotonic() - ControlConfig.VISION_WATCHDOG_TIMEOUT - 0.01
+        )
+
+        controller.control_loop()
+
+        self.assertEqual(transport.stop_count, 1)
+        self.assertEqual((controller.current_error_x, controller.current_error_y), (0, 0))
+
     def test_concurrent_stop_is_ordered_after_inflight_motion(self) -> None:
         transport = BlockingFakeSerialThread()
         controller = GimbalController(transport)
@@ -184,6 +213,74 @@ class GimbalMouseIntegrationTests(unittest.TestCase):
         stop_thread.join(timeout=1.0)
 
         self.assertEqual(transport.operations, ["motion", "stop"])
+
+    def test_visual_tracking_direction_and_y_scaling(self) -> None:
+        transport = FakeSerialThread()
+        controller = GimbalController(transport)
+        controller.is_running = False
+        controller.control_thread.join(timeout=1.0)
+        controller.is_running = True
+        controller.set_visual_input_enabled(True)
+        self.assertTrue(controller.set_control_enabled(True))
+
+        # Target at right (420, 240) -> raw_error_x = +100, raw_error_y = 0
+        # Scaled by 1.20 -> +120
+        controller.handle_target_position(420, 240)
+        controller.control_loop()
+        self.assertEqual(transport.realtime_commands[-1], "<120,0,0>\n")
+
+        # Target at left (220, 240) -> raw_error_x = -100, raw_error_y = 0
+        # Scaled by 1.20 -> -120
+        controller.error_processor.reset()
+        controller.handle_target_position(220, 240)
+        controller.control_loop()
+        self.assertEqual(transport.realtime_commands[-1], "<-120,0,0>\n")
+
+        # Target at top (320, 140) -> raw_error_x = 0, raw_error_y = -100
+        # Inverted (image y downwards) -> +100 -> scaled by 0.45 -> +45
+        controller.error_processor.reset()
+        controller.handle_target_position(320, 140)
+        controller.handle_target_position(320, 140)
+        controller.control_loop()
+        self.assertEqual(transport.realtime_commands[-1], "<0,45,0>\n")
+
+        # Target at far top (320, 40) -> raw_error_y = -200 -> +200 -> scaled -> clamped to max 50
+        controller.error_processor.reset()
+        for _ in range(4):
+            controller.handle_target_position(320, 40)
+        controller.control_loop()
+        self.assertEqual(transport.realtime_commands[-1], "<0,50,0>\n")
+
+    def test_manual_jog_direction(self) -> None:
+        transport = FakeSerialThread()
+        controller = GimbalController(transport)
+        controller.is_running = False
+        controller.control_thread.join(timeout=1.0)
+        controller.is_running = True
+
+        # Left jog -> -260
+        controller.start_manual_continuous('x', -1)
+        controller.control_loop()
+        self.assertEqual(transport.realtime_commands[-1], "<-260,0,0>\n")
+        controller.stop_manual_continuous()
+
+        # Right jog -> +260
+        controller.start_manual_continuous('x', 1)
+        controller.control_loop()
+        self.assertEqual(transport.realtime_commands[-1], "<260,0,0>\n")
+        controller.stop_manual_continuous()
+
+        # Up jog -> +40
+        controller.start_manual_continuous('y', 1)
+        controller.control_loop()
+        self.assertEqual(transport.realtime_commands[-1], "<0,40,0>\n")
+        controller.stop_manual_continuous()
+
+        # Down jog -> -40
+        controller.start_manual_continuous('y', -1)
+        controller.control_loop()
+        self.assertEqual(transport.realtime_commands[-1], "<0,-40,0>\n")
+        controller.stop_manual_continuous()
 
 
 if __name__ == "__main__":

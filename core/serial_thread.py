@@ -79,7 +79,7 @@ class SerialThread(QThread):
         self._send_urgent_motion_command("!STOP\n")
 
     def send_center_command(self) -> None:
-        """Discard unsent motion and physically center both legacy servos."""
+        """Discard pending motion and reset the firmware motion state."""
         self._send_urgent_motion_command("!CENTER\n")
 
     def _send_urgent_motion_command(self, command: str) -> None:

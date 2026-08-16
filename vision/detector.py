@@ -85,44 +85,6 @@ class TargetDetector:
         result = self._find_largest_contour_scaled(mask, min_area=min_area, scale=scale)
         return result, mask
 
-    def detect_laser_and_blue(
-        self, frame: np.ndarray
-    ) -> Tuple[DetectionResult, DetectionResult, np.ndarray]:
-        """
-        同时高速检测红色激光点和蓝色物体，并生成合并调试蒙版
-        
-        Args:
-            frame: 原始 BGR 格式图像帧
-            
-        Returns:
-            (laser_result, blue_result, debug_mask)
-        """
-        small_frame, scale = self._get_scaled_frame(frame)
-        hsv = cv2.cvtColor(small_frame, cv2.COLOR_BGR2HSV)
-
-        # 1. 蓝色目标掩码
-        k = self.small_kernel if scale > 1.0 else self.kernel
-        mask_blue = cv2.inRange(hsv, VisionConfig.HSV_BLUE_LOWER, VisionConfig.HSV_BLUE_UPPER)
-        mask_blue = cv2.morphologyEx(mask_blue, cv2.MORPH_OPEN, k)
-        mask_blue = cv2.morphologyEx(mask_blue, cv2.MORPH_CLOSE, k)
-        blue_result = self._find_largest_contour_scaled(
-            mask_blue, min_area=100 / (scale * scale), scale=scale
-        )
-
-        # 2. 红色激光点掩码（红激光在 HSV 两端）
-        mask_red1 = cv2.inRange(hsv, VisionConfig.HSV_RED_LOWER1, VisionConfig.HSV_RED_UPPER1)
-        mask_red2 = cv2.inRange(hsv, VisionConfig.HSV_RED_LOWER2, VisionConfig.HSV_RED_UPPER2)
-        mask_red = cv2.bitwise_or(mask_red1, mask_red2)
-        # 激光点细小，仅做轻量开运算过滤噪点
-        mask_red = cv2.morphologyEx(mask_red, cv2.MORPH_OPEN, k)
-        laser_result = self._find_largest_contour_scaled(
-            mask_red, min_area=max(1.0, 5.0 / (scale * scale)), scale=scale
-        )
-
-        # 3. 合并调试蒙版
-        debug_mask = cv2.bitwise_or(mask_blue, mask_red)
-
-        return laser_result, blue_result, debug_mask
 
     def _find_largest_contour_scaled(
         self, mask: np.ndarray, min_area: float, scale: float = 1.0

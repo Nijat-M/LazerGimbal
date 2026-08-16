@@ -59,18 +59,6 @@ class VisionConfig:
     PIXELS_PER_DEGREE = 20  # 像素到角度转换系数（估算值）
     
     # ==========================
-    # 颜色阈值 - 红色激光点
-    # ==========================
-    # 红色在 HSV 色轮两端（0° 和 180°），需要两个范围
-    # Range 1: 0-10 度（深红）
-    HSV_RED_LOWER1 = np.array([0, 100, 100])
-    HSV_RED_UPPER1 = np.array([10, 255, 255])
-    
-    # Range 2: 160-180 度（品红）
-    HSV_RED_LOWER2 = np.array([160, 100, 100])
-    HSV_RED_UPPER2 = np.array([180, 255, 255])
-    
-    # ==========================
     # 颜色阈值 - 蓝色物体
     # ==========================
     # 蓝色在 100-140 度
@@ -83,17 +71,6 @@ class VisionConfig:
     # ==========================
     MORPHOLOGY_KERNEL_SIZE = 5      # 形态学操作核大小
     MIN_CONTOUR_AREA = 50           # 最小轮廓面积（过滤噪点）
-    
-    @classmethod
-    def get_red_ranges(cls):
-        """
-        返回红色检测的两个 HSV 范围
-        Returns tuple of red HSV ranges for cv2.inRange
-        """
-        return (
-            (cls.HSV_RED_LOWER1, cls.HSV_RED_UPPER1),
-            (cls.HSV_RED_LOWER2, cls.HSV_RED_UPPER2)
-        )
     
     @classmethod
     def get_blue_range(cls):

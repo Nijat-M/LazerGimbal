@@ -46,15 +46,13 @@ class VisionWorker(QThread):
     信号说明：
         frame_signal      : 发送处理后的画面（给 UI 显示）
         mask_signal       : 发送调试蒙版（给 UI 调试显示）
-        control_signal    : 发送误差 (err_x, err_y)（TRACKING 模式，激光追蓝色）
-        target_pos_signal : 发送目标位置 (pos_x, pos_y)（BLUE_TRACKING 模式，居中追踪）
+        target_pos_signal : 发送目标位置 (pos_x, pos_y)（物体居中追踪）
         stats_signal      : 发送实时统计数据 (fps, width, height)
     """
 
     frame_signal = pyqtSignal(QImage)       # 处理后的画面
     mask_signal = pyqtSignal(QImage)        # 调试蒙版
-    control_signal = pyqtSignal(int, int)   # 误差信号 (TRACKING 模式)
-    target_pos_signal = pyqtSignal(int, int)  # 原始坐标 (BLUE_TRACKING 模式)
+    target_pos_signal = pyqtSignal(int, int)  # 物体追踪原始坐标
     stats_signal = pyqtSignal(float, int, int) # (fps, width, height)
     camera_state_signal = pyqtSignal(int, bool, str) # (request generation, ready, message)
 
@@ -77,7 +75,6 @@ class VisionWorker(QThread):
 
         # 状态跟踪（避免重复打印）
         self.blue_object_detected = False   # 蓝色物体检测状态
-        self.laser_tracking_status = None  # 记录当前追踪状态
         self.flip_mode: str = getattr(VisionConfig, "FLIP_MODE", "NONE")
 
         # FPS 计算相关
@@ -342,9 +339,7 @@ class VisionWorker(QThread):
                     self.fps_queue.append(1.0 / dt)
                     self.current_fps = sum(self.fps_queue) / len(self.fps_queue)
 
-                if self.mode == "TRACKING":
-                    self._process_tracking(frame)
-                elif self.mode == "BLUE_TRACKING":
+                if self.mode == "BLUE_TRACKING":
                     self._process_blue_tracking(frame)
                 elif self.mode == "YOLO_TRACKING":
                     self._process_yolo_tracking(frame)
@@ -367,50 +362,6 @@ class VisionWorker(QThread):
     # --------------------------------------------------
     # 处理逻辑（纯视觉，不含任何控制决策）
     # --------------------------------------------------
-
-    def _process_tracking(self, frame: cv2.Mat) -> None:
-        """
-        TRACKING 模式：激光点追踪蓝色目标
-
-        误差 = 蓝色目标位置 - 红色激光位置（两点相对误差）
-        直接发送误差，由 GimbalController.handle_vision_error 处理。
-        """
-        laser_result, blue_result, debug_mask = self.detector.detect_laser_and_blue(frame)
-
-        # 绘制检测结果
-        if blue_result.detected:
-            cv2.circle(frame, blue_result.position, int(blue_result.radius),
-                       (255, 0, 0), 2)
-            cv2.putText(frame, "Target",
-                        (blue_result.position[0] - 10, blue_result.position[1] - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
-
-        if laser_result.detected:
-            cv2.circle(frame, laser_result.position, 5, (0, 0, 255), -1)
-
-        # 计算并发送误差（原始两点差，不做任何缩放/死区处理）
-        if blue_result.detected and laser_result.detected:
-            error_x = blue_result.position[0] - laser_result.position[0]
-            error_y = blue_result.position[1] - laser_result.position[1]
-            cv2.arrowedLine(frame, laser_result.position, blue_result.position,
-                            (0, 255, 0), 2)
-            self.control_signal.emit(error_x, error_y)  # → handle_vision_error
-
-            if self.laser_tracking_status != "both":
-                logger.info("[VISION] ✓ 同时检测到蓝色目标和红色激光")
-                self.laser_tracking_status = "both"
-
-        elif blue_result.detected and not laser_result.detected:
-            if self.laser_tracking_status != "blue_only":
-                logger.info("[VISION] 找到蓝色目标，但红色激光丢失")
-                self.laser_tracking_status = "blue_only"
-        else:
-            if self.laser_tracking_status not in (None, "none"):
-                logger.info("[VISION] 未检测到目标")
-                self.laser_tracking_status = "none"
-
-        # 发送单次计算的高速调试蒙版
-        self._send_mask(debug_mask)
 
 
     def _process_blue_tracking(self, frame: cv2.Mat) -> None:

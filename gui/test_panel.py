@@ -41,16 +41,16 @@ class TestModePanel(QGroupBox):
             btn.setFocusPolicy(Qt.FocusPolicy.NoFocus) # 避免抢占焦点
 
         # 绑定按住开始与松开停止
-        self.btn_up.pressed.connect(lambda: self._emit_start('y', -1, '上'))
+        self.btn_up.pressed.connect(lambda: self._emit_start('y', 1, '上'))
         self.btn_up.released.connect(self._emit_stop)
 
-        self.btn_down.pressed.connect(lambda: self._emit_start('y', 1, '下'))
+        self.btn_down.pressed.connect(lambda: self._emit_start('y', -1, '下'))
         self.btn_down.released.connect(self._emit_stop)
 
-        self.btn_left.pressed.connect(lambda: self._emit_start('x', 1, '左'))
+        self.btn_left.pressed.connect(lambda: self._emit_start('x', -1, '左'))
         self.btn_left.released.connect(self._emit_stop)
 
-        self.btn_right.pressed.connect(lambda: self._emit_start('x', -1, '右'))
+        self.btn_right.pressed.connect(lambda: self._emit_start('x', 1, '右'))
         self.btn_right.released.connect(self._emit_stop)
 
         # 布局方向键
