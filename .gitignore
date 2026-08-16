@@ -85,3 +85,7 @@ STM32F401/.metadata/
 *.map
 *.srec
 *.list
+
+# WebUI Frontend
+webui/node_modules/
+webui/dist/

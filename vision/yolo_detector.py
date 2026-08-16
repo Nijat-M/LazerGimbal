@@ -42,7 +42,7 @@ class YOLODetector:
     YOLO 深度学习目标检测引擎
     
     支持:
-    - 针对国防防空模型 (savunma_yolo26.pt) 与通用模型 (yolo26n.pt) 的自动发现与动态热切换
+    - 针对国防防空模型 (savunma_yolo26.pt) 与通用模型 (yolo26n.pt / yolov8n.pt) 的自动发现与动态热切换
     - 目标类别过滤 (如单独追踪 BALISTIK_FUZE, F16, HELIKOPTER, MINI_IHA)
     - 动态调节置信度阈值
     - 目标锁定最近距离优先算法 (Anti-Jitter)
@@ -75,12 +75,15 @@ class YOLODetector:
                 Path(model_path)
             ])
 
-        # 默认备选模型（防空模型优先）
+        # 默认备选模型（防空模型优先，通用模型次之）
         candidates.extend([
             models_dir / "savunma_yolo26.pt",
             models_dir / "yolo26n.pt",
+            models_dir / "yolov8n.pt",
+            models_dir / "yolo11n.pt",
             project_root / "savunma_yolo26.pt",
-            project_root / "yolo26n.pt"
+            project_root / "yolo26n.pt",
+            project_root / "yolov8n.pt"
         ])
 
         for c in candidates:
@@ -111,6 +114,8 @@ class YOLODetector:
                             display_name = f"{pt_file.name} (国防防空模型 / 4类)"
                         elif "yolo26n" in pt_file.name.lower():
                             display_name = f"{pt_file.name} (通用COCO模型 / 80类)"
+                        elif "yolov8" in pt_file.name.lower():
+                            display_name = f"{pt_file.name} (YOLOv8通用模型)"
                         else:
                             display_name = f"{pt_file.name} (自定义模型)"
 
@@ -131,7 +136,6 @@ class YOLODetector:
         self.conf_threshold: float = conf_threshold
         self.min_box_size: int = 16
         self.imgsz: int = 640
-        
         # 硬件加速设备检测 (RTX GPU / CUDA 极速加速)
         try:
             import torch
