@@ -17,6 +17,7 @@
 """
 
 import time
+import math
 import threading
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -332,25 +333,59 @@ class GimbalController(QObject):
         # 应用 X/Y 轴独立追踪缩放（针对机械特性进行差分动态分配）
         scale_x = getattr(ControlConfig, "TRACKING_SCALE_X", 1.20)
         scale_y = getattr(ControlConfig, "TRACKING_SCALE_Y", 0.45)
-        max_err_x = getattr(ControlConfig, "TRACKING_MAX_ERROR_X", 360)
+        max_err_x = getattr(ControlConfig, "TRACKING_MAX_ERROR_X", 120)
         max_err_y = getattr(ControlConfig, "TRACKING_MAX_ERROR_Y", 50)
 
-        # Y 轴过冲抑制（防上下来回摆动震荡）：进入中心缓冲区时平滑过渡减速
-        abs_y = abs(err_y)
-        y_settle_zone = 15
-        if abs_y < y_settle_zone:
-            scale_y_effective = scale_y * (abs_y / y_settle_zone)
+        # ----------------------------------------------------
+        # 核心防过冲与边缘防飞车算法 (3-Zone Kinematic Servoing Profile)
+        # 1. 准星核心区 (< settle_zone 像素): 渐进比例平滑减速，消除过冲与回摆
+        # 2. 正常视野区 (settle_zone ~ edge_threshold 像素): 线性敏捷响应
+        # 3. 屏幕最边缘区 (> edge_threshold 像素): 亚线性软饱和压缩，防止超大速度远距离冲过头
+        # ----------------------------------------------------
+        abs_x = abs(err_x)
+        settle_zone_x = getattr(ControlConfig, "SETTLE_ZONE_X", 45)
+        edge_thresh_x = getattr(ControlConfig, "EDGE_COMPRESS_THRESHOLD_X", 100)
+
+        if 0 < abs_x < settle_zone_x:
+            # 准星过渡区：渐进平滑过渡 (0.50 ~ 1.00)，起步即刻响应，中心柔和刹车
+            factor_x = 0.50 + 0.50 * (abs_x / float(settle_zone_x))
+            err_x_computed = abs_x * scale_x * factor_x
+        elif abs_x > edge_thresh_x:
+            # 屏幕最边缘区：平滑亚线性压缩，防止以极限转速飞车甩脱目标
+            excess_x = abs_x - edge_thresh_x
+            compressed_x = edge_thresh_x + (excess_x ** 0.55) * 1.2
+            err_x_computed = compressed_x * scale_x
         else:
-            scale_y_effective = scale_y
+            # 正常线性区
+            err_x_computed = abs_x * scale_x
 
-        err_x = round(err_x * scale_x)
-        err_y = round(err_y * scale_y_effective)
+        abs_y = abs(err_y)
+        settle_zone_y = getattr(ControlConfig, "SETTLE_ZONE_Y", 25)
+        edge_thresh_y = getattr(ControlConfig, "EDGE_COMPRESS_THRESHOLD_Y", 100)
 
-        # 幅值安全截断保护 (防止Y轴打到机械限位)
+        if 0 < abs_y < settle_zone_y:
+            # Y 轴小范围柔和过渡，消除高频微震与果冻效应
+            factor_y = 0.50 + 0.50 * (abs_y / float(settle_zone_y))
+            err_y_computed = abs_y * scale_y * factor_y
+        elif abs_y > edge_thresh_y:
+            excess_y = abs_y - edge_thresh_y
+            compressed_y = edge_thresh_y + (excess_y ** 0.55) * 1.2
+            err_y_computed = compressed_y * scale_y
+        else:
+            err_y_computed = abs_y * scale_y
+
+        # 恢复符号并取整
+        err_x = round(math.copysign(err_x_computed, err_x)) if err_x != 0 else 0
+        err_y = round(math.copysign(err_y_computed, err_y)) if err_y != 0 else 0
+
+        # 幅值安全截断保护 (防止电机速度超限与Y轴打到机械限位)
         err_x = max(-max_err_x, min(max_err_x, err_x))
         err_y = max(-max_err_y, min(max_err_y, err_y))
 
         self.serial_thread.send_realtime_command(f"<{err_x},{err_y},0>\n")
+
+
+
 
     def _manual_mouse_control_loop(self) -> None:
         """Consume accumulated mouse movement at 40 Hz without queue buildup."""

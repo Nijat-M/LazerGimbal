@@ -69,9 +69,11 @@ class VisionWorker(QThread):
         # 检测器（纯视觉，无控制逻辑）
         self.detector = TargetDetector()
         
-        # YOLO检测器 (按需初始化，或在这里先初始化)
+        # YOLO检测器与配置
         self.yolo_detector = None
-
+        self.yolo_model_path: str = getattr(VisionConfig, "DEFAULT_YOLO_MODEL", "vision/models/savunma_yolo26.pt")
+        self.yolo_target_class = getattr(VisionConfig, "YOLO_TARGET_CLASS", None)
+        self.yolo_conf_threshold: float = getattr(VisionConfig, "YOLO_CONF_THRESHOLD", 0.35)
 
         # 状态跟踪（避免重复打印）
         self.blue_object_detected = False   # 蓝色物体检测状态
@@ -105,10 +107,36 @@ class VisionWorker(QThread):
         """设置工作模式"""
         self.mode = mode
         if mode == "YOLO_TRACKING" and self.yolo_detector is None:
-            logger.info("[VISION] 正在初始化 YOLO26 异步深度学习引擎...")
-            self.yolo_detector = AsyncYOLODetector("vision/models/yolo26n.pt")
-            logger.info("[VISION] YOLO26 异步引擎初始化完成。")
+            logger.info(f"[VISION] 正在初始化 YOLO 异步深度学习引擎 (模型: {self.yolo_model_path})...")
+            self.yolo_detector = AsyncYOLODetector(
+                self.yolo_model_path, 
+                conf_threshold=self.yolo_conf_threshold
+            )
+            self.yolo_detector.set_target_class(self.yolo_target_class)
+            logger.info("[VISION] YOLO 异步引擎初始化完成。")
         logger.info(f"[VISION] 视觉线程模式: {mode}")
+
+    def set_yolo_model(self, model_path: str) -> None:
+        """动态切换 YOLO 模型"""
+        self.yolo_model_path = model_path
+        if self.yolo_detector is not None:
+            logger.info(f"[VISION] 正在热切换 YOLO 模型至: {model_path}")
+            self.yolo_detector.set_model(model_path)
+
+    def set_yolo_target_class(self, target_class) -> None:
+        """设置 YOLO 追踪的目标类别过滤 (None 为追踪所有目标)"""
+        self.yolo_target_class = target_class
+        if self.yolo_detector is not None:
+            self.yolo_detector.set_target_class(target_class)
+            logger.info(f"[VISION] YOLO 目标过滤类别已更新为: {target_class}")
+
+    def set_yolo_conf_threshold(self, conf: float) -> None:
+        """设置 YOLO 检测置信度阈值"""
+        self.yolo_conf_threshold = conf
+        if self.yolo_detector is not None:
+            self.yolo_detector.set_conf_threshold(conf)
+            logger.info(f"[VISION] YOLO 置信度阈值已更新为: {conf:.2f}")
+
 
     def open_camera_settings(self) -> None:
         """打开 Windows DirectShow 原生相机属性设置面板 (调节全局快门曝光/增益等)"""
@@ -410,58 +438,97 @@ class VisionWorker(QThread):
         
         发送目标的原始像素坐标，由 GimbalController 计算误差。
         采用后台异步并发架构，主视觉线程零阻塞，保证相机以 60 FPS 满速流畅采集与显示。
+        特别针对防空国防模型 (savunma_yolo26.pt) 实现了战术防空 HUD 渲染与分级威胁色彩。
         """
         if self.yolo_detector is None:
             return
 
         # 非阻塞提交并获取最新目标锁定结果（主线程耗时 <0.01ms）
-        result = self.yolo_detector.detect_target(frame, target_class=None)
+        result = self.yolo_detector.detect_target(frame)
 
-        # 画面中心十字线
+        # 画面中心十字线与战术瞄准圆环
         cx = self.frame_width // 2
         cy = self.frame_height // 2
-        cv2.line(frame, (cx - 20, cy), (cx + 20, cy), (0, 255, 255), 1)
-        cv2.line(frame, (cx, cy - 20), (cx, cy + 20), (0, 255, 255), 1)
-        cv2.circle(frame, (cx, cy), 5, (0, 255, 255), 2)
+        cv2.line(frame, (cx - 25, cy), (cx + 25, cy), (0, 255, 255), 1)
+        cv2.line(frame, (cx, cy - 25), (cx, cy + 25), (0, 255, 255), 1)
+        cv2.circle(frame, (cx, cy), 6, (0, 255, 255), 1)
+        cv2.circle(frame, (cx, cy), 40, (0, 180, 255), 1)
 
-        # 1. 遍历并画出视野里发现的所有目标
+        # 类别警戒色映射 (BGR)
+        threat_colors = {
+            "BALISTIK_FUZE": (0, 0, 255),      # 弹道导弹: 极高危 纯红
+            "F16": (0, 140, 255),              # 战机: 高危 亮橙
+            "HELIKOPTER": (0, 215, 255),       # 直升机: 中危 琥珀金
+            "MINI_IHA": (0, 255, 128),         # 小型无人机: 荧光青绿
+        }
+        default_color = (0, 255, 255)         # 默认/其他目标: 明黄
+
+        # 1. 遍历并画出视野里发现的所有目标 (雷达态势探测框)
         if hasattr(result, 'all_targets') and result.all_targets:
             for t in result.all_targets:
                 tx1, ty1, tx2, ty2 = t.box
                 t_pos = t.position
                 
-                # 绘制所有检测到的物体为黄色框和圆点（BGR: (0, 255, 255) 是黄色），代表“雷达探测到但未锁定”
-                cv2.rectangle(frame, (tx1, ty1), (tx2, ty2), (0, 255, 255), 1)
-                cv2.circle(frame, t_pos, 3, (0, 255, 255), -1)
-                
-                label_name = self.yolo_detector.model.names.get(t.class_id, f"Cls_{t.class_id}")
-                cv2.putText(frame, f"{label_name} {t.confidence:.2f}",
-                            (tx1, ty1 - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+                raw_cname = t.class_name if t.class_name else f"Cls_{t.class_id}"
+                c_color = threat_colors.get(raw_cname, default_color)
 
-        # 2. 特别高亮画出被“锁定”要追踪的那一个主目标
+                # 绘制次要目标线框与中心点
+                cv2.rectangle(frame, (tx1, ty1), (tx2, ty2), c_color, 1)
+                cv2.circle(frame, t_pos, 3, c_color, -1)
+                
+                display_label = f"{raw_cname} {t.confidence:.2f}"
+                cv2.putText(frame, display_label,
+                            (tx1, max(15, ty1 - 5)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, c_color, 1)
+
+        # 2. 特别高亮画出被“锁定”要追踪的那一个主目标 (战术火控锁定瞄具)
         if result.detected:
             pos = result.position
             x1, y1, x2, y2 = result.box
+            raw_cname = result.class_name if result.class_name else f"Target_{result.class_id}"
+            lock_color = threat_colors.get(raw_cname, (0, 0, 255))
             
-            # 覆写主目标的颜色为粗的红色框及醒目的提示
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
-            cv2.circle(frame, pos, 5, (0, 0, 255), -1)
+            # 绘制战术四角包围框 (Corner HUD Reticle)
+            line_len = min(20, (x2 - x1) // 3, (y2 - y1) // 3)
+            # 左上
+            cv2.line(frame, (x1, y1), (x1 + line_len, y1), lock_color, 2)
+            cv2.line(frame, (x1, y1), (x1, y1 + line_len), lock_color, 2)
+            # 右上
+            cv2.line(frame, (x2, y1), (x2 - line_len, y1), lock_color, 2)
+            cv2.line(frame, (x2, y1), (x2, y1 + line_len), lock_color, 2)
+            # 左下
+            cv2.line(frame, (x1, y2), (x1 + line_len, y2), lock_color, 2)
+            cv2.line(frame, (x1, y2), (x1, y2 - line_len), lock_color, 2)
+            # 右下
+            cv2.line(frame, (x2, y2), (x2 - line_len, y2), lock_color, 2)
+            cv2.line(frame, (x2, y2), (x2, y2 - line_len), lock_color, 2)
+
+            # 中心锁定点与追踪引导虚线/箭头
+            cv2.circle(frame, pos, 5, lock_color, -1)
+            cv2.arrowedLine(frame, (cx, cy), pos, (0, 255, 0), 2, tipLength=0.15)
             
-            label_name = self.yolo_detector.model.names.get(result.class_id, f"Cls_{result.class_id}") if result.class_id is not None else "Target"
-            cv2.putText(frame, f"[LOCKED] {label_name}",
-                        (x1, y1 - 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            cv2.arrowedLine(frame, (cx, cy), pos, (0, 255, 0), 2)
+            # 偏差值与置信度指示
+            dx = pos[0] - cx
+            dy = pos[1] - cy
+            conf_pct = int((result.confidence or 0.0) * 100)
+            lock_header = f"[LOCKED] {raw_cname} ({conf_pct}%)"
+            lock_sub = f"dX:{dx:+d} dY:{dy:+d}"
+            
+            cv2.putText(frame, lock_header,
+                        (x1, max(22, y1 - 20)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, lock_color, 2)
+            cv2.putText(frame, lock_sub,
+                        (x1, max(38, y1 - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 0), 1)
 
             self.target_pos_signal.emit(pos[0], pos[1])
 
             if not self.blue_object_detected:
-                logger.info("[VISION] ✓ YOLO: 找到目标")
+                logger.info(f"[VISION] ✓ YOLO 锁定目标: {raw_cname} (置信度: {conf_pct}%)")
                 self.blue_object_detected = True
         else:
             if self.blue_object_detected:
-                logger.info("[VISION] ✗ YOLO: 未找到目标")
+                logger.info("[VISION] ✗ YOLO: 未发现或丢失目标")
                 self.blue_object_detected = False
 
         # 对于YOLO我们不需要发送特定的掩码蒙版，直接填黑

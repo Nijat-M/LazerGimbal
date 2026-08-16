@@ -71,6 +71,26 @@ class VisionConfig:
     # ==========================
     MORPHOLOGY_KERNEL_SIZE = 5      # 形态学操作核大小
     MIN_CONTOUR_AREA = 50           # 最小轮廓面积（过滤噪点）
+
+    # ==========================
+    # YOLO 目标检测模型设置
+    # ==========================
+    DEFAULT_YOLO_MODEL = "vision/models/savunma_yolo26.pt"  # 默认使用新训练的防空国防目标检测模型
+    YOLO_CONF_THRESHOLD = 0.50                             # 提高置信度阈值至 0.50，有效过滤室内与背景杂波误识别
+    YOLO_TARGET_CLASS = None                               # 默认追踪目标类别 (None: 视野内全部目标)
+    YOLO_MIN_BOX_SIZE = 16                                 # 最小有效目标框边长（过滤噪点假目标）
+
+    # 常用军事/国防目标与标准COCO标签友好翻译映射
+    CLASS_LABELS_ZH = {
+        "BALISTIK_FUZE": "弹道导弹 (Ballistic Missile)",
+        "F16": "F-16 战机 (Fighter Jet)",
+        "HELIKOPTER": "直升机 (Helicopter)",
+        "MINI_IHA": "小型无人机 (Mini UAV)",
+        "person": "行人 (Person)",
+        "airplane": "飞机 (Airplane)",
+        "drone": "无人机 (Drone)",
+        "car": "汽车 (Car)"
+    }
     
     @classmethod
     def get_blue_range(cls):
@@ -79,3 +99,9 @@ class VisionConfig:
         Returns blue HSV range for cv2.inRange
         """
         return (cls.HSV_BLUE_LOWER, cls.HSV_BLUE_UPPER)
+
+    @classmethod
+    def get_class_display_name(cls, class_name: str) -> str:
+        """获取类别的友好显示名称"""
+        return cls.CLASS_LABELS_ZH.get(class_name, class_name)
+

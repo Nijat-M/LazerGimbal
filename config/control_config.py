@@ -40,11 +40,18 @@ class ControlConfig:
     INVERT_X: bool = False
     INVERT_Y: bool = True
 
-    # 追踪误差缩放与安全限幅（针对新电机与机械俯仰行程优化）
-    TRACKING_SCALE_X: float = 1.20       # X 轴追踪误差缩放系数（配合下位机直接速度闭环）
-    TRACKING_SCALE_Y: float = 0.45       # Y 轴追踪误差缩放系数（保持平稳，防过冲保护限位）
-    TRACKING_MAX_ERROR_X: int = 360      # X 轴单周期最大追踪误差（匹配 1600 steps/s 高转速）
+    # 追踪误差缩放与准星防过冲阻尼参数
+    TRACKING_SCALE_X: float = 1.20       # X 轴基准追踪误差缩放系数（配合下位机直接速度闭环）
+    TRACKING_SCALE_Y: float = 0.45       # Y 轴基准追踪误差缩放系数
+    TRACKING_MAX_ERROR_X: int = 120      # X 轴单周期最大追踪误差（软饱和限幅，防止远距离超速过冲回摆）
     TRACKING_MAX_ERROR_Y: int = 50       # Y 轴单周期最大追踪误差
+    
+    SETTLE_ZONE_X: int = 45              # X 轴准星中心平滑减速过渡区（像素）
+    SETTLE_ZONE_Y: int = 25              # Y 轴准星中心平滑减速过渡区（像素）
+    EDGE_COMPRESS_THRESHOLD_X: int = 100 # X 轴屏幕边缘软饱和压缩起点（像素）
+    EDGE_COMPRESS_THRESHOLD_Y: int = 100 # Y 轴屏幕边缘软饱和压缩起点（像素）
+
+
 
     # 舵机软件限位（度）
     SERVO_MIN_LIMIT: int = 0

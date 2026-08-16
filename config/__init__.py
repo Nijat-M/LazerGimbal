@@ -25,7 +25,9 @@ from datetime import datetime
 from .control_config import ControlConfig
 from .vision_config import VisionConfig
 from .hardware_config import HardwareConfig
+from .tracking_parameters import TrackingParameters
 from utils.logger import Logger
+
 logger = Logger("Config")
 
 

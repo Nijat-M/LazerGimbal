@@ -67,8 +67,9 @@ class MainWindow(QMainWindow):
     """
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LaserGimbal v0.4.0")
+        self.setWindowTitle("LaserGimbal v0.4.5")
         self.resize(1000, 700)
+
 
         # [核心线程和控制器]
         self.serial_thread = SerialThread()
@@ -234,6 +235,9 @@ class MainWindow(QMainWindow):
         
         # 模式面板
         self.mode_panel.mode_changed.connect(self.on_mode_changed)
+        self.mode_panel.yolo_model_changed.connect(self.vision_thread.set_yolo_model)
+        self.mode_panel.yolo_class_changed.connect(self.vision_thread.set_yolo_target_class)
+        self.mode_panel.yolo_conf_changed.connect(self.vision_thread.set_yolo_conf_threshold)
         
         # PID 调参面板
         self.pid_tuner.pid_changed.connect(self.on_pid_changed)

@@ -4,7 +4,27 @@
   🇬🇧 <a href="CHANGELOG.md">English</a> | 🇹🇷 <a href="CHANGELOG_TR.md">Türkçe</a>
 </div>
 
+### [v0.4.5] - 2026-08-16
+- **Savunma YOLO26 Air-Defense Neural Model Adaptation & Tactical Defense HUD**:
+  - Integrated `savunma_yolo26.pt` air-defense model with automatic model discovery and native **960×960 GPU inference** resolution.
+  - Added target class filtering for 4 defense target classes (`BALISTIK_FUZE`, `F16`, `HELIKOPTER`, `MINI_IHA`) with dynamic class-consistent tracking.
+  - Implemented tactical defense HUD overlays with threat-level color coding, crosshair lock-on percentage, and offset vectors.
+  - Built Model Selection, Class Selection, and Confidence threshold tuning controls in `ModePanel`.
+- **Zero-Lag Dynamic Lead Anticipation & Phase Compensator**:
+  - Replaced legacy sluggish coordinate low-pass filters with a **Dynamic Phase-Lead Compensator** ($\tau_{\text{lead}} = 35\text{ms} \sim 65\text{ms}$), eliminating closed-loop phase lag and hunting oscillations.
+  - Added predictive braking anticipation: automatically anticipates arrival when approaching the crosshair at high speed, achieving overshoot-free lock-on.
+- **Y-Axis Rolling-Shutter Jello Effect Elimination**:
+  - Introduced derivative noise-gating deadband (`|\Delta y| < 1.2\text{px} \implies \text{Vel} = 0`) to cut off 60Hz discrete sensor pixel noise from driving high-frequency pitch micro-vibrations.
+  - Implemented heavy velocity low-pass smoothing on the pitch axis (`\alpha = 0.35`), completely eliminating CMOS rolling shutter jello distortion.
+- **3-Zone Kinematic Servoing & Far-Distance Overshoot Elimination**:
+  - Re-engineered full-field 3-zone motion profile: Settle Zone progressive deceleration ($0.50 \sim 1.00$), Linear Tracking Zone ($1.20\times$), and Edge Soft-Saturation Compression ($e_{\text{compressed}} = 100 + (e - 100)^{0.55} \times 1.2$).
+  - Bounded maximum tracking output (`TRACKING_MAX_ERROR_X = 120`) within the safe braking envelope (~210°/s), eliminating extreme-distance runaway and reverse back-swinging.
+- **Standalone Parameter Archive & Tuning Guide**:
+  - Created centralized [`config/tracking_parameters.py`](file:///d:/LazerGimbal/config/tracking_parameters.py) and [`config/tracking_parameters.json`](file:///d:/LazerGimbal/config/tracking_parameters.json).
+  - Authored comprehensive tuning guide [`TRACKING_PARAMETERS_GUIDE.md`](file:///d:/LazerGimbal/TRACKING_PARAMETERS_GUIDE.md) with parameter baseline references and physical formulas.
+
 ### [v0.4.4] - 2026-08-16
+
 - **Industrial Visual Servo Closed-Loop Architecture & Adaptive Differential Braking**:
   - Re-engineered STM32 firmware motion control from legacy incremental PID to a high-speed **Position-to-Velocity Visual Servo** control law with active differential braking.
   - Implemented **Adaptive Dual-Zone Differential Damping**: applies low damping ($D=25.0f$) during high-speed chasing for zero-drag acceleration, and automatically engages heavy damping ($D=160.0f$) within the central 25px zone for instant, overshoot-free crosshair lock-on.

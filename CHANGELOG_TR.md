@@ -4,7 +4,27 @@
   🇬🇧 <a href="CHANGELOG.md">English</a> | 🇹🇷 <a href="CHANGELOG_TR.md">Türkçe</a>
 </div>
 
+### [v0.4.5] - 2026-08-16
+- **Savunma YOLO26 Hava Savunma Modeli Uyarlaması ve Taktik Savunma HUD**:
+  - `savunma_yolo26.pt` hava savunma modeli otomatik model algılama ve GPU üzerinde yerel **960×960 çözünürlük** ile entegre edildi.
+  - 4 hedef sınıfı (`BALISTIK_FUZE`, `F16`, `HELIKOPTER`, `MINI_IHA`) için hedef filtreleme ve sınıfsal kararlı takip eklendi.
+  - Tehdit seviyesi renk kodlaması, kilitlenme yüzdesi ve ofset vektörlü taktik HUD arayüzü entegre edildi.
+  - `ModePanel` arayüzüne Model Seçimi, Sınıf Seçimi ve Güven Eşiği (Confidence) ayar kontrolleri eklendi.
+- **Sıfır Gecikmeli Dinamik Faz İleri Beslemesi (Phase-Lead Anticipation)**:
+  - Eski düşük geçiren filtrelerin neden olduğu gecikme kaldırıldı ve **Dinamik Faz İleri Dengeleyicisi** ($\tau_{\text{lead}} = 35\text{ms} \sim 65\text{ms}$) eklendi; hedef etrafında sallanma (hunting oscillation) tamamen yok edildi.
+  - Hedefe yüksek hızla yaklaşırken otomatik erken frenleme tahmini ile aşım olmadan tam merkezde durma sağlandı.
+- **Y Ekseni Jöle Efektinin (Rolling-Shutter Jello) Tamamen Giderilmesi**:
+  - Türev gürültü kesme eşiği (`|\Delta y| < 1.2\text{px} \implies \text{Hız} = 0`) ile kamera piksel gürültüsünden kaynaklanan 60Hz yüksek frekanslı mikro titreşimler kesildi.
+  - Y ekseni hız kestirimine derin alçak geçiren filtre (`\alpha = 0.35`) uygulanarak CMOS rolling shutter jöle dalgalanması tamamen yok edildi.
+- **3 Bölgeli Kinematik Hız Planlaması ve Uzak Mesafe Aşım Önleme**:
+  - 3 bölgeli hareket eğrisi geliştirildi: Merkez Frenleme Bölgesi ($0.50 \sim 1.00$), Lineer Takip Bölgesi ($1.20\times$) ve Kenar Yumuşak Doyum Sıkıştırması ($e_{\text{compressed}} = 100 + (e - 100)^{0.55} \times 1.2$).
+  - Maksimum takip çıkışı (`TRACKING_MAX_ERROR_X = 120`) güvenli frenleme sınırları içinde sınırlandırılarak uzak mesafeden ani dönüşlerdeki savrulma ve geri salınım engellendi.
+- **Bağımsız Parametre Arşivi ve Ayar Kılavuzu**:
+  - Bağımsız [`config/tracking_parameters.py`](file:///d:/LazerGimbal/config/tracking_parameters.py) ve [`config/tracking_parameters.json`](file:///d:/LazerGimbal/config/tracking_parameters.json) oluşturuldu.
+  - Parametre taban değerleri ve formülleri içeren kapsamlı [`TRACKING_PARAMETERS_GUIDE.md`](file:///d:/LazerGimbal/TRACKING_PARAMETERS_GUIDE.md) kılavuzu yayınlandı.
+
 ### [v0.4.4] - 2026-08-16
+
 - **Endüstriyel Görsel Servo Kapalı Çevrim Mimarisi ve Uyarlanabilir Diferansiyel Frenleme**:
   - STM32 bellenim hareket kontrolü eski artımsal PID yapısından yüksek hızlı **Konumdan Hıza Görsel Servo (Position-to-Velocity Visual Servo)** ve aktif diferansiyel frenleme modeline dönüştürüldü.
   - **Uyarlanabilir Çift Bölgeli Diferansiyel Sönümleme**: Yüksek hızlı takip sırasında düşük sönümleme ($D=25.0f$) uygulayarak sürtünmesiz ivmelenme sağlarken, merkezdeki 25px hedefe girildiğinde otomatik olarak ağır sönümleme ($D=160.0f$) devreye sokularak aşım (overshoot) olmadan anında hedefe kilitlenme sağlandı.
