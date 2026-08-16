@@ -7,18 +7,20 @@ Connects GimbalController, VisionWorker, and SerialThread with FastAPI WebSocket
 import time
 import asyncio
 import json
-from typing import Dict, Any, List, Set
+from typing import Dict, Any, List, Set, Optional
 from fastapi import WebSocket
+import numpy as np
 
 from utils.logger import Logger
 from config.control_config import ControlConfig
 from config.vision_config import VisionConfig
+from core.serial_thread import SerialThread
 
 logger = Logger("WebBridge")
 
 
 class WebBridge:
-    def __init__(self, gimbal_controller=None, vision_worker=None, serial_thread=None):
+    def __init__(self, gimbal_controller=None, vision_worker=None, serial_thread: Optional[SerialThread] = None):
         self.gimbal_controller = gimbal_controller
         self.vision_worker = vision_worker
         self.serial_thread = serial_thread
@@ -42,11 +44,21 @@ class WebBridge:
         self.temperature_c: float = 38.2
         self.system_state: str = "READY"
         self.detections: List[Dict[str, Any]] = []
-        self.camera_id: int = VisionConfig.CAMERA_ID
+        
+        # Camera & Vision State
+        self.camera_id: int = getattr(VisionConfig, "CAMERA_ID", 0)
+        self.frame_width: int = getattr(VisionConfig, "FRAME_WIDTH", 640)
+        self.frame_height: int = getattr(VisionConfig, "FRAME_HEIGHT", 480)
+        self.target_fps: int = getattr(VisionConfig, "TARGET_FPS", 60)
         self.is_camera_live: bool = False
         self.flip_mode: str = getattr(VisionConfig, "FLIP_MODE", "NONE")
         self.available_cameras: List[Dict[str, Any]] = []
+        self.available_ports: List[Dict[str, Any]] = []
+
+        # Callbacks
         self.on_switch_camera_cb = None
+        self.on_scan_cameras_cb = None
+        self.on_scan_ports_cb = None
 
         self.last_broadcast_time = time.monotonic()
         self._setup_signals()
@@ -82,7 +94,7 @@ class WebBridge:
             self.fps = getattr(self.vision_worker, "current_fps", self.fps)
             self.tracking_mode = getattr(self.vision_worker, "mode", self.tracking_mode)
 
-        # Simulate or calculate system state
+        # Calculate system state
         if self.laser_firing:
             self.system_state = "LOCKED"
         elif self.tracking_mode in ("YOLO_TRACKING", "COLOR_TRACKING", "BLUE_TRACKING"):
@@ -107,6 +119,8 @@ class WebBridge:
             "laser_firing": self.laser_firing,
             "laser_power": self.laser_power,
             "fps": round(self.fps, 1),
+            "target_fps": self.target_fps,
+            "resolution": f"{self.frame_width}x{self.frame_height}",
             "latency_ms": round(self.latency_ms, 1),
             "temperature_c": round(self.temperature_c, 1),
             "voltage_v": round(self.voltage_v, 1),
@@ -116,6 +130,7 @@ class WebBridge:
             "is_camera_live": self.is_camera_live,
             "flip_mode": self.flip_mode,
             "available_cameras": self.available_cameras,
+            "available_ports": self.available_ports,
             "pid": {
                 "kp": getattr(ControlConfig, "KP", 0.60),
                 "ki": getattr(ControlConfig, "KI", 0.16),
@@ -123,12 +138,16 @@ class WebBridge:
             },
         }
 
-
-
     async def connect_client(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.add(websocket)
         logger.info(f"[WEB] New client connected. Total clients: {len(self.active_connections)}")
+        # Send instant telemetry upon connection
+        try:
+            payload = json.dumps(self.get_telemetry_dict())
+            await websocket.send_text(payload)
+        except Exception:
+            pass
 
     def disconnect_client(self, websocket: WebSocket):
         self.active_connections.discard(websocket)
@@ -159,7 +178,6 @@ class WebBridge:
 
         for ws in dead_connections:
             self.active_connections.discard(ws)
-
 
     def handle_command(self, cmd_data: Dict[str, Any]):
         """Execute commands received from the WebUI"""
@@ -244,24 +262,51 @@ class WebBridge:
                 ControlConfig.KD = kd
 
         elif action == "CONNECT_SERIAL":
-            port = payload.get("port", "COM3")
-            baud = payload.get("baud", 115200)
-            if self.serial_thread:
+            port = payload.get("port")
+            baud = int(payload.get("baud", 115200))
+            if not port and self.available_ports:
+                # Pick first available or STM32 port
+                stm32_ports = [p["device"] for p in self.available_ports if p.get("is_stm32")]
+                port = stm32_ports[0] if stm32_ports else self.available_ports[0]["device"]
+            
+            if port and self.serial_thread:
+                logger.info(f"[WEB] Connecting to serial port: {port} @ {baud} bps")
                 self.serial_thread.connect_serial(port, baud)
 
         elif action == "DISCONNECT_SERIAL":
             if self.serial_thread:
+                logger.info("[WEB] Disconnecting serial port...")
                 self.serial_thread.disconnect_serial()
+
+        elif action == "SCAN_PORTS":
+            if self.on_scan_ports_cb:
+                self.available_ports = self.on_scan_ports_cb()
 
         elif action == "SET_CAMERA":
             cam_id = int(payload.get("camera_id", 0))
+            width = int(payload.get("width", self.frame_width))
+            height = int(payload.get("height", self.frame_height))
+            fps = int(payload.get("fps", self.target_fps))
             self.camera_id = cam_id
             if self.on_switch_camera_cb:
-                self.on_switch_camera_cb(cam_id)
+                self.on_switch_camera_cb(cam_id, width, height, fps)
+
+        elif action == "SET_RESOLUTION":
+            width = int(payload.get("width", 640))
+            height = int(payload.get("height", 480))
+            fps = int(payload.get("fps", 60))
+            self.frame_width = width
+            self.frame_height = height
+            self.target_fps = fps
+            VisionConfig.FRAME_WIDTH = width
+            VisionConfig.FRAME_HEIGHT = height
+            VisionConfig.TARGET_FPS = fps
+            if self.on_switch_camera_cb:
+                self.on_switch_camera_cb(self.camera_id, width, height, fps)
 
         elif action == "SCAN_CAMERAS":
             if getattr(self, "on_scan_cameras_cb", None):
-                self.on_scan_cameras_cb()
+                self.available_cameras = self.on_scan_cameras_cb()
 
         elif action == "SET_FLIP_MODE":
             flip = payload.get("flip_mode", "NONE")
@@ -269,8 +314,6 @@ class WebBridge:
             VisionConfig.FLIP_MODE = flip
             if self.vision_worker:
                 self.vision_worker.set_flip_mode(flip)
-
-
 
     def _send_laser_command(self, fire: bool):
         if self.serial_thread and self.serial_thread.is_connected():

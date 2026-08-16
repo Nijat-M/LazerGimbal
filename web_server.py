@@ -2,9 +2,10 @@
 """
 Laser Gimbal (HSS) - Futuristic WebUI Backend Server (FastAPI)
 Provides:
+- Real-time WebSockets for Telemetry, COM Ports, and 3D Model Synchronization
+- Full 60 FPS High-Resolution Camera Streaming (1920x1200, 1920x1080, 1280x720, 640x480) with MJPG
+- Direct STM32 USB CDC Serial Communication (Auto-filtering Bluetooth)
 - Blue Color (HSV) Object Detector (TargetDetector) + YOLO Target Detector
-- Real-time WebSockets for Telemetry and 3D Model Synchronization
-- Low-latency MJPEG video streaming (/video_feed)
 - REST API for Configuration, Serial Ports, and PID parameters
 - Static SPA hosting of the React/Three.js WebUI
 """
@@ -38,6 +39,7 @@ from config.vision_config import VisionConfig
 from vision.detector import TargetDetector, DetectionResult
 from vision.yolo_detector import YOLODetector
 from core.control.error_processor import ErrorProcessor
+from core.serial_thread import SerialThread
 from core.web_bridge import WebBridge
 
 logger = Logger("WebServer")
@@ -54,7 +56,8 @@ app.add_middleware(
 )
 
 # Global instances
-bridge = WebBridge()
+serial_thread = SerialThread()
+bridge = WebBridge(serial_thread=serial_thread)
 target_detector = TargetDetector()
 error_processor = ErrorProcessor()
 yolo_detector: Optional[YOLODetector] = None
@@ -74,13 +77,39 @@ def get_yolo_detector() -> Optional[YOLODetector]:
 # Video & Camera State
 cap: Optional[cv2.VideoCapture] = None
 camera_lock = threading.Lock()
-current_camera_id: int = VisionConfig.CAMERA_ID
-latest_frame_bytes: Optional[bytes] = None
+current_camera_id: int = getattr(VisionConfig, "CAMERA_ID", 0)
 is_camera_live: bool = False
 
 
 def get_camera_backend() -> int:
     return cv2.CAP_DSHOW if sys.platform.startswith("win") else cv2.CAP_ANY
+
+
+def scan_available_ports() -> List[Dict[str, Any]]:
+    """Scan and list COM ports, prioritizing STM32 USB CDC and filtering Bluetooth SPP"""
+    all_ports = list(serial.tools.list_ports.comports())
+    valid_ports = []
+
+    for p in all_ports:
+        is_bluetooth = ("BTHENUM" in str(p.hwid)) or ("蓝牙" in str(p.description)) or ("Bluetooth" in str(p.description))
+        if not is_bluetooth:
+            is_stm32 = (
+                (getattr(p, "vid", 0) == 0x0483 and getattr(p, "pid", 0) == 0x5740)
+                or ("STMicroelectronics" in str(p.description))
+                or ("0483:5740" in str(p.hwid))
+            )
+            clean_name = str(p.description).split("(")[0].strip()
+            desc = f"{p.device} (⚡ STM32 Native USB)" if is_stm32 else f"{p.device} ({clean_name[:18]})"
+            valid_ports.append({
+                "device": p.device,
+                "description": desc,
+                "is_stm32": is_stm32,
+            })
+
+    # Sort STM32 ports first
+    valid_ports.sort(key=lambda x: (not x["is_stm32"], x["device"]))
+    bridge.available_ports = valid_ports
+    return valid_ports
 
 
 def scan_available_cameras() -> List[Dict[str, Any]]:
@@ -92,14 +121,14 @@ def scan_available_cameras() -> List[Dict[str, Any]]:
     for idx in range(3):
         try:
             if is_camera_live and current_camera_id == idx and cap is not None and cap.isOpened():
-                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or VisionConfig.FRAME_WIDTH)
-                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or VisionConfig.FRAME_HEIGHT)
-                fps = int(cap.get(cv2.CAP_PROP_FPS) or VisionConfig.TARGET_FPS)
+                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or bridge.frame_width)
+                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or bridge.frame_height)
+                fps = int(cap.get(cv2.CAP_PROP_FPS) or bridge.target_fps)
                 cams.append({
                     "id": idx,
                     "name": f"Kamera {idx} (Aktif Aygıt)",
                     "resolution": f"{w}x{h}",
-                    "fps": fps if fps > 0 else 30,
+                    "fps": fps if fps > 0 else 60,
                     "is_live": True,
                     "is_selected": True,
                 })
@@ -111,12 +140,12 @@ def scan_available_cameras() -> List[Dict[str, Any]]:
                 if ret:
                     w = int(test_cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 640)
                     h = int(test_cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 480)
-                    fps = int(test_cap.get(cv2.CAP_PROP_FPS) or 30)
+                    fps = int(test_cap.get(cv2.CAP_PROP_FPS) or 60)
                     cams.append({
                         "id": idx,
                         "name": f"Kamera {idx} (USB / Dahili)",
                         "resolution": f"{w}x{h}",
-                        "fps": fps if fps > 0 else 30,
+                        "fps": fps if fps > 0 else 60,
                         "is_live": True,
                         "is_selected": (current_camera_id == idx),
                     })
@@ -128,8 +157,8 @@ def scan_available_cameras() -> List[Dict[str, Any]]:
     cams.append({
         "id": -1,
         "name": "Simülasyon / Test Akışı",
-        "resolution": f"{VisionConfig.FRAME_WIDTH}x{VisionConfig.FRAME_HEIGHT}",
-        "fps": VisionConfig.TARGET_FPS,
+        "resolution": f"{bridge.frame_width}x{bridge.frame_height}",
+        "fps": bridge.target_fps,
         "is_live": False,
         "is_selected": (current_camera_id == -1),
     })
@@ -138,8 +167,8 @@ def scan_available_cameras() -> List[Dict[str, Any]]:
     return cams
 
 
-def init_camera(preferred_id: int = 0) -> bool:
-    """Initialize physical camera device or simulation"""
+def init_camera(preferred_id: int = 0, width: int = 640, height: int = 480, target_fps: int = 60) -> bool:
+    """Initialize physical camera device or simulation with hardware MJPG acceleration"""
     global cap, is_camera_live, current_camera_id
     with camera_lock:
         if cap is not None and cap.isOpened():
@@ -155,27 +184,46 @@ def init_camera(preferred_id: int = 0) -> bool:
             current_camera_id = -1
             bridge.camera_id = -1
             bridge.is_camera_live = False
+            bridge.frame_width = width
+            bridge.frame_height = height
+            bridge.target_fps = target_fps
             logger.info("[CAMERA] Switched to High-Tech Simulation Feed Mode.")
             return True
 
         backend = get_camera_backend()
-        candidate_ids = [preferred_id] if preferred_id is not None and preferred_id >= 0 else [0]
+        candidate_ids = [preferred_id] if preferred_id is not None and preferred_id >= 0 else [0, 1]
         for cam_id in candidate_ids:
             try:
                 test_cap = cv2.VideoCapture(cam_id, backend)
                 if test_cap.isOpened():
-                    test_cap.set(cv2.CAP_PROP_FRAME_WIDTH, VisionConfig.FRAME_WIDTH)
-                    test_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, VisionConfig.FRAME_HEIGHT)
-                    test_cap.set(cv2.CAP_PROP_FPS, VisionConfig.TARGET_FPS)
-                    
+                    # Set MJPG FourCC for high-resolution 60 FPS streaming without USB 2.0 throttling
+                    test_cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                    test_cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                    test_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                    test_cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                    test_cap.set(cv2.CAP_PROP_FPS, target_fps)
+                    test_cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
                     ret, test_frame = test_cap.read()
                     if ret and test_frame is not None:
                         cap = test_cap
                         current_camera_id = cam_id
                         is_camera_live = True
+                        actual_w = int(test_cap.get(cv2.CAP_PROP_FRAME_WIDTH) or width)
+                        actual_h = int(test_cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or height)
+                        actual_fps = int(test_cap.get(cv2.CAP_PROP_FPS) or target_fps)
+
                         bridge.camera_id = cam_id
                         bridge.is_camera_live = True
-                        logger.info(f"[CAMERA] ✓ Successfully opened Camera ID: {cam_id}")
+                        bridge.frame_width = actual_w
+                        bridge.frame_height = actual_h
+                        bridge.target_fps = actual_fps if actual_fps > 0 else target_fps
+
+                        VisionConfig.FRAME_WIDTH = actual_w
+                        VisionConfig.FRAME_HEIGHT = actual_h
+                        VisionConfig.TARGET_FPS = bridge.target_fps
+
+                        logger.info(f"[CAMERA] ✓ Successfully opened Camera ID: {cam_id} ({actual_w}x{actual_h} @ {bridge.target_fps} FPS [MJPG])")
                         return True
                     test_cap.release()
             except Exception as e:
@@ -186,44 +234,48 @@ def init_camera(preferred_id: int = 0) -> bool:
         bridge.camera_id = -1
         current_camera_id = -1
         bridge.is_camera_live = False
+        bridge.frame_width = width
+        bridge.frame_height = height
+        bridge.target_fps = target_fps
         logger.info("[CAMERA] No physical camera found. Using high-tech simulation mode.")
         return False
+
 
 # Register callbacks with WebBridge
 bridge.on_switch_camera_cb = init_camera
 bridge.on_scan_cameras_cb = scan_available_cameras
-
-
-
+bridge.on_scan_ports_cb = scan_available_ports
 
 
 def generate_simulated_frame(pitch: float, yaw: float, is_laser_firing: bool, mode: str):
     """Generate realistic sci-fi tactical EO/IR video feed when physical camera is offline"""
-    w, h = VisionConfig.FRAME_WIDTH, VisionConfig.FRAME_HEIGHT
+    w = getattr(bridge, "frame_width", 640)
+    h = getattr(bridge, "frame_height", 480)
     frame = np.zeros((h, w, 3), dtype=np.uint8)
 
     # Dark tactical thermal background
     frame[:] = (16, 12, 8)
 
     # Draw grid lines
-    for x in range(0, w, 40):
+    step = 40 if w <= 640 else 80
+    for x in range(0, w, step):
         cv2.line(frame, (x, 0), (x, h), (30, 24, 16), 1)
-    for y in range(0, h, 40):
+    for y in range(0, h, step):
         cv2.line(frame, (0, y), (w, y), (30, 24, 16), 1)
 
     t = time.time()
 
     # If in COLOR_TRACKING / BLUE_TRACKING mode, draw a blue simulated target object
     if mode in ("COLOR_TRACKING", "BLUE_TRACKING"):
-        blue_x = int(w / 2 + np.sin(t * 1.0) * 130 - (yaw * 2.5))
-        blue_y = int(h / 2 + np.cos(t * 1.3) * 70 + (pitch * 2.5))
-        radius = 22
+        blue_x = int(w / 2 + np.sin(t * 1.0) * (w * 0.2) - (yaw * 2.5))
+        blue_y = int(h / 2 + np.cos(t * 1.3) * (h * 0.15) + (pitch * 2.5))
+        radius = max(16, int(w * 0.035))
 
         # Draw real blue circle in BGR: (255, 100, 20) -> (B, G, R)
         cv2.circle(frame, (blue_x, blue_y), radius, (255, 120, 20), -1)
         cv2.circle(frame, (blue_x, blue_y), radius + 2, (255, 200, 50), 2)
 
-        # Run actual TargetDetector to verify detector algorithm!
+        # Run actual TargetDetector to verify detector algorithm
         blue_res, _ = target_detector.detect_blue_object(frame)
         if blue_res.detected and blue_res.position:
             pos = blue_res.position
@@ -255,8 +307,8 @@ def generate_simulated_frame(pitch: float, yaw: float, is_laser_firing: bool, mo
 
     else:
         # Generic Simulated Drone Target
-        drone_x = int(w / 2 + np.sin(t * 1.2) * 120 - (yaw * 3))
-        drone_y = int(h / 2 + np.cos(t * 1.5) * 60 + (pitch * 3))
+        drone_x = int(w / 2 + np.sin(t * 1.2) * (w * 0.2) - (yaw * 3))
+        drone_y = int(h / 2 + np.cos(t * 1.5) * (h * 0.12) + (pitch * 3))
 
         bridge.error_x = drone_x - (w // 2)
         bridge.error_y = drone_y - (h // 2)
@@ -283,8 +335,8 @@ def generate_simulated_frame(pitch: float, yaw: float, is_laser_firing: bool, mo
         cv2.line(frame, (w // 2, h // 2), target_pos, (0, 0, 255), 3)
         cv2.circle(frame, target_pos, 24, (0, 50, 255), -1)
 
-    # Encode to JPEG
-    _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    # Encode to JPEG with fast compression
+    _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
     return jpeg.tobytes()
 
 
@@ -297,7 +349,7 @@ def process_camera_frame(frame: np.ndarray) -> bytes:
     mode = bridge.tracking_mode
 
     # Flip mode handling
-    flip_mode = getattr(VisionConfig, "FLIP_MODE", "NONE")
+    flip_mode = getattr(bridge, "flip_mode", "NONE")
     if flip_mode == "180":
         frame = cv2.flip(frame, -1)
     elif flip_mode == "V":
@@ -433,19 +485,18 @@ def process_camera_frame(frame: np.ndarray) -> bytes:
             bridge.error_y = 0
 
     # Draw Laser Strike on Camera Feed if firing
-
     if bridge.laser_firing and bridge.detections:
         target_pos = (bridge.detections[0]["bbox"][0], bridge.detections[0]["bbox"][1])
         cv2.line(frame, (cx, cy), target_pos, (0, 0, 255), 3)
         cv2.circle(frame, target_pos, 20, (0, 0, 255), -1)
 
     # Encode to JPEG
-    _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+    _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
     return jpeg.tobytes()
 
 
 def video_stream_generator():
-    """Generator for MJPEG stream (/video_feed)"""
+    """Generator for MJPEG stream (/video_feed) supporting full 60 FPS hardware rate"""
     global cap, is_camera_live
     prev_time = time.time()
 
@@ -467,6 +518,9 @@ def video_stream_generator():
                 is_laser_firing=bridge.laser_firing,
                 mode=bridge.tracking_mode,
             )
+            # Regulate simulation stream frequency (e.g. 60 FPS = 0.016s)
+            sim_sleep = max(0.005, 1.0 / (bridge.target_fps or 60))
+            time.sleep(sim_sleep)
 
         # Calculate FPS
         curr_time = time.time()
@@ -480,8 +534,6 @@ def video_stream_generator():
             b'--frame\r\n'
             b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n'
         )
-
-        time.sleep(0.030)  # ~33 FPS
 
 
 @app.get("/video_feed")
@@ -526,8 +578,24 @@ async def telemetry_broadcast_loop():
 @app.on_event("startup")
 async def startup_event():
     logger.info("[SERVER] Starting Web Command Center...")
-    # Initialize camera in a non-blocking background thread so server starts instantly
-    threading.Thread(target=lambda: init_camera(VisionConfig.CAMERA_ID), daemon=True).start()
+    # Start serial worker thread
+    if not serial_thread.is_alive():
+        serial_thread.start()
+    
+    # Pre-scan COM ports
+    scan_available_ports()
+
+    # Initialize camera in a non-blocking background thread
+    threading.Thread(
+        target=lambda: init_camera(
+            getattr(VisionConfig, "CAMERA_ID", 0),
+            getattr(VisionConfig, "FRAME_WIDTH", 640),
+            getattr(VisionConfig, "FRAME_HEIGHT", 480),
+            getattr(VisionConfig, "TARGET_FPS", 60)
+        ),
+        daemon=True
+    ).start()
+
     logger.info("[SERVER] Starting background telemetry broadcaster...")
     asyncio.create_task(telemetry_broadcast_loop())
 
@@ -539,8 +607,20 @@ def get_status():
 
 @app.get("/api/ports")
 def list_serial_ports():
-    ports = [p.device for p in serial.tools.list_ports.comports()]
+    ports = scan_available_ports()
     return {"ports": ports}
+
+
+@app.post("/api/serial/connect")
+def connect_serial_endpoint(port: str, baud: int = 115200):
+    success = serial_thread.connect_serial(port, baud)
+    return {"success": success, "port": port, "baud": baud}
+
+
+@app.post("/api/serial/disconnect")
+def disconnect_serial_endpoint():
+    serial_thread.disconnect_serial()
+    return {"success": True}
 
 
 @app.get("/api/cameras")
@@ -563,9 +643,15 @@ def scan_cameras_endpoint():
 
 
 @app.post("/api/camera/switch")
-def switch_camera(camera_id: int):
-    success = init_camera(camera_id)
-    return {"success": success, "camera_id": camera_id, "live": is_camera_live}
+def switch_camera(camera_id: int, width: int = 640, height: int = 480, fps: int = 60):
+    success = init_camera(camera_id, width, height, fps)
+    return {
+        "success": success,
+        "camera_id": camera_id,
+        "resolution": f"{width}x{height}",
+        "fps": fps,
+        "live": is_camera_live
+    }
 
 
 # Serve React SPA static build if exists

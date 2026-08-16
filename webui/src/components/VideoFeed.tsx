@@ -15,6 +15,7 @@ import {
   RefreshCw,
   CheckCircle2,
   Radio,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { soundManager } from '../utils/audioEffects';
 
@@ -29,12 +30,15 @@ interface VideoFeedProps {
   laserArmed: boolean;
   trackingMode: string;
   fps: number;
+  targetFps?: number;
+  resolution?: string;
   connected: boolean;
   cameraId?: number;
   isCameraLive?: boolean;
   flipMode?: string;
   availableCameras?: CameraDevice[];
-  onSwitchCamera?: (id: number) => void;
+  onSwitchCamera?: (id: number, width?: number, height?: number, fps?: number) => void;
+  onSetResolution?: (width: number, height: number, fps: number) => void;
   onSetFlipMode?: (mode: 'NONE' | '180' | 'V' | 'H') => void;
   onRescanCameras?: () => void;
 }
@@ -50,12 +54,15 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({
   laserArmed,
   trackingMode,
   fps,
+  targetFps = 60,
+  resolution = '640x480',
   connected,
   cameraId = 0,
   isCameraLive = false,
   flipMode = 'NONE',
   availableCameras = [],
   onSwitchCamera,
+  onSetResolution,
   onSetFlipMode,
   onRescanCameras,
 }) => {
@@ -97,22 +104,38 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({
     setTimeout(() => setIsScanning(false), 1200);
   };
 
+  // Resolution presets including 1920x1200
+  const resolutionPresets = [
+    { label: '1920x1200 (WUXGA 16:10 - 60 FPS)', width: 1920, height: 1200, fps: 60 },
+    { label: '1920x1080 (FHD 16:9 - 60 FPS)', width: 1920, height: 1080, fps: 60 },
+    { label: '1280x720 (HD 16:9 - 60 FPS)', width: 1280, height: 720, fps: 60 },
+    { label: '640x480 (SD 4:3 - 60 FPS / 低延迟)', width: 640, height: 480, fps: 60 },
+  ];
+
   // Default camera fallback list if no active scan yet
   const defaultCameras: CameraDevice[] = [
-    { id: 0, name: 'Kamera 0 (Dahili / USB Ana Kamera)', resolution: '1280x720', fps: 30, is_live: true },
-    { id: 1, name: 'Kamera 1 (Harici Gimbal / EO Kamera)', resolution: '1280x720', fps: 30, is_live: true },
-    { id: 2, name: 'Kamera 2 (USB Video Aygıtı)', resolution: '640x480', fps: 30, is_live: true },
-    { id: -1, name: 'Simülasyon / Test Akışı', resolution: '640x480', fps: 30, is_live: false },
+    { id: 0, name: 'Kamera 0 (Dahili / USB Ana Kamera)', resolution: '1920x1200', fps: 60, is_live: true },
+    { id: 1, name: 'Kamera 1 (Harici Gimbal / EO Kamera)', resolution: '1920x1080', fps: 60, is_live: true },
+    { id: 2, name: 'Kamera 2 (USB Video Aygıtı)', resolution: '640x480', fps: 60, is_live: true },
+    { id: -1, name: 'Simülasyon / Test Akışı', resolution: '640x480', fps: 60, is_live: false },
   ];
 
   const cameraList = availableCameras.length > 0 ? availableCameras : defaultCameras;
 
   const flipOptions: Array<{ mode: 'NONE' | '180' | 'V' | 'H'; label: string }> = [
     { mode: 'NONE', label: 'Normal (0°)' },
-    { mode: '180', label: '180° Ters Montaj' },
-    { mode: 'H', label: 'Yatay Aynalama (H)' },
-    { mode: 'V', label: 'Dikey Ters (V)' },
+    { mode: '180', label: '180° 翻转 (倒装)' },
+    { mode: 'H', label: '水平镜像 (H)' },
+    { mode: 'V', label: '垂直镜像 (V)' },
   ];
+
+  const handleResolutionChange = (width: number, height: number, presetFps: number) => {
+    if (onSetResolution) {
+      onSetResolution(width, height, presetFps);
+    } else if (onSwitchCamera) {
+      onSwitchCamera(cameraId, width, height, presetFps);
+    }
+  };
 
   return (
     <div
@@ -173,7 +196,9 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({
 
           <div className="flex items-center gap-1 bg-black/70 backdrop-blur-md px-2.5 py-1 rounded border border-cyan-500/30 text-xs font-mono text-cyan-300">
             <Cpu className="w-3.5 h-3.5 text-cyan-400" />
-            <span>FPS: <b className="text-white">{fps.toFixed(0)}</b></span>
+            <span>FPS: <b className="text-white">{fps > 0 ? fps.toFixed(0) : targetFps}</b></span>
+            <span className="text-cyan-600">|</span>
+            <span className="text-cyan-400 font-bold">{resolution}</span>
           </div>
         </div>
 
@@ -187,10 +212,10 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({
             </div>
           )}
 
-          {/* Camera Device Selector Dropdown Trigger Button */}
+          {/* Camera Device & Resolution Selector Dropdown Trigger Button */}
           <button
             onClick={() => setShowCamMenu(!showCamMenu)}
-            title="Kamera Aygıt Seçimi & Ayarları"
+            title="Kamera Aygıt Seçimi & Çözünürlük Ayarları"
             className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono font-bold transition-all border ${
               showCamMenu
                 ? 'bg-cyan-500/30 border-cyan-400 text-cyan-200 glow-cyan'
@@ -199,18 +224,18 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({
           >
             <Camera className="w-3.5 h-3.5 text-cyan-400" />
             <span>
-              {cameraId === -1 ? 'SİMÜLASYON' : isCameraLive ? `KAMERA ${cameraId} (CANLI)` : `KAMERA ${cameraId}`}
+              {cameraId === -1 ? 'SİMÜLASYON' : isCameraLive ? `KAMERA ${cameraId} (${resolution})` : `KAMERA ${cameraId}`}
             </span>
           </button>
 
           {/* Comprehensive Camera Selection Popup Modal / Dropdown */}
           {showCamMenu && (
-            <div className="absolute right-0 top-9 w-80 bg-[#070e1c]/95 backdrop-blur-xl border border-cyan-500/60 rounded-xl p-3.5 shadow-2xl z-50 flex flex-col gap-3 font-mono text-xs text-cyan-200">
+            <div className="absolute right-0 top-9 w-84 bg-[#070e1c]/95 backdrop-blur-xl border border-cyan-500/60 rounded-xl p-3.5 shadow-2xl z-50 flex flex-col gap-3 font-mono text-xs text-cyan-200">
               {/* Header with Rescan Button */}
               <div className="flex items-center justify-between border-b border-cyan-500/30 pb-2">
                 <div className="flex items-center gap-1.5 text-cyan-300 font-bold text-xs">
                   <Tv className="w-4 h-4 text-cyan-400" />
-                  <span>KAMERA AYGIT SEÇİMİ</span>
+                  <span>KAMERA & ÇÖZÜNÜRLÜK AYARLARI</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <button
@@ -231,47 +256,72 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({
                 </div>
               </div>
 
-              {/* Dynamic Camera Devices List */}
-              <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto pr-1">
-                {cameraList.map((cam) => {
-                  const isSelected = cameraId === cam.id;
-                  return (
-                    <button
-                      key={cam.id}
-                      onClick={() => {
-                        if (onSwitchCamera) onSwitchCamera(cam.id);
-                        setShowCamMenu(false);
-                      }}
-                      className={`p-2.5 rounded-lg text-left transition-all border flex items-center justify-between ${
-                        isSelected
-                          ? 'bg-cyan-950/90 border-cyan-400 text-cyan-100 glow-cyan font-bold'
-                          : 'bg-black/40 border-cyan-500/20 hover:bg-cyan-950/50 text-cyan-400'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        {cam.id === -1 ? (
-                          <Radio className={`w-3.5 h-3.5 ${isSelected ? 'text-cyan-300' : 'text-cyan-600'}`} />
-                        ) : (
-                          <Camera className={`w-3.5 h-3.5 ${isSelected ? 'text-cyan-300' : 'text-cyan-600'}`} />
-                        )}
-                        <div className="flex flex-col">
-                          <span className="text-[11px] leading-tight">{cam.name}</span>
-                          {cam.resolution && (
-                            <span className="text-[9px] text-cyan-500">
-                              {cam.resolution} @ {cam.fps || 30} FPS
-                            </span>
+              {/* 1. Dynamic Camera Devices List */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] text-cyan-400 font-bold flex items-center gap-1">
+                  <Camera className="w-3 h-3 text-cyan-400" /> AYGIT SEÇİMİ (DEVICE):
+                </span>
+                <div className="flex flex-col gap-1 max-h-36 overflow-y-auto pr-1">
+                  {cameraList.map((cam) => {
+                    const isSelected = cameraId === cam.id;
+                    return (
+                      <button
+                        key={cam.id}
+                        onClick={() => {
+                          if (onSwitchCamera) onSwitchCamera(cam.id);
+                        }}
+                        className={`p-2 rounded-lg text-left transition-all border flex items-center justify-between ${
+                          isSelected
+                            ? 'bg-cyan-950/90 border-cyan-400 text-cyan-100 glow-cyan font-bold'
+                            : 'bg-black/40 border-cyan-500/20 hover:bg-cyan-950/50 text-cyan-400'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          {cam.id === -1 ? (
+                            <Radio className={`w-3.5 h-3.5 ${isSelected ? 'text-cyan-300' : 'text-cyan-600'}`} />
+                          ) : (
+                            <Camera className={`w-3.5 h-3.5 ${isSelected ? 'text-cyan-300' : 'text-cyan-600'}`} />
                           )}
+                          <div className="flex flex-col">
+                            <span className="text-[11px] leading-tight">{cam.name}</span>
+                          </div>
                         </div>
-                      </div>
 
-                      {isSelected && <CheckCircle2 className="w-4 h-4 text-cyan-300" />}
-                    </button>
-                  );
-                })}
+                        {isSelected && <CheckCircle2 className="w-4 h-4 text-cyan-300" />}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              {/* Image Orientation Flip Selection */}
-              <div className="border-t border-cyan-500/20 pt-2.5 flex flex-col gap-1.5">
+              {/* 2. Resolution Presets (Includes 1920x1200) */}
+              <div className="border-t border-cyan-500/20 pt-2 flex flex-col gap-1">
+                <span className="text-[10px] text-cyan-400 font-bold flex items-center gap-1">
+                  <SlidersHorizontal className="w-3 h-3 text-cyan-400" /> ÇÖZÜNÜRLÜK VE KARE HIZI (60 FPS MJPG):
+                </span>
+                <div className="flex flex-col gap-1">
+                  {resolutionPresets.map((r) => {
+                    const isCurrent = resolution === `${r.width}x${r.height}`;
+                    return (
+                      <button
+                        key={`${r.width}x${r.height}`}
+                        onClick={() => handleResolutionChange(r.width, r.height, r.fps)}
+                        className={`py-1.5 px-2 rounded text-[11px] text-left border transition-colors flex items-center justify-between ${
+                          isCurrent
+                            ? 'bg-cyan-900/90 border-cyan-400 text-white font-bold glow-cyan'
+                            : 'bg-black/40 border-cyan-500/20 text-cyan-300 hover:bg-cyan-950/50'
+                        }`}
+                      >
+                        <span>{r.label}</span>
+                        {isCurrent && <CheckCircle2 className="w-3.5 h-3.5 text-cyan-300" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 3. Image Orientation Flip Selection */}
+              <div className="border-t border-cyan-500/20 pt-2 flex flex-col gap-1">
                 <span className="text-[10px] text-cyan-400 flex items-center gap-1 font-bold">
                   <RotateCw className="w-3 h-3 text-cyan-400" /> GÖRÜNTÜ YÖNÜ / FLIP AYARI:
                 </span>
@@ -282,7 +332,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({
                       onClick={() => {
                         if (onSetFlipMode) onSetFlipMode(f.mode);
                       }}
-                      className={`py-1.5 px-2 rounded text-[10px] text-center border transition-colors ${
+                      className={`py-1 px-2 rounded text-[10px] text-center border transition-colors ${
                         flipMode === f.mode
                           ? 'bg-cyan-900/80 border-cyan-400 text-white font-bold'
                           : 'bg-black/40 border-cyan-500/20 text-cyan-400 hover:bg-cyan-950/40'
@@ -326,7 +376,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({
         <div className="bg-black/70 backdrop-blur-md px-3 py-1 rounded border border-cyan-500/30 text-cyan-400">
           EO/IR SENSOR:{' '}
           <span className={isCameraLive ? 'text-green-400 font-bold' : 'text-amber-400 font-bold'}>
-            {isCameraLive ? `HARDWARE CAM ${cameraId} ACTIVE` : 'TACTICAL SIMULATION ACTIVE'}
+            {isCameraLive ? `HARDWARE CAM ${cameraId} (${resolution})` : 'TACTICAL SIMULATION ACTIVE'}
           </span>
         </div>
       </div>

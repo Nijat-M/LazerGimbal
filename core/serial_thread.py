@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Asynchronous serial transport with priority stop and latest-wins motion."""
+"""
+Asynchronous serial transport with priority stop and latest-wins motion.
+Supports both PyQt6 GUI signals and pure-Python threaded environments (FastAPI/WebUI).
+"""
 
 import queue
 import sys
 import threading
 import time
+from typing import Callable, List, Optional
 
 import serial
-from PyQt6.QtCore import QThread, pyqtSignal
 
 try:
     from config import cfg
@@ -19,13 +22,39 @@ from utils.logger import Logger
 logger = Logger("SerialThread")
 
 
-class SerialThread(QThread):
-    connection_state_signal = pyqtSignal(bool, str)
-    data_received_signal = pyqtSignal(str)
+class Signal:
+    """Universal Signal supporting .connect() and .emit() for any callable."""
+    def __init__(self):
+        self._slots: List[Callable] = []
+
+    def connect(self, slot: Callable) -> None:
+        if slot not in self._slots:
+            self._slots.append(slot)
+
+    def disconnect(self, slot: Callable) -> None:
+        if slot in self._slots:
+            self._slots.remove(slot)
+
+    def emit(self, *args, **kwargs) -> None:
+        for slot in list(self._slots):
+            try:
+                slot(*args, **kwargs)
+            except Exception as e:
+                logger.error(f"[SIGNAL ERROR] Callback {slot} failed: {e}")
+
+
+class SerialThread(threading.Thread):
+    """
+    High-performance Asynchronous Serial Thread.
+    Compatible with PyQt6 QThread interface (isRunning, start, stop, wait).
+    """
 
     def __init__(self) -> None:
-        super().__init__()
-        self.serial_port = None
+        super().__init__(daemon=True)
+        self.connection_state_signal = Signal()
+        self.data_received_signal = Signal()
+
+        self.serial_port: Optional[serial.Serial] = None
         self.is_running = True
         self.write_queue = queue.Queue()
         self.urgent_queue = queue.Queue()
@@ -33,25 +62,39 @@ class SerialThread(QThread):
         self._latest_realtime_command = None
         self._read_buffer = ""
 
-    def connect_serial(self, port_name, baud_rate):
+    def isRunning(self) -> bool:
+        """QThread compatibility helper"""
+        return self.is_alive()
+
+    def wait(self, timeout_ms: int = 1000) -> bool:
+        """QThread compatibility helper"""
+        self.join(timeout=timeout_ms / 1000.0)
+        return not self.is_alive()
+
+    def connect_serial(self, port_name: str, baud_rate: int = 115200) -> bool:
         try:
             if self.serial_port and self.serial_port.is_open:
                 self.serial_port.close()
 
+            timeout = getattr(cfg, "TIMEOUT", 0.5)
             self.serial_port = serial.Serial(
                 port=port_name,
                 baudrate=baud_rate,
-                timeout=cfg.TIMEOUT,
+                timeout=timeout,
                 write_timeout=0.2,
             )
 
             if self.serial_port.is_open:
-                msg = f"已连接至 {port_name}"
+                msg = f"已连接至 {port_name} ({baud_rate} bps)"
                 logger.info(f"[SERIAL] {msg}")
                 self.connection_state_signal.emit(True, msg)
                 return True
         except serial.SerialException as exc:
-            error_msg = f"连接失败: {exc}"
+            error_msg = f"连接失败 ({port_name}): {exc}"
+            logger.error(f"[SERIAL ERROR] {error_msg}")
+            self.connection_state_signal.emit(False, error_msg)
+        except Exception as exc:
+            error_msg = f"未知异常 ({port_name}): {exc}"
             logger.error(f"[SERIAL ERROR] {error_msg}")
             self.connection_state_signal.emit(False, error_msg)
         return False
@@ -59,7 +102,10 @@ class SerialThread(QThread):
     def disconnect_serial(self) -> None:
         self.clear_pending_commands()
         if self.serial_port and self.serial_port.is_open:
-            self.serial_port.close()
+            try:
+                self.serial_port.close()
+            except Exception:
+                pass
             self.connection_state_signal.emit(False, "串口已断开")
 
     def is_connected(self) -> bool:
@@ -111,7 +157,7 @@ class SerialThread(QThread):
                     self._write(realtime_command)
 
                 port = self.serial_port
-                if port is None:
+                if port is None or not port.is_open:
                     continue
                 waiting = port.in_waiting
                 if waiting > 0:
@@ -126,7 +172,10 @@ class SerialThread(QThread):
                 error_msg = f"检测到物理断开或硬件异常: {exc}"
                 logger.error(f"[SERIAL ERROR] {error_msg}")
                 if self.serial_port:
-                    self.serial_port.close()
+                    try:
+                        self.serial_port.close()
+                    except Exception:
+                        pass
                 self.clear_pending_commands()
                 self.connection_state_signal.emit(False, error_msg)
             except Exception as exc:
@@ -135,8 +184,10 @@ class SerialThread(QThread):
     def stop(self) -> None:
         self.is_running = False
         if self.serial_port and self.serial_port.is_open:
-            self.serial_port.close()
-        self.wait(1000)
+            try:
+                self.serial_port.close()
+            except Exception:
+                pass
 
     def _drain_queue(self, command_queue: queue.Queue, limit=None) -> None:
         sent = 0

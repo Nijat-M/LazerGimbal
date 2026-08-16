@@ -14,7 +14,6 @@ import {
   Clock,
 } from 'lucide-react';
 
-
 export function App() {
   const { telemetry, wsConnected, logs, sendCommand } = useGimbalSocket();
   const [isPidModalOpen, setIsPidModalOpen] = useState<boolean>(false);
@@ -35,7 +34,7 @@ export function App() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't intercept if typing in an input
-      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return;
 
       if (e.key === 'ArrowUp' || e.key.toLowerCase() === 'w') {
         sendCommand({ action: 'MANUAL_JOG', payload: { axis: 'y', dir: 1 } });
@@ -73,12 +72,20 @@ export function App() {
     };
   }, [sendCommand, telemetry.laser_armed, telemetry.laser_firing]);
 
-  const handleConnectPort = (port: string) => {
-    sendCommand({ action: 'CONNECT_SERIAL', payload: { port } });
+  const handleConnectPort = (port: string, baud: number) => {
+    sendCommand({ action: 'CONNECT_SERIAL', payload: { port, baud } });
   };
 
   const handleDisconnectPort = () => {
     sendCommand({ action: 'DISCONNECT_SERIAL' });
+  };
+
+  const handleRescanPorts = () => {
+    sendCommand({ action: 'SCAN_PORTS' });
+  };
+
+  const handleSetResolution = (width: number, height: number, fps: number) => {
+    sendCommand({ action: 'SET_RESOLUTION', payload: { width, height, fps } });
   };
 
   return (
@@ -155,16 +162,18 @@ export function App() {
             laserArmed={telemetry.laser_armed}
             trackingMode={telemetry.tracking_mode}
             fps={telemetry.fps}
+            targetFps={telemetry.target_fps}
+            resolution={telemetry.resolution}
             connected={telemetry.connected}
             cameraId={telemetry.camera_id}
             isCameraLive={telemetry.is_camera_live}
             flipMode={telemetry.flip_mode}
             availableCameras={telemetry.available_cameras}
             onSwitchCamera={(id) => sendCommand({ action: 'SET_CAMERA', payload: { camera_id: id } })}
+            onSetResolution={handleSetResolution}
             onSetFlipMode={(mode) => sendCommand({ action: 'SET_FLIP_MODE', payload: { flip_mode: mode } })}
             onRescanCameras={() => sendCommand({ action: 'SCAN_CAMERAS' })}
           />
-
 
           {/* Tactical Weapon & Mode Controls (Directly Under Video Feed) */}
           <ControlCenter
@@ -190,18 +199,18 @@ export function App() {
             />
           </div>
 
-          {/* Telemetry Sensor Panels */}
+          {/* Telemetry Sensor Panels with COM Port Selector & Live Badges */}
           <TelemetryPanel
             telemetry={telemetry}
             onConnectPort={handleConnectPort}
             onDisconnectPort={handleDisconnectPort}
+            onRescanPorts={handleRescanPorts}
           />
 
           {/* Tactical Event Stream & Mission Logs */}
           <TacticalLog logs={logs} />
         </div>
       </main>
-
 
       {/* 3. PID Tuning Modal */}
       <PidTuningModal

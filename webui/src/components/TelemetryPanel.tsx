@@ -1,17 +1,19 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import type { TelemetryData } from '../types/telemetry';
-import { Activity, Gauge, Zap, Thermometer, Radio, Wifi, WifiOff, Target } from 'lucide-react';
+import { Activity, Gauge, Zap, Thermometer, Radio, Wifi, WifiOff, Target, RefreshCw, Cpu } from 'lucide-react';
 
 interface TelemetryPanelProps {
   telemetry: TelemetryData;
-  onConnectPort: (port: string) => void;
+  onConnectPort: (port: string, baud: number) => void;
   onDisconnectPort: () => void;
+  onRescanPorts?: () => void;
 }
 
 export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
   telemetry,
   onConnectPort,
   onDisconnectPort,
+  onRescanPorts,
 }) => {
   const {
     connected,
@@ -22,8 +24,38 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
     temperature_c = 36.5,
     latency_ms,
     detections,
+    available_ports = [],
   } = telemetry;
 
+  const [selectedPort, setSelectedPort] = useState<string>('');
+  const [selectedBaud, setSelectedBaud] = useState<number>(115200);
+  const [isScanning, setIsScanning] = useState<boolean>(false);
+
+  // Auto-select STM32 port if available when port list updates
+  useEffect(() => {
+    if (available_ports && available_ports.length > 0) {
+      const currentExists = available_ports.some((p) => p.device === selectedPort);
+      if (!selectedPort || !currentExists) {
+        const stm32 = available_ports.find((p) => p.is_stm32);
+        setSelectedPort(stm32 ? stm32.device : available_ports[0].device);
+      }
+    }
+  }, [available_ports, selectedPort]);
+
+  const handleRescan = () => {
+    setIsScanning(true);
+    if (onRescanPorts) {
+      onRescanPorts();
+    }
+    setTimeout(() => setIsScanning(false), 1000);
+  };
+
+  const handleConnect = () => {
+    const targetPort = selectedPort || (available_ports.length > 0 ? available_ports[0].device : 'COM3');
+    onConnectPort(targetPort, selectedBaud);
+  };
+
+  const isStm32Selected = available_ports.find((p) => p.device === selectedPort)?.is_stm32;
 
   return (
     <div className="flex flex-col gap-3 w-full">
@@ -39,8 +71,8 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
 
           <div className="flex items-center gap-1.5">
             {connected ? (
-              <span className="flex items-center gap-1 text-[11px] font-mono text-green-400 bg-green-950/70 border border-green-500/40 px-2 py-0.5 rounded">
-                <Wifi className="w-3 h-3" /> CONNECTED
+              <span className="flex items-center gap-1 text-[11px] font-mono text-green-400 bg-green-950/70 border border-green-500/40 px-2 py-0.5 rounded animate-pulse">
+                <Wifi className="w-3 h-3" /> CONNECTED ({port})
               </span>
             ) : (
               <span className="flex items-center gap-1 text-[11px] font-mono text-red-400 bg-red-950/70 border border-red-500/40 px-2 py-0.5 rounded">
@@ -50,20 +82,76 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
           </div>
         </div>
 
-        {/* Port Status & Action */}
-        <div className="flex items-center justify-between text-xs font-mono">
-          <span className="text-cyan-400">PORT / BAUDRATE:</span>
-          <span className="text-cyan-200 font-bold">{port || 'COM3 / 115200'}</span>
+        {/* Port Selection Controls */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex-1 flex items-center gap-1.5">
+              <span className="text-[10px] font-mono text-cyan-400 font-bold whitespace-nowrap">PORT:</span>
+              <select
+                value={selectedPort}
+                onChange={(e) => setSelectedPort(e.target.value)}
+                disabled={connected}
+                className="flex-1 bg-black/60 border border-cyan-500/40 rounded px-2 py-1 text-xs font-mono text-cyan-200 focus:border-cyan-400 focus:outline-none disabled:opacity-60"
+              >
+                {available_ports && available_ports.length > 0 ? (
+                  available_ports.map((p) => (
+                    <option key={p.device} value={p.device}>
+                      {p.description}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No USB Serial Ports Detected</option>
+                )}
+              </select>
+            </div>
+
+            <button
+              onClick={handleRescan}
+              disabled={isScanning || connected}
+              title="Rescan COM Ports"
+              className="p-1.5 bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-500/40 rounded text-cyan-300 text-xs transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isScanning ? 'animate-spin text-amber-400' : 'text-cyan-400'}`} />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between text-xs font-mono">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-cyan-500 font-bold">BAUDRATE:</span>
+              <select
+                value={selectedBaud}
+                onChange={(e) => setSelectedBaud(Number(e.target.value))}
+                disabled={connected}
+                className="bg-black/60 border border-cyan-500/40 rounded px-2 py-0.5 text-[11px] font-mono text-cyan-200 focus:outline-none disabled:opacity-60"
+              >
+                <option value={115200}>115200 (STM32 USB CDC)</option>
+                <option value={921600}>921600 (High Speed)</option>
+                <option value={57600}>57600</option>
+                <option value={9600}>9600</option>
+              </select>
+            </div>
+
+            <div className="text-[10px]">
+              {isStm32Selected ? (
+                <span className="text-green-400 font-bold flex items-center gap-1">
+                  <Cpu className="w-3 h-3" /> STM32 CDC
+                </span>
+              ) : (
+                <span className="text-cyan-600">Standard USB</span>
+              )}
+            </div>
+          </div>
         </div>
 
+        {/* Connect / Disconnect Buttons */}
         <div className="grid grid-cols-2 gap-2 mt-1">
           <button
-            onClick={() => onConnectPort(port || 'COM3')}
-            disabled={connected}
-            className={`py-1.5 px-3 rounded text-xs font-mono font-bold tracking-wider transition-all ${
+            onClick={handleConnect}
+            disabled={connected || (!selectedPort && available_ports.length === 0)}
+            className={`py-2 px-3 rounded text-xs font-mono font-bold tracking-wider transition-all ${
               connected
                 ? 'bg-cyan-950/30 text-cyan-700 border border-cyan-900 cursor-not-allowed'
-                : 'bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-500/50 hover:border-cyan-400'
+                : 'bg-cyan-950 hover:bg-cyan-900 text-cyan-300 border border-cyan-500/50 hover:border-cyan-400 glow-cyan active:scale-95'
             }`}
           >
             CONNECT PORT
@@ -71,10 +159,10 @@ export const TelemetryPanel: React.FC<TelemetryPanelProps> = ({
           <button
             onClick={onDisconnectPort}
             disabled={!connected}
-            className={`py-1.5 px-3 rounded text-xs font-mono font-bold tracking-wider transition-all ${
+            className={`py-2 px-3 rounded text-xs font-mono font-bold tracking-wider transition-all ${
               !connected
                 ? 'bg-red-950/20 text-red-800 border border-red-950 cursor-not-allowed'
-                : 'bg-red-950/80 hover:bg-red-900 text-red-300 border border-red-500/50 hover:border-red-400'
+                : 'bg-red-950/80 hover:bg-red-900 text-red-300 border border-red-500/50 hover:border-red-400 glow-red active:scale-95'
             }`}
           >
             DISCONNECT
