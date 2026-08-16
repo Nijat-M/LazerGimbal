@@ -4,3 +4,7 @@ opencv-python
 pyserial
 numpy
 ultralytics
+fastapi
+uvicorn
+websockets
+

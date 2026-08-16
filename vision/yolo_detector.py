@@ -41,30 +41,40 @@ class YOLODetector:
             self.model = None
             return
         
-        # 优先加载指定的 YOLO26 模型
-        candidate_paths = [
-            model_path,
+        # 1. Look for user models in vision/models/ folder
+        models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+        available_models = []
+        if os.path.exists(models_dir):
+            for f in os.listdir(models_dir):
+                if f.endswith((".pt", ".onnx", ".engine", ".tflite")):
+                    available_models.append(os.path.join(models_dir, f))
+
+        candidate_paths = [model_path] + available_models + [
+            "vision/models/best.pt",
+            "vision/models/yolov8n.pt",
+            "vision/models/yolo11n.pt",
             "vision/models/yolo26n.pt",
-            "yolo26n.pt"
+            "yolov8n.pt",
         ]
         
         chosen_path = None
         for p in candidate_paths:
-            if os.path.exists(p):
+            if p and os.path.exists(p):
                 chosen_path = p
                 break
         
         if chosen_path is None:
-            chosen_path = "yolo26n.pt"  # 触发 Ultralytics 自动加载最新 yolo26n
-            logger.info(f"[YOLO] 本地未找到模型，正在自动下载/加载 {chosen_path}...")
+            chosen_path = "yolov8n.pt"  # Fallback auto-download
+            logger.info(f"[YOLO] vision/models/ altında model bulunamadı, varsayılan {chosen_path} yükleniyor...")
         
         try:
             self.model = YOLO(chosen_path)
             model_name = os.path.basename(chosen_path)
-            logger.info(f"[YOLO] ✓ YOLO26 深度学习模型就绪 ({model_name}): {chosen_path}")
+            logger.info(f"[YOLO] ✓ YOLO Modeli Başarıyla Yüklendi ({model_name}): {chosen_path}")
         except Exception as e:
-            logger.error(f"[YOLO ERROR] 加载 YOLO26 模型失败: {e}")
+            logger.error(f"[YOLO ERROR] YOLO Modeli Yüklenemedi: {e}")
             self.model = None
+
 
         # 硬件加速设备检测 (RTX GPU / CUDA 极速加速)
         try:
