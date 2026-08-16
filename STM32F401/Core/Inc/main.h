@@ -73,6 +73,12 @@ void Error_Handler(void);
 #define Y_DIR_Pin GPIO_PIN_5
 #define Y_DIR_GPIO_Port GPIOA
 
+#define LASER_EN_Pin GPIO_PIN_7
+#define LASER_EN_GPIO_Port GPIOA
+
+#define LASER_PWM_Pin GPIO_PIN_0
+#define LASER_PWM_GPIO_Port GPIOB
+
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */

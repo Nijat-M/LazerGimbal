@@ -97,6 +97,8 @@ volatile uint8_t pulse_active_y = 0;
 
 // 运行控制与安全标志
 uint8_t current_fire = 0;
+volatile uint8_t laser_power = 100;    // 激光功率百分比 (0-100%)
+volatile uint8_t laser_enabled = 0;   // 激光主使能状态 (PA7 + PB0)
 uint16_t vision_timeout_counter = 0;
 uint8_t stop_holdoff_cycles = 0;
 volatile uint8_t stop_requested = 0;  // 仅由 TIM2 消费并执行的急停请求
@@ -111,6 +113,9 @@ volatile uint8_t rx_index = 0;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
+void Laser_Init(void);
+void Laser_SetPower(uint8_t power_percent);
+void Laser_SetState(uint8_t enable);
 static float LimitTrackingRate(float pid_step_delta, int16_t error);
 static float RampMotorRate(float current_rate, float target_rate);
 static void RequestStop(void);
@@ -121,6 +126,52 @@ void Process_Protocol_Byte(uint8_t byte);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+/**
+ * @brief 初始化激光硬件外设 (默认处于绝对安全断电状态)
+ */
+void Laser_Init(void)
+{
+    // PA7 硬件使能先拉低
+    HAL_GPIO_WritePin(LASER_EN_GPIO_Port, LASER_EN_Pin, GPIO_PIN_RESET);
+    // PB0 TIM3_CH3 PWM 占空比初始化为 0
+    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
+    laser_enabled = 0;
+}
+
+/**
+ * @brief 设置激光输出功率百分比
+ * @param power_percent 0 ~ 100
+ */
+void Laser_SetPower(uint8_t power_percent)
+{
+    if (power_percent > 100) power_percent = 100;
+    laser_power = power_percent;
+    // 如果当前激光处于使能开启状态，实时更新 PWM 占空比
+    if (laser_enabled) {
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, (uint32_t)laser_power);
+    }
+}
+
+/**
+ * @brief 设置激光开启/关闭使能状态 (双重安全联动)
+ * @param enable 1: 开启, 0: 关闭
+ */
+void Laser_SetState(uint8_t enable)
+{
+    laser_enabled = enable ? 1 : 0;
+    if (laser_enabled) {
+        // 先打开硬件使能开关 PA7，再输出 PWM 功率 PB0
+        HAL_GPIO_WritePin(LASER_EN_GPIO_Port, LASER_EN_Pin, GPIO_PIN_SET);
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, (uint32_t)laser_power);
+    } else {
+        // 先清零 PWM 占空比 PB0，再强制拉低 PA7 硬件使能
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+        HAL_GPIO_WritePin(LASER_EN_GPIO_Port, LASER_EN_Pin, GPIO_PIN_RESET);
+    }
+}
+
 static float LimitTrackingRate(float target_rate, int16_t error)
 {
     if (!isfinite(target_rate)) {
@@ -174,6 +225,8 @@ static void RequestStop(void)
     stop_requested = 1;
 }
 
+static volatile uint8_t manual_laser_state = 0;
+
 static void ApplyStopMotion(void)
 {
     current_error_x = 0;
@@ -200,7 +253,10 @@ static void ApplyStopMotion(void)
         pulse_active_y = 0;
     }
     
+    // 强制立即断电并关闭激光
+    manual_laser_state = 0;
     current_fire = 0;
+    Laser_SetState(0);
     vision_timeout_counter = 0;
     stop_holdoff_cycles = 3; // 丢弃 STOP 后约 60ms 内可能仍在传输的旧运动包
     stop_requested = 0;
@@ -315,6 +371,25 @@ void Process_Protocol_Byte(uint8_t byte)
                 RequestStop();
             } else if (strcmp((char*)rx_buffer, "CENTER") == 0) {
                 ResetPosition();
+            } else if (strncmp((char*)rx_buffer, "LASER:", 6) == 0) {
+                int state = atoi((char*)rx_buffer + 6);
+                manual_laser_state = (state > 0) ? 1 : 0;
+                Laser_SetState(manual_laser_state | current_fire);
+                if (manual_laser_state) {
+                    CDC_Transmit_FS((uint8_t*)"[OK] LASER_ON\r\n", 15);
+                    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+                } else {
+                    CDC_Transmit_FS((uint8_t*)"[OK] LASER_OFF\r\n", 16);
+                    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
+                }
+            } else if (strncmp((char*)rx_buffer, "POWER:", 6) == 0) {
+                int pwr = atoi((char*)rx_buffer + 6);
+                if (pwr < 0) pwr = 0;
+                if (pwr > 100) pwr = 100;
+                Laser_SetPower((uint8_t)pwr);
+                char ack_buf[32];
+                int len = snprintf(ack_buf, sizeof(ack_buf), "[OK] POWER:%d\r\n", pwr);
+                CDC_Transmit_FS((uint8_t*)ack_buf, (uint16_t)len);
             }
             rx_state = STATE_IDLE;
             rx_index = 0;
@@ -358,9 +433,11 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_TIM2_Init();
+  MX_TIM3_Init();
   MX_USB_DEVICE_Init();
   
   /* USER CODE BEGIN 2 */
+  Laser_Init();
   // 启动 TIM2 10kHz 高频微步时钟中断
   HAL_TIM_Base_Start_IT(&htim2);
   /* USER CODE END 2 */
@@ -524,6 +601,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
               current_fire = fire;
               vision_timeout_counter = 0;
 
+              // 视觉伺服自瞄开火联动 (PA7 使能 + PB0 PWM 占空比)
+              Laser_SetState(current_fire | manual_laser_state);
+
               // --------------------------------------------------
               // 3.1 工业级视觉伺服闭环速度规划 (自适应动态阻尼 + 平滑过渡前馈)
               // --------------------------------------------------
@@ -560,11 +640,17 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
               target_step_rate_y = LimitTrackingRate(raw_rate_y, error_y);
           } else {
               // 40Hz 上位机与 50Hz 固件之间的空周期保持目标速度；
-              // 最后一包到达后最多 500ms 执行硬停止。
+              // 最后一包到达后最多 500ms 执行电机平稳停止。
               vision_timeout_counter++;
               if (vision_timeout_counter >= VISION_TIMEOUT_CYCLES) {
-                  ApplyStopMotion();
-                  return;
+                  current_error_x = 0;
+                  current_error_y = 0;
+                  target_step_rate_x = 0.0f;
+                  target_step_rate_y = 0.0f;
+                  current_step_rate_x = 0.0f;
+                  current_step_rate_y = 0.0f;
+                  current_fire = 0;
+                  Laser_SetState(manual_laser_state);
               }
           }
 

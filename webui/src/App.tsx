@@ -180,6 +180,7 @@ export function App() {
             trackingMode={telemetry.tracking_mode}
             laserArmed={telemetry.laser_armed}
             laserFiring={telemetry.laser_firing}
+            laserPower={telemetry.laser_power}
             onSendCommand={sendCommand}
             onOpenPidModal={() => setIsPidModalOpen(true)}
           />

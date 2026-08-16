@@ -15,7 +15,7 @@ class MouseControlPanel(QGroupBox):
     sensitivity_changed = pyqtSignal(float)
 
     def __init__(self, initial_sensitivity: float, parent=None) -> None:
-        super().__init__("鼠标瞄准 (Mouse Aim)", parent)
+        super().__init__("Mouse Aim Control", parent)
         self._init_ui(initial_sensitivity)
 
     def _init_ui(self, initial_sensitivity: float) -> None:
@@ -40,7 +40,7 @@ class MouseControlPanel(QGroupBox):
         layout.addLayout(form)
 
         instructions = QLabel(
-            "点击实时画面捕获鼠标；移动鼠标控制云台；Esc、窗口失焦或切换模式会立即停止。"
+            "Click live camera feed to capture mouse; move cursor to aim; Esc, window blur or mode change stops motion immediately."
         )
         instructions.setWordWrap(True)
         instructions.setStyleSheet("color: gray;")

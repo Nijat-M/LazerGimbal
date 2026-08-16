@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import type { SystemCommand } from '../types/telemetry';
 import {
   Flame,
@@ -16,6 +16,7 @@ import {
   Bot,
   Play,
   Square,
+  Zap,
 } from 'lucide-react';
 import { soundManager } from '../utils/audioEffects';
 
@@ -23,6 +24,7 @@ interface ControlCenterProps {
   trackingMode: string;
   laserArmed: boolean;
   laserFiring: boolean;
+  laserPower?: number;
   onSendCommand: (cmd: SystemCommand) => void;
   onOpenPidModal: () => void;
 }
@@ -31,9 +33,27 @@ export const ControlCenter: React.FC<ControlCenterProps> = ({
   trackingMode,
   laserArmed,
   laserFiring,
+  laserPower = 100,
   onSendCommand,
   onOpenPidModal,
 }) => {
+  const [localPower, setLocalPower] = useState<number>(laserPower);
+
+  useEffect(() => {
+    if (laserPower !== undefined) {
+      setLocalPower(laserPower);
+    }
+  }, [laserPower]);
+
+  const handlePowerChange = (power: number) => {
+    const clamped = Math.max(0, Math.min(100, power));
+    setLocalPower(clamped);
+    onSendCommand({
+      action: 'SET_LASER_POWER',
+      payload: { power: clamped },
+    });
+  };
+
   const toggleLaserArm = () => {
     onSendCommand({
       action: 'ARM_LASER',
@@ -212,8 +232,65 @@ export const ControlCenter: React.FC<ControlCenterProps> = ({
               <Flame className="w-4 h-4" />
               {laserFiring ? 'ATEŞLENİYOR...' : 'BASILI TUT (ATEŞ)'}
             </button>
-
           </div>
+
+          {/* Laser PWM Power Adjustment Bar */}
+          <div className="flex flex-col gap-1.5 p-2 rounded-lg bg-black/40 border border-cyan-500/20">
+            <div className="flex items-center justify-between text-[11px] font-mono">
+              <span className="flex items-center gap-1 text-cyan-300 font-bold">
+                <Zap className="w-3.5 h-3.5 text-amber-400" /> PWM GÜÇ / POWER
+              </span>
+              <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/40">
+                {localPower}%
+              </span>
+            </div>
+
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={localPower}
+              onChange={(e) => handlePowerChange(Number(e.target.value))}
+              className="w-full h-1.5 bg-cyan-950 rounded-lg appearance-none cursor-pointer accent-amber-400"
+            />
+
+            <div className="flex items-center justify-between gap-1 pt-0.5">
+              <button
+                type="button"
+                onClick={() => handlePowerChange(10)}
+                className={`flex-1 py-0.5 rounded text-[10px] font-mono font-bold border transition-colors ${
+                  localPower === 10
+                    ? 'bg-amber-500/30 border-amber-400 text-amber-200'
+                    : 'bg-black/40 border-cyan-500/20 text-cyan-400 hover:bg-cyan-950'
+                }`}
+              >
+                10% NİŞAN
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePowerChange(50)}
+                className={`flex-1 py-0.5 rounded text-[10px] font-mono font-bold border transition-colors ${
+                  localPower === 50
+                    ? 'bg-amber-500/30 border-amber-400 text-amber-200'
+                    : 'bg-black/40 border-cyan-500/20 text-cyan-400 hover:bg-cyan-950'
+                }`}
+              >
+                50% TEST
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePowerChange(100)}
+                className={`flex-1 py-0.5 rounded text-[10px] font-mono font-bold border transition-colors ${
+                  localPower === 100
+                    ? 'bg-red-500/30 border-red-400 text-red-200'
+                    : 'bg-black/40 border-cyan-500/20 text-cyan-400 hover:bg-cyan-950'
+                }`}
+              >
+                100% MAKS
+              </button>
+            </div>
+          </div>
+
           <div className="text-[10px] font-mono text-cyan-600/90 text-center">
             İpucu: Boşluk (Space) tuşuna basılı tutarak da ateşleyebilirsiniz
           </div>

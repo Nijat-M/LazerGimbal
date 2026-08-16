@@ -62,6 +62,7 @@ export interface SystemCommand {
     | 'ARM_LASER'
     | 'FIRE_LASER'
     | 'STOP_LASER'
+    | 'SET_LASER_POWER'
     | 'CENTER'
     | 'EMERGENCY_STOP'
     | 'UPDATE_PID'

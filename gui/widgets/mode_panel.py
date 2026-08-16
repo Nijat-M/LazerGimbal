@@ -77,7 +77,7 @@ class ModePanel(QGroupBox):
         
         # 1. 模型选择
         model_h_layout = QHBoxLayout()
-        model_label = QLabel("模型:")
+        model_label = QLabel("Model:")
         model_label.setStyleSheet("color: #b0b0b0; font-size: 11px;")
         self.combo_model = QComboBox()
         self.combo_model.setStyleSheet("font-size: 11px; padding: 2px;")
@@ -87,7 +87,7 @@ class ModePanel(QGroupBox):
         
         # 2. 追踪目标类别过滤
         class_h_layout = QHBoxLayout()
-        class_label = QLabel("目标:")
+        class_label = QLabel("Target:")
         class_label.setStyleSheet("color: #b0b0b0; font-size: 11px;")
         self.combo_class = QComboBox()
         self.combo_class.setStyleSheet("font-size: 11px; padding: 2px;")
@@ -98,7 +98,7 @@ class ModePanel(QGroupBox):
         # 3. 置信度阈值微调
         conf_h_layout = QHBoxLayout()
         default_conf = getattr(VisionConfig, "YOLO_CONF_THRESHOLD", 0.50)
-        self.label_conf = QLabel(f"置信度: {default_conf:.2f}")
+        self.label_conf = QLabel(f"Confidence: {default_conf:.2f}")
         self.label_conf.setStyleSheet("color: #b0b0b0; font-size: 11px;")
         self.slider_conf = QSlider(Qt.Orientation.Horizontal)
         self.slider_conf.setRange(15, 95)
@@ -141,8 +141,8 @@ class ModePanel(QGroupBox):
                 if m["path"] == default_model or m["filename"] in default_model:
                     selected_idx = idx
         else:
-            self.combo_model.addItem("savunma_yolo26.pt (国防防空模型)", "vision/models/savunma_yolo26.pt")
-            self.combo_model.addItem("yolo26n.pt (通用COCO模型)", "vision/models/yolo26n.pt")
+            self.combo_model.addItem("savunma_yolo26.pt (Defense Model)", "vision/models/savunma_yolo26.pt")
+            self.combo_model.addItem("yolo26n.pt (Standard COCO Model)", "vision/models/yolo26n.pt")
 
         self.combo_model.setCurrentIndex(selected_idx)
         self.combo_model.blockSignals(False)
@@ -156,7 +156,7 @@ class ModePanel(QGroupBox):
         
         self.combo_class.blockSignals(True)
         self.combo_class.clear()
-        self.combo_class.addItem("全部目标 [All Targets]", None)
+        self.combo_class.addItem("All Targets (Any Detection)", None)
         
         # 尝试读取该模型的 class names
         resolved = YOLODetector.resolve_model_path(model_path)
@@ -178,7 +178,7 @@ class ModePanel(QGroupBox):
             
         for cid, cname in class_dict.items():
             display_name = VisionConfig.get_class_display_name(cname)
-            self.combo_class.addItem(f"{cname} - {display_name}", cid)
+            self.combo_class.addItem(f"{display_name}", cid)
             
         self.combo_class.setCurrentIndex(0)
         self.combo_class.blockSignals(False)
@@ -187,7 +187,7 @@ class ModePanel(QGroupBox):
         """模型下拉框改变"""
         model_path = self.combo_model.currentData()
         if model_path:
-            logger.info(f"[MODE PANEL] 选择 YOLO 模型: {model_path}")
+            logger.info(f"[MODE PANEL] Selected YOLO Model: {model_path}")
             self._update_classes_for_current_model()
             self.yolo_model_changed.emit(model_path)
             self.yolo_class_changed.emit(None)
@@ -195,13 +195,13 @@ class ModePanel(QGroupBox):
     def _on_class_changed(self, index):
         """目标类别下拉框改变"""
         target_class = self.combo_class.currentData()
-        logger.info(f"[MODE PANEL] 选择 YOLO 目标类别: {target_class}")
+        logger.info(f"[MODE PANEL] Selected YOLO Target Class: {target_class}")
         self.yolo_class_changed.emit(target_class)
 
     def _on_conf_slider_changed(self, value):
         """置信度阈值滑块改变"""
         conf = value / 100.0
-        self.label_conf.setText(f"置信度: {conf:.2f}")
+        self.label_conf.setText(f"Confidence: {conf:.2f}")
         self.yolo_conf_changed.emit(conf)
 
     def _on_mode_toggled(self, btn_id, checked):
@@ -223,16 +223,16 @@ class ModePanel(QGroupBox):
         
         # 手动模式需要确认
         if mode in ("TEST", "MANUAL_MOUSE"):
-            mode_name = "鼠标手动瞄准" if mode == "MANUAL_MOUSE" else "测试模式"
+            mode_name = "Manual Mouse Aim" if mode == "MANUAL_MOUSE" else "Manual Test Mode"
             reply = QMessageBox.question(
                 self,
-                f"确认进入{mode_name}",
-                f"进入{mode_name}将允许手动控制云台。\n\n"
+                f"Confirm {mode_name}",
+                f"Entering {mode_name} allows manual gimbal control.\n\n"
                 "Please confirm:\n"
-                "1. No obstacles around gimbal\n"
-                "2. Servo soft limits calibrated\n"
+                "1. No obstacles around gimbal movement range\n"
+                "2. Steppers soft limits verified\n"
                 "3. Ready to press Esc to stop immediately\n\n"
-                "Continue?",
+                "Do you want to continue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
             )

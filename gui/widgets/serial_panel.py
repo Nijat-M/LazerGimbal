@@ -163,7 +163,7 @@ class SerialPanel(QGroupBox):
         if "⚡ STM32" in current_text:
             self.lbl_channel_type.setText("⚡ STM32 Native USB (12 Mbps Full Speed)")
             self.lbl_channel_type.setStyleSheet("color: #4ade80; font-weight: bold; font-size: 12px;")
-        elif "未检测到" in current_text:
+        elif "No USB" in current_text or "No Port" in current_text or "未检测到" in current_text:
             self.lbl_channel_type.setText("⚠️ No STM32 USB connection detected")
             self.lbl_channel_type.setStyleSheet("color: #f87171; font-weight: bold; font-size: 12px;")
         else:
@@ -194,7 +194,7 @@ class SerialPanel(QGroupBox):
             self.btn_connect.setChecked(True)
             self.btn_connect.setText("🔌 Disconnect")
             port_name = self.combo_port.currentData() or ""
-            self.lbl_channel_type.setText(f"✓ Connected {port_name} (12 Mbps 全速传输中)")
+            self.lbl_channel_type.setText(f"✓ Connected {port_name} (12 Mbps Full Speed)")
             self.lbl_channel_type.setStyleSheet("color: #22c55e; font-weight: bold; font-size: 12px;")
         else:
             self.btn_connect.setChecked(False)

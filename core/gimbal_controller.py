@@ -41,6 +41,7 @@ class GimbalController(QObject):
     status_update_signal = pyqtSignal(str)        # 状态文本
     position_update_signal = pyqtSignal(float, float)  # X, Y 位置（度）
     manual_target_update_signal = pyqtSignal(float, float)  # 相对中心的 yaw/pitch
+    laser_state_signal = pyqtSignal(bool, bool, int)  # 激光状态 (armed, firing, power)
 
     def __init__(self, serial_thread):
         """
@@ -56,6 +57,11 @@ class GimbalController(QObject):
         # 当前硬件没有绝对位置反馈；仅记录软件相对原点。
         self.servo_x: float = 0.0
         self.servo_y: float = 0.0
+
+        # [激光武器控制状态]
+        self.laser_armed: bool = False
+        self.laser_firing: bool = False
+        self.laser_power: int = 100
 
         # [误差处理器] 负责缩放和滤波（统一从 ControlConfig 读取参数）
         self.error_processor = ErrorProcessor()
@@ -97,6 +103,37 @@ class GimbalController(QObject):
         self.control_thread = threading.Thread(target=self._run_control_loop, daemon=True)
         self.control_thread.start()
 
+    def set_laser_armed(self, armed: bool) -> None:
+        """设置激光保险状态 (ARM / SAFE)"""
+        self.laser_armed = armed
+        if not armed and self.laser_firing:
+            self.laser_firing = False
+            if self._is_serial_connected():
+                self.serial_thread.send_command("!LASER:0\n")
+        self.laser_state_signal.emit(self.laser_armed, self.laser_firing, self.laser_power)
+        logger.info(f"[LASER] 激光保险状态: {'🔴 ARMED' if armed else '🟢 SAFE'}")
+
+    def set_laser_firing(self, firing: bool) -> None:
+        """设置激光发射状态"""
+        if not self.laser_armed:
+            if firing:
+                logger.warning("[LASER] 激光未解锁 (SAFE)，无法发射！")
+            return
+        self.laser_firing = firing
+        if self._is_serial_connected():
+            cmd = "!LASER:1\n" if firing else "!LASER:0\n"
+            self.serial_thread.send_command(cmd)
+        self.laser_state_signal.emit(self.laser_armed, self.laser_firing, self.laser_power)
+        logger.info(f"[LASER] 激光发射状态: {'⚡ FIRING' if firing else 'STOPPED'}")
+
+    def set_laser_power(self, power: int) -> None:
+        """设置激光 PWM 输出功率 (0 ~ 100%)"""
+        self.laser_power = max(0, min(100, int(power)))
+        if self._is_serial_connected():
+            self.serial_thread.send_command(f"!POWER:{self.laser_power}\n")
+        self.laser_state_signal.emit(self.laser_armed, self.laser_firing, self.laser_power)
+        logger.info(f"[LASER] 激光功率设定: {self.laser_power}%")
+
 
     def stop(self) -> None:
         """Stop motion and terminate the control thread."""
@@ -117,16 +154,16 @@ class GimbalController(QObject):
         """Enable or disable automatic visual tracking and report acceptance."""
         with self._motion_lock:
             if enabled and self.manual_mouse_enabled:
-                self.status_update_signal.emit("鼠标模式下不能启动自动控制")
+                self.status_update_signal.emit("Cannot start auto tracking in Mouse Aim mode")
                 return False
             if enabled and not self.visual_input_enabled:
-                self.status_update_signal.emit("摄像头尚未就绪，不能启动自动控制")
+                self.status_update_signal.emit("Camera is not ready, cannot start tracking")
                 return False
 
             self.control_enabled = enabled
             if not enabled:
                 self.stop_motion()
-        status = "控制已启动" if enabled else "控制已停止"
+        status = "Tracking Started" if enabled else "Tracking Stopped"
         self.status_update_signal.emit(status)
         logger.info(f"[CONTROLLER] {status}")
         return True
@@ -162,7 +199,7 @@ class GimbalController(QObject):
 
         self.manual_target_update_signal.emit(*target)
         if enabled:
-            self.status_update_signal.emit("鼠标瞄准就绪：点击实时画面开始")
+            self.status_update_signal.emit("Mouse Aim Ready: Click live view to start")
 
     def set_mouse_capture_active(self, active: bool) -> None:
         """Arm mouse motion only while the video widget owns the cursor."""
@@ -173,7 +210,7 @@ class GimbalController(QObject):
             self.mouse_capture_active = active
             if not active:
                 self.stop_motion()
-        status = "鼠标已捕获，Esc 停止" if active else "鼠标已释放，运动已停止"
+        status = "Mouse Captured (Press Esc to release)" if active else "Mouse Released (Motion Stopped)"
         self.status_update_signal.emit(status)
 
     def handle_mouse_delta(self, dx: int, dy: int) -> None:
@@ -382,7 +419,8 @@ class GimbalController(QObject):
         err_x = max(-max_err_x, min(max_err_x, err_x))
         err_y = max(-max_err_y, min(max_err_y, err_y))
 
-        self.serial_thread.send_realtime_command(f"<{err_x},{err_y},0>\n")
+        fire_val = 1 if (self.laser_armed and self.laser_firing) else 0
+        self.serial_thread.send_realtime_command(f"<{err_x},{err_y},{fire_val}>\n")
 
 
 
@@ -420,7 +458,8 @@ class GimbalController(QObject):
         if self.invert_y:
             err_y = -err_y
 
-        self.serial_thread.send_realtime_command(f"<{err_x},{err_y},0>\n")
+        fire_val = 1 if (self.laser_armed and self.laser_firing) else 0
+        self.serial_thread.send_realtime_command(f"<{err_x},{err_y},{fire_val}>\n")
         self.manual_motion_active = True
 
     def _is_serial_connected(self) -> bool:
@@ -429,8 +468,8 @@ class GimbalController(QObject):
     def _warn_serial_disconnected(self) -> None:
         now = time.monotonic()
         if now - self.last_warn_time > 2.0:
-            logger.warning("[WARNING] 串口未连接！请先点击'连接'按钮。")
-            self.status_update_signal.emit("警告: 串口未连接")
+            logger.warning("[WARNING] Serial port not connected! Please click 'Connect'.")
+            self.status_update_signal.emit("Warning: Serial port not connected")
             self.last_warn_time = now
 
     # --------------------------------------------------

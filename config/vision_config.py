@@ -80,28 +80,27 @@ class VisionConfig:
     YOLO_TARGET_CLASS = None                               # 默认追踪目标类别 (None: 视野内全部目标)
     YOLO_MIN_BOX_SIZE = 16                                 # 最小有效目标框边长（过滤噪点假目标）
 
-    # 常用军事/国防目标与标准COCO标签友好翻译映射
-    CLASS_LABELS_ZH = {
-        "BALISTIK_FUZE": "弹道导弹 (Ballistic Missile)",
-        "F16": "F-16 战机 (Fighter Jet)",
-        "HELIKOPTER": "直升机 (Helicopter)",
-        "MINI_IHA": "小型无人机 (Mini UAV)",
-        "person": "行人 (Person)",
-        "airplane": "飞机 (Airplane)",
-        "drone": "无人机 (Drone)",
-        "car": "汽车 (Car)"
+    # Military / Defense targets and standard COCO class friendly labels (100% English)
+    CLASS_LABELS_EN = {
+        "BALISTIK_FUZE": "Ballistic Missile",
+        "F16": "F-16 Fighter Jet",
+        "HELIKOPTER": "Helicopter",
+        "MINI_IHA": "Mini UAV / Drone",
+        "person": "Person",
+        "airplane": "Airplane",
+        "drone": "UAV / Drone",
+        "car": "Vehicle / Car"
     }
     
     @classmethod
     def get_blue_range(cls):
         """
-        返回蓝色检测的 HSV 范围
         Returns blue HSV range for cv2.inRange
         """
         return (cls.HSV_BLUE_LOWER, cls.HSV_BLUE_UPPER)
 
     @classmethod
     def get_class_display_name(cls, class_name: str) -> str:
-        """获取类别的友好显示名称"""
-        return cls.CLASS_LABELS_ZH.get(class_name, class_name)
+        """Get friendly English display name for class"""
+        return cls.CLASS_LABELS_EN.get(class_name, class_name)
 

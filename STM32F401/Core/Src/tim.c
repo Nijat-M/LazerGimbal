@@ -25,6 +25,7 @@
 /* USER CODE END 0 */
 
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
 
 /* TIM2 init function */
 void MX_TIM2_Init(void)
@@ -67,23 +68,97 @@ void MX_TIM2_Init(void)
 
 }
 
+/* TIM3 init function - Laser PWM Generation (PB0 - CH3) */
+void MX_TIM3_Init(void)
+{
+  /* 确保 TIM3 和 GPIOB 外设时钟绝对使能 */
+  __HAL_RCC_TIM3_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  htim3.Instance = TIM3;
+  htim3.Init.Prescaler = 839; // 84MHz / 840 = 100kHz
+  htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim3.Init.Period = 99;     // 100kHz / 100 = 1,000Hz (1kHz 标准激光工业 PWM 频率)
+  htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0; // 默认 0% 占空比 (安全闭锁)
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  HAL_TIM_MspPostInit(&htim3);
+}
+
 void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* tim_baseHandle)
 {
 
   if(tim_baseHandle->Instance==TIM2)
   {
-  /* USER CODE BEGIN TIM2_MspInit 0 */
-
-  /* USER CODE END TIM2_MspInit 0 */
     /* TIM2 clock enable */
     __HAL_RCC_TIM2_CLK_ENABLE();
 
     /* TIM2 owns STEP generation and must preempt USB parsing. */
     HAL_NVIC_SetPriority(TIM2_IRQn, 0, 0);
     HAL_NVIC_EnableIRQ(TIM2_IRQn);
-  /* USER CODE BEGIN TIM2_MspInit 1 */
+  }
+  else if(tim_baseHandle->Instance==TIM3)
+  {
+    /* TIM3 clock enable */
+    __HAL_RCC_TIM3_CLK_ENABLE();
+  }
+}
 
-  /* USER CODE END TIM2_MspInit 1 */
+void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* tim_pwmHandle)
+{
+  if(tim_pwmHandle->Instance==TIM3)
+  {
+    /* TIM3 clock enable */
+    __HAL_RCC_TIM3_CLK_ENABLE();
+  }
+}
+
+void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  if(htim->Instance==TIM3)
+  {
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    /**TIM3 GPIO Configuration
+    PB0     ------> TIM3_CH3 (LASER_PWM)
+    */
+    GPIO_InitStruct.Pin = LASER_PWM_Pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF2_TIM3;
+    HAL_GPIO_Init(LASER_PWM_GPIO_Port, &GPIO_InitStruct);
   }
 }
 
@@ -103,6 +178,14 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* tim_baseHandle)
   /* USER CODE BEGIN TIM2_MspDeInit 1 */
 
   /* USER CODE END TIM2_MspDeInit 1 */
+  }
+}
+
+void HAL_TIM_PWM_MspDeInit(TIM_HandleTypeDef* tim_pwmHandle)
+{
+  if(tim_pwmHandle->Instance==TIM3)
+  {
+    __HAL_RCC_TIM3_CLK_DISABLE();
   }
 }
 

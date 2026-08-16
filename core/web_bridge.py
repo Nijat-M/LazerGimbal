@@ -211,6 +211,13 @@ class WebBridge:
             self.laser_firing = False
             self._send_laser_command(False)
 
+        elif action == "SET_LASER_POWER":
+            power = int(payload.get("power", 100))
+            power = max(0, min(100, power))
+            self.laser_power = power
+            if self.serial_thread and self.serial_thread.is_connected():
+                self.serial_thread.send_command(f"!POWER:{power}\n")
+
         elif action == "MANUAL_JOG":
             axis = payload.get("axis", "x")
             direction = payload.get("dir", 0)

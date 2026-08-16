@@ -52,16 +52,16 @@ class CameraPanel(QGroupBox):
         # 2. 分辨率选择（聚焦于工业级最稳妥的 60 FPS 档位）
         self.combo_resolution = QComboBox()
         self.combo_resolution.addItems([
-            "640x480 (SD Recommended - 60 FPS fast response)",
-            "1280x720 (HD Balanced - 60 FPS wider view)",
-            "1920x1080 (FHD - 60 FPS high detail)"
+            "640x480 (60 FPS - Low Latency)",
+            "1280x720 (60 FPS - HD)",
+            "1920x1080 (60 FPS - Full HD)"
         ])
         self.combo_resolution.setCurrentIndex(0)  # 默认 640x480
         self.combo_resolution.setToolTip("Select resolution (640x480 lowest latency)")
         
         # 3. 画面方向/翻转选择 (即时热切换)
         self.combo_flip = QComboBox()
-        self.combo_flip.addItem("Normal", "NONE")
+        self.combo_flip.addItem("Normal (0°)", "NONE")
         self.combo_flip.addItem("180° Flip (Inverted)", "180")
         self.combo_flip.addItem("Vertical Flip", "V")
         self.combo_flip.addItem("Horizontal Mirror", "H")

@@ -20,7 +20,7 @@ import time
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QLabel, QMessageBox, QScrollArea
+    QLabel, QMessageBox, QScrollArea, QSplitter
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QCloseEvent, QKeyEvent
@@ -67,9 +67,10 @@ class MainWindow(QMainWindow):
     """
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LaserGimbal v0.4.5")
-        self.resize(1000, 700)
-
+        self.setWindowTitle("LaserGimbal Pro Ground Station")
+        self.resize(1260, 820)
+        self.setMinimumSize(960, 640)
+        self.is_camera_fullscreen = False
 
         # [核心线程和控制器]
         self.serial_thread = SerialThread()
@@ -87,43 +88,63 @@ class MainWindow(QMainWindow):
         # 摄像头会通过 camera_panel 自动检测并应用，无需手动初始化
 
     def init_ui(self):
-        """初始化界面 - 使用组件化设计"""
+        """初始化界面 - 使用响应式水平分割布局 (QSplitter)"""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
-        # 主布局：左侧视频，右侧控制
         main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(6, 6, 6, 6)
+        main_layout.setSpacing(6)
+
+        # 创建主响应式水平分割器
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setHandleWidth(6)
+        self.splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #1e293b;
+                border-radius: 3px;
+            }
+            QSplitter::handle:hover {
+                background-color: #0284c7;
+            }
+        """)
 
         # ==========================
         # 左侧：摄像头显示区
         # ==========================
         self.camera_view = CameraView()
-        main_layout.addWidget(self.camera_view, 2)
+        self.camera_view.setMinimumWidth(480)
+        self.splitter.addWidget(self.camera_view)
 
         # ==========================
         # 右侧：控制面板（添加滚动区域）
         # ==========================
-        # 创建滚动区域容器
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll_area.setMinimumWidth(440)  # 设置最小宽度
-        scroll_area.setMaximumWidth(580)  # 增加最大宽度，确保内容不被截断并留出滚动条空间
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setMinimumWidth(380)
         
-        # 设置滚动条样式，使其更加美观且不挡住内容
-        scroll_area.setStyleSheet("""
+        # 设置滚动条样式，使其美观且不遮挡内容
+        self.scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: 1px solid #1e293b;
+                border-radius: 6px;
+                background-color: #0b0f19;
+            }
             QScrollBar:vertical {
-                width: 12px;
+                width: 10px;
+                background: #0f172a;
                 margin: 0px;
+                border-radius: 5px;
             }
             QScrollBar::handle:vertical {
-                background: #c0c0c0;
-                border-radius: 6px;
-                min-height: 20px;
+                background: #334155;
+                border-radius: 5px;
+                min-height: 25px;
             }
             QScrollBar::handle:vertical:hover {
-                background: #a0a0a0;
+                background: #0284c7;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0px;
@@ -133,8 +154,8 @@ class MainWindow(QMainWindow):
         # 创建内容组件
         scroll_content = QWidget()
         right_layout = QVBoxLayout(scroll_content)
-        right_layout.setSpacing(10)  # 减小间距，节省空间
-        right_layout.setContentsMargins(10, 10, 15, 10)  # 右侧留出更多空间给滚动条
+        right_layout.setSpacing(8)
+        right_layout.setContentsMargins(8, 8, 8, 8)
 
         # 1. 串口连接面板
         self.serial_panel = SerialPanel(default_port=cfg.SERIAL_PORT)
@@ -177,17 +198,22 @@ class MainWindow(QMainWindow):
 
         # 状态栏
         self.status_label = QLabel("System Ready")
-        self.status_label.setStyleSheet("color: gray; padding: 5px;")
+        self.status_label.setStyleSheet("color: #94a3b8; padding: 4px; font-size: 11px;")
         self.status_label.setWordWrap(True) # 允许长文本换行，防止撑大窗口
         right_layout.addWidget(self.status_label)
         
         right_layout.addStretch()
         
         # 将内容设置到滚动区域
-        scroll_area.setWidget(scroll_content)
+        self.scroll_area.setWidget(scroll_content)
+        self.splitter.addWidget(self.scroll_area)
         
-        # 将滚动区域添加到主布局
-        main_layout.addWidget(scroll_area, 1)
+        # 设置左右初始分配比例 ~ 65% : 35%
+        self.splitter.setStretchFactor(0, 3)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setSizes([780, 440])
+
+        main_layout.addWidget(self.splitter)
 
     def init_signals(self):
         """连接信号与槽 - 协调各组件通信"""
@@ -246,10 +272,25 @@ class MainWindow(QMainWindow):
         self.pid_tuner.save_requested.connect(self.on_save_config)
         self.pid_tuner.reset_requested.connect(self.on_reset_pid)
         
-        # 控制面板
+        # 控制面板与激光武器
         self.control_panel.control_toggled.connect(self.on_control_toggled)
         self.control_panel.reset_requested.connect(self.on_reset_position)
+        self.control_panel.emergency_stop_requested.connect(self.on_emergency_stop)
+        self.control_panel.laser_armed_toggled.connect(self.controller.set_laser_armed)
+        self.control_panel.laser_fire_changed.connect(self.controller.set_laser_firing)
+        self.control_panel.laser_power_changed.connect(self.controller.set_laser_power)
+
+        # 激光状态 -> 画面准星 HUD
+        self.controller.laser_state_signal.connect(
+            lambda armed, firing, pwr: self.camera_view.set_laser_status(armed, firing)
+        )
+        self.controller.laser_state_signal.connect(
+            lambda armed, firing, pwr: self.control_panel.set_laser_firing_visual(firing)
+        )
         
+        # 摄像头全屏切换
+        self.camera_view.fullscreen_requested.connect(self.toggle_fullscreen_mode)
+
         # 手动测试面板（支持单步微调、长按连续移动、独立键盘开关）
         self.test_panel.request_move_signal.connect(self.on_manual_move)
         self.test_panel.start_continuous_signal.connect(self.controller.start_manual_continuous)
@@ -264,6 +305,23 @@ class MainWindow(QMainWindow):
     # 槽函数 (Slots) - 简化版
     # ==========================
     
+    def toggle_fullscreen_mode(self):
+        """全屏/窗口化模式切换"""
+        self.is_camera_fullscreen = not self.is_camera_fullscreen
+        if self.is_camera_fullscreen:
+            # 隐藏右侧控制栏，主窗口全屏化
+            self.scroll_area.setVisible(False)
+            self.showFullScreen()
+            self.camera_view.set_fullscreen_state(True)
+            self.status_label.setText("⛶ Fullscreen Monitor Mode (Press Esc or F11 to exit)")
+        else:
+            # 恢复正常窗口并展示右侧控制栏
+            self.scroll_area.setVisible(True)
+            self.showNormal()
+            self.camera_view.set_fullscreen_state(False)
+            self.splitter.setSizes([780, 440])
+            self.status_label.setText("Exited Fullscreen Mode")
+
     def on_serial_connection_toggled(self, checked, port):
         """串口连接切换"""
         if checked:
@@ -418,8 +476,7 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self, 
             "Reset Complete",
-            "电机已停止，当前位置已设为相对原点。\n"
-            "当前硬件没有原点开关，因此不会自动物理归中。"
+            "Motors stopped. Current position has been set as software relative origin."
         )
     
     def on_manual_move(self, axis, direction):
@@ -434,58 +491,106 @@ class MainWindow(QMainWindow):
             self.controller.stop_manual_continuous()
         status = "🎮 Keyboard control ON (WASD/Arrows)" if enabled else "Keyboard control OFF"
         self.status_label.setText(status)
-    
+
     def update_status(self, *args):
         """更新状态栏"""
         if len(args) == 1:
             # 字符串消息
-            self.status_label.setText(args[0])
+            self.status_label.setText(str(args[0]))
         elif len(args) == 2:
             # 位置信息 (x, y)
             x, y = args
             self.status_label.setText(f"Relative origin: X={x:.1f}°, Y={y:.1f}°")
 
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        """键盘方向键 (↑/↓/←/→) 与 (W/S/A/D) 快捷操控云台（仅在勾选开启时生效）"""
-        if not getattr(self, "keyboard_control_enabled", False):
-            super().keyPressEvent(event)
-            return
+    def on_emergency_stop(self):
+        """急停处理：立即切断激光、停止电机并重置所有使能"""
+        logger.warning("[GUI] 收到急停请求 (EMERGENCY STOP)！")
+        self.camera_view.release_mouse_control()
+        self.control_panel.set_control_enabled(False)
+        self.control_panel.btn_arm.setChecked(False)
+        self.controller.set_laser_armed(False)
+        self.controller.stop_motion("🛑 Emergency Stop Triggered")
+        self.status_label.setText("🛑 EMERGENCY STOP TRIGGERED")
+        self.status_label.setStyleSheet("color: red; font-weight: bold; padding: 5px;")
 
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        """全局快捷键：F11 全屏切换、空格键发射激光、Esc 退出全屏/急停、方向键/WASD 手动点动"""
         if event.isAutoRepeat():
             return
 
         key = event.key()
-        if key in (Qt.Key.Key_Up, Qt.Key.Key_W):
-            self.controller.start_manual_continuous('y', 1)
+
+        # F11 键：切换全屏模式
+        if key == Qt.Key.Key_F11:
+            self.toggle_fullscreen_mode()
             event.accept()
-        elif key in (Qt.Key.Key_Down, Qt.Key.Key_S):
-            self.controller.start_manual_continuous('y', -1)
+            return
+
+        # Esc 键：优先退出全屏，其次释放鼠标捕获，最后触发急停
+        if key == Qt.Key.Key_Escape:
+            if self.is_camera_fullscreen:
+                self.toggle_fullscreen_mode()
+                event.accept()
+                return
+            if self.controller.mouse_capture_active:
+                self.camera_view.release_mouse_control()
+                event.accept()
+                return
+            self.on_emergency_stop()
             event.accept()
-        elif key in (Qt.Key.Key_Left, Qt.Key.Key_A):
-            self.controller.start_manual_continuous('x', -1)
-            event.accept()
-        elif key in (Qt.Key.Key_Right, Qt.Key.Key_D):
-            self.controller.start_manual_continuous('x', 1)
-            event.accept()
-        else:
-            super().keyPressEvent(event)
+            return
+
+        # 空格键：在激光处于 ARMED 状态下按住发射
+        if key == Qt.Key.Key_Space:
+            if self.controller.laser_armed:
+                self.control_panel.set_laser_firing_visual(True)
+                self.controller.set_laser_firing(True)
+                event.accept()
+                return
+
+        # 键盘方向键 (↑/↓/←/→) 与 (W/S/A/D) 快捷操控云台（仅在勾选开启时生效）
+        if getattr(self, "keyboard_control_enabled", False):
+            if key in (Qt.Key.Key_Up, Qt.Key.Key_W):
+                self.controller.start_manual_continuous('y', 1)
+                event.accept()
+                return
+            elif key in (Qt.Key.Key_Down, Qt.Key.Key_S):
+                self.controller.start_manual_continuous('y', -1)
+                event.accept()
+                return
+            elif key in (Qt.Key.Key_Left, Qt.Key.Key_A):
+                self.controller.start_manual_continuous('x', -1)
+                event.accept()
+                return
+            elif key in (Qt.Key.Key_Right, Qt.Key.Key_D):
+                self.controller.start_manual_continuous('x', 1)
+                event.accept()
+                return
+
+        super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event: QKeyEvent) -> None:
-        """松开键盘按键时立即平稳刹车"""
-        if not getattr(self, "keyboard_control_enabled", False):
-            super().keyReleaseEvent(event)
-            return
-
+        """松开按键处理：松开空格停火、松开方向键平稳刹车"""
         if event.isAutoRepeat():
             return
 
         key = event.key()
-        if key in (Qt.Key.Key_Up, Qt.Key.Key_W, Qt.Key.Key_Down, Qt.Key.Key_S,
-                   Qt.Key.Key_Left, Qt.Key.Key_A, Qt.Key.Key_Right, Qt.Key.Key_D):
-            self.controller.stop_manual_continuous()
+
+        # 松开空格键：停止激光发射
+        if key == Qt.Key.Key_Space:
+            self.control_panel.set_laser_firing_visual(False)
+            self.controller.set_laser_firing(False)
             event.accept()
-        else:
-            super().keyReleaseEvent(event)
+            return
+
+        if getattr(self, "keyboard_control_enabled", False):
+            if key in (Qt.Key.Key_Up, Qt.Key.Key_W, Qt.Key.Key_Down, Qt.Key.Key_S,
+                       Qt.Key.Key_Left, Qt.Key.Key_A, Qt.Key.Key_Right, Qt.Key.Key_D):
+                self.controller.stop_manual_continuous()
+                event.accept()
+                return
+
+        super().keyReleaseEvent(event)
 
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
