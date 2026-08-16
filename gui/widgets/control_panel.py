@@ -28,7 +28,7 @@ class ControlPanel(QWidget):
         layout = QHBoxLayout(self)
         
         # 开始/停止按钮
-        self.btn_control = QPushButton("开始控制 (Start)")
+        self.btn_control = QPushButton("Start Control")
         self.btn_control.setCheckable(True)
         self.btn_control.setStyleSheet(
             "background-color: #444; color: white; padding: 8px;"
@@ -37,21 +37,21 @@ class ControlPanel(QWidget):
         layout.addWidget(self.btn_control)
         
         # 停止电机并将当前位置设为软件相对原点
-        self.btn_reset = QPushButton("重置原点 (Reset)")
-        self.btn_reset.setToolTip("停止电机并将当前位置设为相对原点，不执行物理归中")
+        self.btn_reset = QPushButton("Reset Origin")
+        self.btn_reset.setToolTip("Stop motors and set position as relative origin")
         self.btn_reset.clicked.connect(self.reset_requested.emit)
         layout.addWidget(self.btn_reset)
     
     def _on_control_toggled(self, checked):
         """控制开关切换"""
         if checked:
-            self.btn_control.setText("停止控制 (Stop)")
+            self.btn_control.setText("Stop Control")
             self.btn_control.setStyleSheet(
                 "background-color: #d9534f; color: white; "
                 "font-weight: bold; padding: 8px;"
             )
         else:
-            self.btn_control.setText("开始控制 (Start)")
+            self.btn_control.setText("Start Control")
             self.btn_control.setStyleSheet(
                 "background-color: #444; color: white; padding: 8px;"
             )

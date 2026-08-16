@@ -84,7 +84,7 @@ class PIDTuner(QWidget):
         title_layout = QHBoxLayout(title_frame)
         title_layout.setContentsMargins(5, 5, 5, 5)
         
-        self.title_label = QLabel("▶ ⚙️ PID 参数调节 (点击展开)")
+        self.title_label = QLabel("▶ ⚙️ PID Tuning (Click to expand)")
         self.title_label.setStyleSheet("font-size: 13px; font-weight: bold;")
         title_layout.addWidget(self.title_label)
         title_layout.addStretch()
@@ -131,7 +131,7 @@ class PIDTuner(QWidget):
         content_layout.addLayout(kp_layout)
         
         # Kp 说明
-        kp_hint = QLabel("↑ 比例项：响应速度（过大会震荡）")
+        kp_hint = QLabel("↑ Proportional: Response speed")
         kp_hint.setStyleSheet("color: gray; font-size: 10px;")
         content_layout.addWidget(kp_hint)
         
@@ -154,7 +154,7 @@ class PIDTuner(QWidget):
         content_layout.addLayout(ki_layout)
         
         # Ki 说明
-        ki_hint = QLabel("↑ 积分项：消除稳态误差（通常很小）")
+        ki_hint = QLabel("↑ Integral: Steady-state error")
         ki_hint.setStyleSheet("color: gray; font-size: 10px;")
         content_layout.addWidget(ki_hint)
         
@@ -177,7 +177,7 @@ class PIDTuner(QWidget):
         content_layout.addLayout(kd_layout)
         
         # Kd 说明
-        kd_hint = QLabel("↑ 微分项：阻尼作用（抑制震荡）")
+        kd_hint = QLabel("↑ Derivative: Damping")
         kd_hint.setStyleSheet("color: gray; font-size: 10px;")
         content_layout.addWidget(kd_hint)
 
@@ -185,7 +185,7 @@ class PIDTuner(QWidget):
         # Deadzone (死区) 滑块
         # ==========================
         dz_layout = QHBoxLayout()
-        dz_layout.addWidget(QLabel("死区:"))
+        dz_layout.addWidget(QLabel("Deadzone:"))
         
         self.slider_dz = QSlider(Qt.Orientation.Horizontal)
         self.slider_dz.setRange(0, 30)  # 0 - 30 像素
@@ -200,7 +200,7 @@ class PIDTuner(QWidget):
         content_layout.addLayout(dz_layout)
         
         # Deadzone 说明
-        dz_hint = QLabel("↑ 距离中心像素范围：抑制稳态微小震荡")
+        dz_hint = QLabel("↑ Center pixel range: suppress steady-state oscillation")
         dz_hint.setStyleSheet("color: gray; font-size: 10px;")
         content_layout.addWidget(dz_hint)
         
@@ -211,11 +211,11 @@ class PIDTuner(QWidget):
         # ==========================
         check_layout = QHBoxLayout()
         
-        self.chk_invert_x = QCheckBox("反转 X 轴")
+        self.chk_invert_x = QCheckBox("Invert X Axis")
         self.chk_invert_x.setChecked(invert_x)
         self.chk_invert_x.stateChanged.connect(self._on_invert_changed)
         
-        self.chk_invert_y = QCheckBox("反转 Y 轴")
+        self.chk_invert_y = QCheckBox("Invert Y Axis")
         self.chk_invert_y.setChecked(invert_y)
         self.chk_invert_y.stateChanged.connect(self._on_invert_changed)
         
@@ -228,12 +228,12 @@ class PIDTuner(QWidget):
         # ==========================
         # 按钮 - 同样使用主题色
         # ==========================
-        self.btn_save = QPushButton("💾 保存配置")
+        self.btn_save = QPushButton("💾 Save Config")
         self.btn_save.setStyleSheet("font-weight: bold; padding: 5px;")
         self.btn_save.clicked.connect(self._on_save_clicked)
         content_layout.addWidget(self.btn_save)
         
-        self.btn_reset = QPushButton("🔄 重置默认 PID")
+        self.btn_reset = QPushButton("🔄 Reset Default PID")
         self.btn_reset.clicked.connect(self._on_reset_clicked)
         content_layout.addWidget(self.btn_reset)
         
@@ -247,9 +247,9 @@ class PIDTuner(QWidget):
         
         # 更新标题文字
         if self.is_expanded:
-            self.title_label.setText("▼ ⚙️ PID 参数调节 (点击折叠)")
+            self.title_label.setText("▼ ⚙️ PID Tuning (Click to collapse)")
         else:
-            self.title_label.setText("▶ ⚙️ PID 参数调节 (点击展开)")
+            self.title_label.setText("▶ ⚙️ PID Tuning (Click to expand)")
     
     def update_sliders(self):
         """更新滑块位置和显示"""
@@ -303,8 +303,8 @@ class PIDTuner(QWidget):
         self.save_requested.emit()
         QMessageBox.information(
             self, 
-            "保存成功", 
-            f"PID 参数已保存！\n\nKp={self.kp:.2f}, Ki={self.ki:.3f}, Kd={self.kd:.2f}"
+            "Save Success", 
+            f"PID parameters saved!\n\nKp={self.kp:.2f}, Ki={self.ki:.3f}, Kd={self.kd:.2f}"
         )
     
     def _on_reset_clicked(self):
@@ -316,8 +316,8 @@ class PIDTuner(QWidget):
 
         reply = QMessageBox.question(
             self,
-            "确认重置",
-            f"是否重置为默认 PID 参数？\n\nKp={default_kp:.2f}, Ki={default_ki:.3f}, Kd={default_kd:.2f}",
+            "Confirm Reset",
+            f"Reset to default PID parameters?\n\nKp={default_kp:.2f}, Ki={default_ki:.3f}, Kd={default_kd:.2f}",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 

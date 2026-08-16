@@ -21,11 +21,11 @@ class MouseControlPanel(QGroupBox):
     def _init_ui(self, initial_sensitivity: float) -> None:
         layout = QVBoxLayout(self)
 
-        self.status_label = QLabel("未捕获：点击实时画面开始控制")
+        self.status_label = QLabel("Uncaptured: Click live view to start")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
-        self.target_label = QLabel("虚拟目标：Yaw +0.00° | Pitch +0.00°")
+        self.target_label = QLabel("Virtual Target: Yaw +0.00° | Pitch +0.00°")
         layout.addWidget(self.target_label)
 
         form = QFormLayout()
@@ -36,7 +36,7 @@ class MouseControlPanel(QGroupBox):
         self.sensitivity_spin.setSuffix(" °/count")
         self.sensitivity_spin.setValue(initial_sensitivity)
         self.sensitivity_spin.valueChanged.connect(self.sensitivity_changed.emit)
-        form.addRow("灵敏度", self.sensitivity_spin)
+        form.addRow("Sensitivity", self.sensitivity_spin)
         layout.addLayout(form)
 
         instructions = QLabel(
@@ -49,14 +49,14 @@ class MouseControlPanel(QGroupBox):
     @pyqtSlot(bool)
     def set_capture_state(self, captured: bool) -> None:
         if captured:
-            self.status_label.setText("已捕获：Esc 释放并停止")
+            self.status_label.setText("Captured: Esc to release and stop")
             self.status_label.setStyleSheet("color: #00aa55; font-weight: bold;")
         else:
-            self.status_label.setText("未捕获：点击实时画面开始控制")
+            self.status_label.setText("Uncaptured: Click live view to start")
             self.status_label.setStyleSheet("color: #cc8800;")
 
     @pyqtSlot(float, float)
     def update_target(self, yaw: float, pitch: float) -> None:
         self.target_label.setText(
-            f"虚拟目标：Yaw {yaw:+.2f}° | Pitch {pitch:+.2f}°"
+            f"Virtual Target: Yaw {yaw:+.2f}° | Pitch {pitch:+.2f}°"
         )

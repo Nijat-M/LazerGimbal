@@ -19,7 +19,7 @@ class ModePanel(QGroupBox):
     mode_changed = pyqtSignal(str)
     
     def __init__(self, parent=None):
-        super().__init__("工作模式 (Mode)", parent)
+        super().__init__("Mode", parent)
         self.init_ui()
     
     def init_ui(self):
@@ -30,18 +30,18 @@ class ModePanel(QGroupBox):
         self.mode_group = QButtonGroup(self)
         
         # 工作模式单选框
-        self.rb_idle = QRadioButton("待机 (IDLE)")
-        self.rb_blue_tracking = QRadioButton("蓝色物体追踪 (Blue Object)")
-        self.rb_yolo_tracking = QRadioButton("YOLO 人体追踪 (YOLO Tracking)")
-        self.rb_test = QRadioButton("测试模式 (Test Mode)")
-        self.rb_mouse_manual = QRadioButton("鼠标手动瞄准 (Mouse Aim)")
+        self.rb_idle = QRadioButton("IDLE")
+        self.rb_blue_tracking = QRadioButton("Blue Object Tracking")
+        self.rb_yolo_tracking = QRadioButton("YOLO Tracking")
+        self.rb_test = QRadioButton("Test Mode")
+        self.rb_mouse_manual = QRadioButton("Mouse Aim")
         
         self.rb_idle.setChecked(True)
         
         # 设置提示文本
-        self.rb_blue_tracking.setToolTip("让蓝色物体居中在画面中央")
-        self.rb_yolo_tracking.setToolTip("使用 YOLO26 端到端深度学习模型使得人体居中在画面中央")
-        self.rb_mouse_manual.setToolTip("点击实时画面捕获鼠标，像 FPS 游戏一样手动瞄准")
+        self.rb_blue_tracking.setToolTip("Center blue object")
+        self.rb_yolo_tracking.setToolTip("Center human using YOLO")
+        self.rb_mouse_manual.setToolTip("Click live view to capture mouse for manual aiming")
         
         self.mode_group.addButton(self.rb_idle, 0)
         self.mode_group.addButton(self.rb_blue_tracking, 1)
@@ -79,11 +79,11 @@ class ModePanel(QGroupBox):
                 self,
                 f"确认进入{mode_name}",
                 f"进入{mode_name}将允许手动控制云台。\n\n"
-                "请确认：\n"
-                "1. 云台周围无障碍物\n"
-                "2. 舵机软限位已校准\n"
-                "3. 已准备好使用 Esc 立即停止\n\n"
-                "是否继续？",
+                "Please confirm:\n"
+                "1. No obstacles around gimbal\n"
+                "2. Servo soft limits calibrated\n"
+                "3. Ready to press Esc to stop immediately\n\n"
+                "Continue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
             )

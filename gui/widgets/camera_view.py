@@ -136,9 +136,9 @@ class CameraView(QWidget):
 
     def init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("<h2>实时监控 (Live View)</h2>"))
+        layout.addWidget(QLabel("<h2>Live View</h2>"))
 
-        self.lbl_camera = MouseAimLabel("摄像头画面未启动")
+        self.lbl_camera = MouseAimLabel("Camera not started")
         self.lbl_camera.setStyleSheet("background-color: black; border: 2px solid #333;")
         self.lbl_camera.setMinimumSize(480, 360)
         self.lbl_camera.mouse_delta_signal.connect(self.mouse_delta_signal.emit)
@@ -147,9 +147,9 @@ class CameraView(QWidget):
         )
         layout.addWidget(self.lbl_camera, 2)
 
-        layout.addWidget(QLabel("<h3>算法调试 (Debug Mask)</h3>"))
+        layout.addWidget(QLabel("<h3>Debug Mask</h3>"))
 
-        self.lbl_mask = QLabel("Mask 蒙版 (调试)")
+        self.lbl_mask = QLabel("Debug Mask")
         self.lbl_mask.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_mask.setStyleSheet("background-color: #222; border: 1px dashed #555;")
         self.lbl_mask.setMinimumSize(320, 240)
@@ -192,10 +192,10 @@ class CameraView(QWidget):
         )
         self.lbl_mask.setPixmap(scaled)
 
-    def show_blank_screen(self, text: str = "相机未运行 (Camera Not Running)") -> None:
+    def show_blank_screen(self, text: str = "Camera Not Running") -> None:
         self.is_camera_active = False
         self._update_mouse_input_state()
         self.lbl_camera.clear()
         self.lbl_camera.setText(f"<font color='#888888'><h3>📷 {text}</h3></font>")
         self.lbl_mask.clear()
-        self.lbl_mask.setText("<font color='#666666'>Mask 蒙版 (已停止)</font>")
+        self.lbl_mask.setText("<font color='#666666'>Debug Mask (Stopped)</font>")

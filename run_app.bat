@@ -4,53 +4,53 @@ title LaserGimbal Pro Launcher
 cd /d "%~dp0"
 
 echo ===================================================
-echo           LaserGimbal Pro 启动器
+echo           LaserGimbal Pro Launcher
 echo ===================================================
 
-:: 1. 如果虚拟环境已存在，直接跳转运行
+:: 1. If venv exists, jump to RUN_APP
 if exist ".venv\Scripts\python.exe" goto RUN_APP
 
-:: 2. 首次运行：检查系统 Python
+:: 2. First run: check system Python
 where python >nul 2>nul
 if %errorlevel% neq 0 goto NO_PYTHON
 
-echo [提示] 首次运行，正在为您自动创建虚拟环境...
+echo [INFO] First run, automatically creating virtual environment...
 python -m venv .venv
 if %errorlevel% neq 0 goto VENV_FAIL
 
-echo [提示] 虚拟环境创建成功！正在自动安装依赖库 (requirements.txt)...
-echo 请保持网络畅通，这可能需要一点时间...
+echo [INFO] Virtual environment created successfully! Automatically installing dependencies (requirements.txt)...
+echo Please keep your network connected, this might take a moment...
 .venv\Scripts\python.exe -m pip install --upgrade pip
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 if %errorlevel% neq 0 goto PIP_FAIL
 
-echo [成功] 依赖库安装完成！
+echo [SUCCESS] Dependencies installed successfully!
 echo ===================================================
 goto RUN_APP
 
 :NO_PYTHON
-echo [错误] 未能在系统 PATH 中找到 Python 解释器！
-echo 请先安装 Python 3.10 及以上版本，并务必勾选 "Add Python to PATH"。
-echo 下载地址: https://www.python.org/downloads/
+echo [ERROR] Could not find Python interpreter in system PATH!
+echo Please install Python 3.10 or higher first, and make sure to check "Add Python to PATH".
+echo Download link: https://www.python.org/downloads/
 pause
 exit /b 1
 
 :VENV_FAIL
-echo [错误] 创建虚拟环境失败！
+echo [ERROR] Failed to create virtual environment!
 pause
 exit /b 1
 
 :PIP_FAIL
-echo [错误] 依赖包安装失败，请检查网络连接后重试。
+echo [ERROR] Failed to install dependencies, please check your network connection and try again.
 pause
 exit /b 1
 
 :RUN_APP
-echo [信息] 正在启动 LaserGimbal Pro 主程序...
+echo [INFO] Starting LaserGimbal Pro main application...
 .venv\Scripts\python.exe main.py
 if %errorlevel% neq 0 (
     echo.
-    echo [警告] 程序异常退出，退出码: %errorlevel%
+    echo [WARNING] Application exited abnormally, exit code: %errorlevel%
 )
 pause
 
