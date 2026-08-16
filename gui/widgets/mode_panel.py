@@ -101,17 +101,18 @@ class ModePanel(QGroupBox):
         # 发射信号
         self.mode_changed.emit(mode)
     
-    def get_current_mode(self):
-        """获取当前模式"""
-        if self.rb_tracking.isChecked():
-            return "TRACKING"
-        elif self.rb_blue_tracking.isChecked():
-            return "BLUE_TRACKING"
-        elif self.rb_yolo_tracking.isChecked():
-            return "YOLO_TRACKING"
-        elif self.rb_test.isChecked():
-            return "TEST"
-        elif self.rb_mouse_manual.isChecked():
-            return "MANUAL_MOUSE"
+    def set_mode(self, mode: str):
+        """通过代码切换当前选中的模式"""
+        if mode == "TRACKING":
+            self.rb_tracking.setChecked(True)
+        elif mode == "BLUE_TRACKING":
+            self.rb_blue_tracking.setChecked(True)
+        elif mode == "YOLO_TRACKING":
+            self.rb_yolo_tracking.setChecked(True)
+        elif mode == "TEST":
+            self.rb_test.setChecked(True)
+        elif mode == "MANUAL_MOUSE":
+            self.rb_mouse_manual.setChecked(True)
         else:
-            return "IDLE"
+            self.rb_idle.setChecked(True)
+

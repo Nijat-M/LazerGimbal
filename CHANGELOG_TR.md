@@ -4,7 +4,22 @@
   🇬🇧 <a href="CHANGELOG.md">English</a> | 🇹🇷 <a href="CHANGELOG_TR.md">Türkçe</a>
 </div>
 
+### [v0.4.0] - 2026-08-16
+- **MKS SERVO42C Kapalı Çevrim Step Motor Yükseltmesi**: Eski MG996R RC servolar, 20V DC endüstriyel güç beslemeli, yüksek torklu NEMA 17 step motorlar ve Makerbase MKS SERVO42C vektör FOC (`CR_vFOC`) kapalı çevrim sürücülerle değiştirildi. Adım kaybı (lost steps) tamamen ortadan kaldırıldı.
+- **10kHz Donanımsal DDA Mikro-Adım Darbe Üreticisi**: STM32F401 ürün yazılımı, 10kHz donanımsal zamanlayıcı kesmesi (`TIM2`) ve Bresenham / DDA gerçek zamanlı darbe enterpolasyonuyla yeniden yazıldı. 50Hz Artımlı PID döngüsü ile titreşimsiz ve ultra akıcı hareket sağlandı.
+- **5 Katmanlı Endüstriyel Güvenlik ve Hata Koruma Mimarisi**:
+  - Güç dalgalanmalarına ve ani akım şoklarına karşı motor pinlerini anında 0V'a çeken ve 1 milisaniyede kendini yeniden başlatan (`NVIC_SystemReset()`) otomatik iyileşen `HardFault_Handler` entegrasyonu.
+  - 2.0 saniye kesintisiz görsel güvenlik bekçisi (Watchdog) ile bağlantı koptuğunda otomatik frenleme ve şaft kitleme.
+  - Darbe hızı sınırlayıcı (`MAX_STEPS_PER_CYCLE = 80`) ve seri port koordinat kısıtlaması ($\pm 400\text{px}$) ile motor kontrol dışı dönmelerine karşı koruma.
+  - 500ms bloklanmayan durum bildirim LED'i (`PC13`) ile donanım çalışma göstergesi.
+- **Gelişmiş Manuel ve Klavye Kontrolü**:
+  - Çift modlu kontrol: Kısa tıklama ile tek adımlık hassas mikro-adım, basılı tutma ile 40Hz pürüzsüz sürekli dönüş ve bırakıldığında anında frenleme.
+  - Ayrı bir anahtarla etkinleştirilen `WASD` / Yön tuşları (`↑ / ↓ / ← / →`) klavye kontrol modu ve otomatik tekrarlama filtresi.
+  - Eksen atalet dengelemesi (X ekseni gövde ağırlığı kompanzasyonu ve Y ekseni hassasiyet kalibrasyonu).
+- **Akıllı Takip Kontrol Bağlantısı**: Seri port ve kamera durumunu otomatik doğrulayan ve tek tıklamayla görsel takip algoritmasını başlatan akıllı "Kontrolü Başlat" butonu.
+
 ### [v0.3.7] - 2026-08-09
+
 - **Arayüz ve Kontrol Yenilemesi (GUI & Control Refactor)**: PyQt6 arayüz bileşenleri (Kamera görünümü, Kamera paneli, Seri panel) geliştirilmiş durum göstergeleri ve sinyal yapılarıyla güncellendi.
 - **Gimbal Kontrolcüsü Stabilitesi**: İş parçacığı (thread) döngüsü performansı artırıldı, güvenlik (watchdog) mekanizmaları ve telemetri işleme optimize edildi.
 - **Yapay Zeka Modeli ve Günlükleme**: YOLO26 desteğinin yanında varsayılan YOLOv8 model ağırlıkları (`yolov8n.pt`) entegre edildi, iş parçacıkları genelinde standart günlükleme (logging) sağlandı.

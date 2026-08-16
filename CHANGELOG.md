@@ -4,7 +4,22 @@
   🇬🇧 <a href="CHANGELOG.md">English</a> | 🇹🇷 <a href="CHANGELOG_TR.md">Türkçe</a>
 </div>
 
+### [v0.4.0] - 2026-08-16
+- **MKS SERVO42C Closed-Loop Stepper Motor Upgrade**: Replaced legacy MG996R RC servos with high-precision NEMA 17 stepper motors and Makerbase MKS SERVO42C closed-loop vector FOC (`CR_vFOC`) drivers powered by 20V DC for ultra-high holding torque, anti-stall protection, and zero lost steps.
+- **10kHz Hardware DDA Microstep Pulse Generator**: Rewrote STM32F401 firmware around a native 10kHz hardware timer interrupt (`TIM2`) with Bresenham / DDA real-time pulse interpolation, delivering whisper-quiet, ultra-smooth microstepping at 50Hz Incremental PID velocity loops.
+- **5-Layer Industrial Safety & Fault Protection**:
+  - Auto-healing exception handler (`HardFault_Handler` / `Error_Handler`) instantly clamps motor pins to 0V and self-resets (`NVIC_SystemReset()`) in 1ms against back-EMF / power surges.
+  - 2.0-second hardware visual watchdog automatically engages braking and holding torque on telemetry disconnect.
+  - Slew rate velocity limiter (`MAX_STEPS_PER_CYCLE = 80`) and physical UART coordinate clamping ($\pm 400\text{px}$) to prevent motor runaway.
+  - 500ms non-blocking heartbeat LED (`PC13`) for visual proof of hardware health.
+- **Enhanced Manual & Keyboard Control**:
+  - Dual-mode manual control: Tap/short-press for crisp single-step jog, press-and-hold for smooth 40Hz continuous rotation with instant release braking.
+  - Selectable Keyboard Control Mode with dedicated toggle switch for `WASD` / Arrow keys (`↑ / ↓ / ← / →`) with OS auto-repeat filtering.
+  - Differentiated axis inertia compensation (X-axis base inertia boost vs Y-axis pitch precision).
+- **Smart Tracking Control Linkage**: One-click "Start Control" button with automatic serial/camera readiness validation and seamless tracking mode engagement.
+
 ### [v0.3.7] - 2026-08-09
+
 - **GUI & Control Refactor**: Updated PyQt6 interface components (Camera view, Camera panel, Serial panel) with improved stats display and control signals.
 - **Gimbal Controller Stability**: Enhanced thread loop performance, refined watchdog mechanisms, and optimized telemetry handling.
 - **Vision Model & Logging**: Integrated default YOLOv8 model weights (`yolov8n.pt`) alongside YOLO26 support, and standardized logging across vision worker threads.

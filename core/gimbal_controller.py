@@ -86,10 +86,16 @@ class GimbalController(QObject):
         # 警告时间戳（防止刷屏）
         self.last_warn_time: float = 0.0
 
+        # [手动连续移动控制 (按住连续动/键盘控制)]
+        self._manual_jog_active: bool = False
+        self._manual_jog_axis: str = 'x'
+        self._manual_jog_dir: int = 0
+
         # [控制循环线程] 40Hz (25ms) 替代 QTimer
         self.is_running = True
         self.control_thread = threading.Thread(target=self._run_control_loop, daemon=True)
         self.control_thread.start()
+
 
     def stop(self) -> None:
         """Stop motion and terminate the control thread."""
@@ -298,6 +304,30 @@ class GimbalController(QObject):
     def _control_loop_locked(self) -> None:
         if not self.is_running:
             return
+
+        # 优先响应手动连续点动/键盘操控
+        if self._manual_jog_active:
+            if not self._is_serial_connected():
+                self._manual_jog_active = False
+                self._warn_serial_disconnected()
+                return
+            axis = self._manual_jog_axis
+            direction = self._manual_jog_dir
+            # 仅强化 X 轴连续转动速度 (X轴: 180)，Y 轴保持原样最佳手感 (Y轴: 35)
+            speed_error = 180 if axis == "x" else 35
+            simulated_error = speed_error * direction
+            if axis == "x" and self.invert_x:
+                simulated_error = -simulated_error
+            elif axis == "y" and self.invert_y:
+                simulated_error = -simulated_error
+
+            command = f"<{simulated_error},0,0>\n" if axis == "x" else f"<0,{simulated_error},0>\n"
+            self.serial_thread.send_realtime_command(command)
+            return
+
+
+
+
         if self.manual_mouse_enabled:
             self._manual_mouse_control_loop()
             return
@@ -379,12 +409,12 @@ class GimbalController(QObject):
             self.last_warn_time = now
 
     # --------------------------------------------------
-    # 手动控制（测试模式）
+    # 手动控制（测试模式与连续点动）
     # --------------------------------------------------
 
     def manual_move(self, axis: str, direction: int) -> None:
-        """Send one short, bounded movement for the legacy button test panel."""
-        logger.info(f"[MANUAL] 手动移动请求: 轴={axis}, 方向={direction}")
+        """Send one single distinct jog step."""
+        logger.info(f"[MANUAL] 手动微调请求: 轴={axis}, 方向={direction}")
         if not self._is_serial_connected():
             self.status_update_signal.emit("⚠️ 警告: 串口未连接")
             return
@@ -392,21 +422,56 @@ class GimbalController(QObject):
             logger.warning("[MANUAL] 忽略无效的手动移动参数")
             return
 
-        degree_step = cfg.MANUAL_STEP * direction
+        # X 轴调大至 90 (明显步距)，Y 轴完全恢复原样最佳手感 (25)
+        step_error = 90 if axis == "x" else 25
+        simulated_error = step_error * direction
         if axis == "x" and self.invert_x:
-            degree_step = -degree_step
+            simulated_error = -simulated_error
         elif axis == "y" and self.invert_y:
-            degree_step = -degree_step
+            simulated_error = -simulated_error
 
-        simulated_error = -70 if degree_step > 0 else 70
         command = (
             f"<{simulated_error},0,0>\n"
             if axis == "x"
             else f"<0,{simulated_error},0>\n"
         )
         self.serial_thread.send_realtime_command(command)
-        threading.Timer(0.05, self.serial_thread.send_stop_command).start()
-        self.status_update_signal.emit(f"手动移动 {axis.upper()}")
+        # 单次点动平稳刹车 (X轴 0.08s, Y轴 0.06s 原样)
+        stop_delay = 0.08 if axis == "x" else 0.06
+        threading.Timer(stop_delay, self.serial_thread.send_stop_command).start()
+        self.status_update_signal.emit(f"手动微调 {axis.upper()}")
+
+
+
+
+    def start_manual_continuous(self, axis: str, direction: int) -> None:
+        """按住按钮或按下键盘方向键时：启动连续平滑运动"""
+        if not self._is_serial_connected():
+            self.status_update_signal.emit("⚠️ 警告: 串口未连接")
+            return
+        if axis not in ("x", "y") or direction not in (-1, 1):
+            return
+
+        with self._motion_lock:
+            self._manual_jog_axis = axis
+            self._manual_jog_dir = direction
+            self._manual_jog_active = True
+
+        self.status_update_signal.emit(f"连续移动中: {axis.upper()} (方向 {direction})")
+
+    def stop_manual_continuous(self) -> None:
+        """松开按钮或松开键盘时：立即刹车停止"""
+        with self._motion_lock:
+            if not self._manual_jog_active:
+                return
+            self._manual_jog_active = False
+            self._manual_jog_axis = 'x'
+            self._manual_jog_dir = 0
+            if self.serial_thread:
+                self.serial_thread.send_stop_command()
+        self.status_update_signal.emit("移动已停止")
+
+
 
     def sync_position(self) -> bool:
         """Physically center the legacy servos and reset the virtual aim origin."""

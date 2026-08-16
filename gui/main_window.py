@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
     QLabel, QMessageBox, QScrollArea
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QCloseEvent
+from PyQt6.QtGui import QCloseEvent, QKeyEvent
 
 from utils.logger import Logger
 logger = Logger("GUI")
@@ -67,7 +67,7 @@ class MainWindow(QMainWindow):
     """
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LaserGimbal - 激光云台 v0.3.7")
+        self.setWindowTitle("LaserGimbal - 激光云台 v0.4.0")
         self.resize(1000, 700)
 
         # [核心线程和控制器]
@@ -247,8 +247,15 @@ class MainWindow(QMainWindow):
         self.control_panel.control_toggled.connect(self.on_control_toggled)
         self.control_panel.reset_requested.connect(self.on_reset_position)
         
-        # 测试面板
+        # 手动测试面板（支持单步微调、长按连续移动、独立键盘开关）
         self.test_panel.request_move_signal.connect(self.on_manual_move)
+        self.test_panel.start_continuous_signal.connect(self.controller.start_manual_continuous)
+        self.test_panel.stop_continuous_signal.connect(self.controller.stop_manual_continuous)
+        self.test_panel.keyboard_control_toggled.connect(self.on_keyboard_control_toggled)
+        
+        # 激活键盘焦点
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
 
     # ==========================
     # 槽函数 (Slots) - 简化版
@@ -378,10 +385,28 @@ class MainWindow(QMainWindow):
         self.pid_tuner.set_pid_values(default_kp, default_ki, default_kd)
     
     def on_control_toggled(self, checked):
-        """控制开关"""
+        """控制开关（开启/关闭自动目标追踪）"""
+        if checked:
+            if not self.serial_thread.is_connected():
+                self.status_label.setText("⚠️ 串口未连接，请先点击'连接'串口！")
+                self.control_panel.set_control_enabled(False)
+                return
+            if not self.controller.visual_input_enabled:
+                self.status_label.setText("⚠️ 摄像头未就绪，请先开启摄像头！")
+                self.control_panel.set_control_enabled(False)
+                return
+
+            # 如果当前还是 IDLE 待机模式，自动帮用户切换为蓝色目标追踪模式
+            if self.mode_panel.get_current_mode() in ("IDLE", "TEST"):
+                self.mode_panel.set_mode("BLUE_TRACKING")
+                self.vision_thread.set_mode("BLUE_TRACKING")
+
         accepted = self.controller.set_control_enabled(checked)
         if checked and not accepted:
             self.control_panel.set_control_enabled(False)
+        else:
+            status = "🟢 自动追踪控制已启动" if checked else "⚪ 自动控制已停止"
+            self.status_label.setText(status)
     
     def on_reset_position(self):
         """重置位置"""
@@ -397,6 +422,14 @@ class MainWindow(QMainWindow):
         """手动移动（测试模式）"""
         print(f"[GUI] 收到手动移动请求: 轴={axis}, 方向={direction}")
         self.controller.manual_move(axis, direction)
+
+    def on_keyboard_control_toggled(self, enabled: bool):
+        """键盘操控开关切换"""
+        self.keyboard_control_enabled = enabled
+        if not enabled:
+            self.controller.stop_manual_continuous()
+        status = "🎮 键盘操控已开启 (可用 WASD / 方向键)" if enabled else "键盘操控已关闭"
+        self.status_label.setText(status)
     
     def update_status(self, *args):
         """更新状态栏"""
@@ -407,6 +440,49 @@ class MainWindow(QMainWindow):
             # 位置信息 (x, y)
             x, y = args
             self.status_label.setText(f"Servo: X={x:.1f}°, Y={y:.1f}°")
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        """键盘方向键 (↑/↓/←/→) 与 (W/S/A/D) 快捷操控云台（仅在勾选开启时生效）"""
+        if not getattr(self, "keyboard_control_enabled", False):
+            super().keyPressEvent(event)
+            return
+
+        if event.isAutoRepeat():
+            return
+
+        key = event.key()
+        if key in (Qt.Key.Key_Up, Qt.Key.Key_W):
+            self.controller.start_manual_continuous('y', -1)
+            event.accept()
+        elif key in (Qt.Key.Key_Down, Qt.Key.Key_S):
+            self.controller.start_manual_continuous('y', 1)
+            event.accept()
+        elif key in (Qt.Key.Key_Left, Qt.Key.Key_A):
+            self.controller.start_manual_continuous('x', 1)
+            event.accept()
+        elif key in (Qt.Key.Key_Right, Qt.Key.Key_D):
+            self.controller.start_manual_continuous('x', -1)
+            event.accept()
+        else:
+            super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event: QKeyEvent) -> None:
+        """松开键盘按键时立即平稳刹车"""
+        if not getattr(self, "keyboard_control_enabled", False):
+            super().keyReleaseEvent(event)
+            return
+
+        if event.isAutoRepeat():
+            return
+
+        key = event.key()
+        if key in (Qt.Key.Key_Up, Qt.Key.Key_W, Qt.Key.Key_Down, Qt.Key.Key_S,
+                   Qt.Key.Key_Left, Qt.Key.Key_A, Qt.Key.Key_Right, Qt.Key.Key_D):
+            self.controller.stop_manual_continuous()
+            event.accept()
+        else:
+            super().keyReleaseEvent(event)
+
 
     def closeEvent(self, a0: QCloseEvent | None) -> None:
         """Release input, stop motion, and terminate background workers."""
@@ -434,4 +510,5 @@ class MainWindow(QMainWindow):
 
         if a0 is not None:
             a0.accept()
+
 

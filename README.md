@@ -16,11 +16,11 @@
 A 2-axis laser gimbal tracking system combining desktop computer vision with real-time microcontroller hardware execution.
 
 ## Overview
-This project is an experimental 2-axis laser gimbal tracking system that operates through a combination of computer vision and a microcontroller. The system uses a PyQt6/Python-based desktop application to process camera feeds, detect targets (using either HSV color tracking or YOLO-based deep learning), and calculate position errors. These error coordinates are then sent over a high-speed serial connection to an STM32F401 microcontroller. 
+This project is an experimental 2-axis laser gimbal tracking system that operates through a combination of computer vision and a real-time microcontroller. The system uses a PyQt6/Python-based desktop application to process camera feeds, detect targets (using either HSV color tracking or YOLO-based deep learning), and calculate position errors. These error coordinates are then sent over a high-speed serial connection (115200 baud) to an STM32F401 microcontroller.
 
-On the hardware side, the STM32 runs a hardware-level Incremental PID algorithm to smoothly drive two MG996R servos, effectively keeping the camera centered on the target. The project features a user-friendly GUI for real-time monitoring, PID tuning, and manual testing.
+On the hardware side, the STM32 runs a **10kHz hardware DDA (Digital Differential Analyzer) microstep pulse engine** alongside a **50Hz Incremental PID algorithm** to smoothly drive two **Makerbase MKS SERVO42C closed-loop stepper motors (`CR_vFOC`)**, effectively keeping the camera centered on the target with zero lost steps and high holding torque. The project features a modern PyQt6 GUI with real-time status monitoring, PID tuning, dual-mode manual control (tap-to-step & hold-to-spin), and dedicated keyboard controls.
 
-*Note: This is just a small personal project for testing purposes. It can serve as a basic prototype for a future Teknofest project. In the future, the hardware will be upgraded with better motors, high-quality camera modules, stronger mechanical structures, and custom PCBs.*
+*Note: This is a prototype system developed towards Teknofest competitions and precision optical gimbal research.*
 
 ## Demo Videos
 - [V0.1.0 Laser Tracking Demo](https://www.youtube.com/shorts/czz0KMfvBXw) - Real-time laser tracking demonstration
@@ -30,55 +30,42 @@ On the hardware side, the STM32 runs a hardware-level Incremental PID algorithm 
 ## Changelog
 Please see [CHANGELOG.md](CHANGELOG.md) for a detailed history of updates and fixes.
 
-## System Images
-
-<div align="center">
-  <img src="images/Camera_and_new_power%20suply.jpeg" width="400" alt="New Camera and Power System">
-  <p><i>New External 720p USB Camera and Stable Power Module</i></p>
-  
-  <img src="images/Pan%20Tilt.jpeg" width="400" alt="Pan-Tilt Mechanism">
-  <p><i>Pan-Tilt Servo Mechanism (MG996R)</i></p>
-  
-  <img src="images/GUI.png" width="600" alt="GUI Interface">
-  <p><i>Control Interface - Real-time Status Monitoring & PID Tuning & Manual Test Panel</i></p>
-</div>
-
 ## Core Features
 
-### 👁️ Computer Vision (PC / Python)
-- **Dual Tracking Modes**: Seamlessly switch between lightweight, high-performance HSV color tracking and Deep Learning-based object detection (YOLO26 `yolo26n.pt`).
+### 👁️ Computer Vision & Control GUI (PC / Python)
+- **Dual Tracking Modes**: Seamlessly switch between lightweight, high-performance HSV color tracking and Deep Learning-based object detection (YOLO26 `yolo26n.pt` / YOLOv8).
 - **Continuous Target Locking**: Center-distance data association algorithm (Euclidean distance threshold) ensures persistent lock-on against multiple targets in frame.
-- **Multithreaded Processing**: Dedicated asynchronous threads for UI updates (`QTimer`), Camera parsing (`vision_worker`), and serial communication (`serial_thread`) to prevent UI freezes.
-- **Clean Interface (PyQt6)**: Integrated status monitoring (FPS/Resolution), real-time PID tuning panel, Deadzone adjusters, and a comprehensive manual component test panel.
+- **Multithreaded Architecture**: Dedicated asynchronous threads for UI rendering (`QTimer`), Camera processing (`vision_worker`), and high-speed serial telemetry (`serial_thread`) preventing any UI freezes.
+- **Enhanced Manual & Keyboard Controls**:
+  - **Tap-to-Step**: Short clicks produce crisp, precise single-step adjustments.
+  - **Press-and-Hold**: Continuous 40Hz smooth rotation with immediate deceleration braking upon release.
+  - **Keyboard Mode Switch**: Dedicated toggle to enable/disable `WASD` and Arrow key (`↑ / ↓ / ← / →`) control with anti-repeat event handling.
+- **One-Click Tracking Linkage**: Intelligent "Start Control" button validates serial and camera readiness and seamlessly activates target tracking.
 
-### ⚙️ Hardware Control (STM32 MCU / C)
-- **Hardware Incremental PID**: The control algorithm is completely offloaded to the STM32, running at a native 50Hz hardware interrupt (`TIM2`). Uses Incremental PID to ensure mathematically stable velocity output and eliminate integral windup.
-- **Zero-Latency Telemetry**: High-speed, unblocked serial pipeline continuously feeds target error directly into the microcontroller with minimal software smoothing, preventing delayed system reactions.
-- **Hardware Safety Limits**: 
-  - **Slew Rate Limiters** (`MAX_SERVO_DELTA`) actively protect the mechanical servos from gear-stripping during sudden high-error target jumps.
-  - **Asynchronous Data Validation** (`new_data_flag`) to pause PID integral accumulation if visual telemetry is temporarily lost (Vision Signal Watchdog).
-  - Software limits constraint the servos from physically over-driving (10~170 degrees).
-
-## Future Roadmap (Road to Teknofest)
-This current version serves as a functional prototype. To meet the rigorous demands of the Teknofest competition, the next stages of development will focus on:
-- **Phase 3 (Predictive Tracking)**: Implementing a Kalman Filter for trajectory prediction to maintain target lock during momentary occlusions and handle noisy vision data.
-- **Phase 4 (Hardware Upgrade & PCB Integration)**: Transitioning to higher-specification hardware. This includes upgrading to an industrial camera for better stability and frame rates, replacing mechanical RC servos with reliable stepper motors, and designing a custom PCB to integrate all scattered electronics into a single, compact control board.
+### ⚙️ Real-Time Motion Control (STM32 MCU / C)
+- **10kHz Hardware DDA Microstep Pulse Generator**: 100μs granularity Bresenham / DDA pulse distributor on `TIM2` hardware interrupt, delivering whisper-quiet, ultra-smooth microstepping (16 microsteps = 3200 pulses/rev).
+- **50Hz Incremental PID Engine**: Computes velocity microstep deltas ($\Delta\text{Steps}$) every 20ms, natively immune to integral windup.
+- **5-Layer Industrial Safety & Fault Protection**:
+  1. **Surge Auto-Healing Reset**: Exception handlers (`HardFault_Handler` / `Error_Handler`) instantly clamp motor pins to 0V and trigger a 1ms auto-reboot (`NVIC_SystemReset()`) to recover from back-EMF or voltage transients.
+  2. **Hardware Visual Watchdog**: 2.0-second timeout automatically halts pulses and locks motor shafts if telemetry is lost.
+  3. **Velocity Slew Rate Limiter**: Maximum step limit (`MAX_STEPS_PER_CYCLE = 80`) mathematically prevents mechanical runaway.
+  4. **UART Coordinate Clamping**: Input error bounded to $\pm 400\text{px}$ to shield against serial noise.
+  5. **500ms Non-Blocking Heartbeat LED (`PC13`)**: Instant visual feedback of MCU execution status.
 
 ## Hardware Requirements
 
 ### Electronics
 - **Microcontroller**: STM32F401CCU6 (Blackpill)
-- **Servos**: 2x MG996R High-Torque Servos
-- **Capacitor**: 1000µF Electrolytic Capacitor (Power filtering for servos)
+- **Motors & Drivers**: 2x NEMA 17 Stepper Motors with Makerbase MKS SERVO42C Closed-Loop Vector Driver Boards (`CR_vFOC` mode)
 - **Camera**: External 720p USB Desktop Camera (Mounted on gimbal)
-- **Power Supply**: 12V 2A DC Adapter
-- **Step-Down Module**: XL4016 Buck Converter (Regulated to stable 6V for servos)
-- **Serial Communication**: HC-05 Bluetooth or direct USB-TTL
-- **Laser**: Red laser pointer (optional, for tracking demonstration)
+- **Power Supply**: 20V DC 2A+ Power Supply (Motor power rail)
+- **Logic Wiring**: Common Cathode configuration (`COM` and `GND` to STM32 GND; `PA0` X_STP, `PA4` X_DIR, `PA1` Y_STP, `PA5` Y_DIR)
+- **Laser**: Red laser diode / pointer (optional, for tracking demonstration)
 
-### Power Supply
-- **OLD**: 4x 1.5V Duracell AA Batteries (6V output)
-- **NOW**: 12V DC Adapter + XL4016 Buck Converter (for stable voltage and current)
+### Power Architecture
+- **Motor Power**: 20V DC directly connected to driver board `V+` and `GND` terminals.
+- **Logic Level**: 3.3V STM32 GPIO signal drive with common ground referencing.
+
 
 ### Mechanical Structure
 - **3D Printed Pan-Tilt Mechanism**: [MakerWorld - Pan Tilt Servo Antenna Tracker MG996R](https://makerworld.com/en/models/973248-pan-tilt-servo-antenna-tracker-mg996r#profileId-945437)

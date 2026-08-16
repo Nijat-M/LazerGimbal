@@ -85,7 +85,10 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-
+  // 硬件发生异常前，第一件事：强制拉低所有步进脉冲引脚，确保电机绝对静止！
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_4 | GPIO_PIN_5, GPIO_PIN_RESET);
+  // 浪涌/异常自动自愈重启，防止硬件挂起锁死
+  NVIC_SystemReset();
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {

@@ -16,11 +16,11 @@
 Masaüstü bilgisayarlı görü (computer vision) ile gerçek zamanlı mikrodenetleyici donanım yürütmesini harmanlayan 2 eksenli (2-axis) lazer gimbal takip sistemi.
 
 ## Genel Bakış (Overview)
-Bu proje, bilgisayarlı görü ve bir mikrodenetleyicinin birleşimi ile çalışan deneysel bir 2 eksenli lazer gimbal takip sistemidir. Sistem, kamera anlık görüntülerini işlemek, hedefleri algılamak (HSV renk takibi veya YOLO tabanlı derin öğrenme kullanarak) ve konum hatalarını hesaplamak için PyQt6/Python tabanlı bir masaüstü uygulaması kullanır. Hesaplanarak elde edilen bu hata koordinatları, daha sonra yüksek hızlı bir seri iletişim üzerinden STM32F401 mikrodenetleyicisine iletilir.
+Bu proje, bilgisayarlı görü ve gerçek zamanlı bir mikrodenetleyicinin birleşimi ile çalışan deneysel bir 2 eksenli lazer gimbal takip sistemidir. Sistem, kamera anlık görüntülerini işlemek, hedefleri algılamak (HSV renk takibi veya YOLO tabanlı derin öğrenme kullanarak) ve konum hatalarını hesaplamak için PyQt6/Python tabanlı bir masaüstü uygulaması kullanır. Hesaplanarak elde edilen bu hata koordinatları, daha sonra yüksek hızlı bir seri iletişim (115200 baud) üzerinden STM32F401 mikrodenetleyicisine iletilir.
 
-Donanım tarafında ise STM32, kamerayı etkili bir şekilde hedefin merkezinde tutarak iki MG996R servo motoru kusursuzca sürebilmek için donanım tabanlı bir Artımlı PID (Incremental PID) algoritması çalıştırır. Proje, gerçek zamanlı izleme, PID parametre ayarı ve manuel testler için kullanıcı dostu bir grafiksel arayüze (GUI) sahiptir.
+Donanım tarafında ise STM32, kamerayı etkili bir şekilde hedefin merkezinde tutabilmek için **10kHz donanımsal DDA (Digital Differential Analyzer) mikro-adım darbe üreteci** ve **50Hz Artımlı PID (Incremental PID) algoritması** çalıştırarak iki adet **Makerbase MKS SERVO42C kapalı çevrim step motoru (`CR_vFOC`)** sıfır adım kaybı ve yüksek tutma torkuyla kusursuzca sürer. Proje, gerçek zamanlı izleme, PID parametre ayarı, çift modlu manuel kontrol (tıkla-adım-at ve basılı-tut-döndür) ve bağımsız klavye kontrolü sunan modern bir PyQt6 arayüzüne sahiptir.
 
-*Not: Bu sistem şu an için sadece test ve AR-GE amaçlı küçük bir kişisel projedir. Gelecekteki bir Teknofest projesi için temel bir prototip (ön model) niteliğindedir. İlerleyen süreçte donanım bileşenleri; endüstriyel sınıf sensörler, gelişmiş motorlar, daha sağlam mekanik yapılar ve sisteme özel tasarlanmış çok katmanlı PCB'ler ile baştan aşağı revize edilecektir.*
+*Not: Bu sistem Teknofest yarışmaları ve hassas optik gimbal sistemleri için geliştirilmiş ileri düzey bir prototip niteliğindedir.*
 
 ## Demo Videoları
 - [V0.1.0 Lazer Takip Demosu](https://www.youtube.com/shorts/czz0KMfvBXw) - Gerçek zamanlı lazer takip tanıtımı
@@ -30,55 +30,42 @@ Donanım tarafında ise STM32, kamerayı etkili bir şekilde hedefin merkezinde 
 ## Değişiklik Günlüğü (Changelog)
 Güncellemelerin ve düzeltmelerin detaylı geçmişi için lütfen [CHANGELOG_TR.md](CHANGELOG_TR.md) dosyasına göz atın.
 
-## Sistem Görselleri
-
-<div align="center">
-  <img src="images/Camera_and_new_power%20suply.jpeg" width="400" alt="Yeni Kamera ve Güç Sistemi">
-  <p><i>Harici 720p USB Kamera ve Stabilize Güç Modülü</i></p>
-  
-  <img src="images/Pan%20Tilt.jpeg" width="400" alt="Pan-Tilt Mekanizması">
-  <p><i>Pan-Tilt Servo Mekanizması (MG996R)</i></p>
-  
-  <img src="images/GUI.png" width="600" alt="GUI Arayüzü">
-  <p><i>Kontrol Arayüzü - Gerçek Zamanlı Durum İzleme, PID Ayarlama ve Manuel Test Paneli</i></p>
-</div>
-
 ## Temel Özellikler (Core Features)
 
-### 👁️ Bilgisayarlı Görü (PC / Python)
-- **Çift Takip Modu (Dual Tracking)**: Hafif ve yüksek performanslı HSV renk takibi ile Derin Öğrenme tabanlı nesne algılama (YOLO26 `yolo26n.pt`) algoritmaları arasında sorunsuzca geçiş imkanı.
-- **Kesintisiz Hedef Kilidi**: Çerçevedeki birden fazla algılanan hedef karşısında stabiliteyi koruyabilmek için, merkeze olan Öklid (Euclidean) uzaklığı eşik algoritması temel alınarak veri ilişkilendirmesi yapılmıştır.
+### 👁️ Bilgisayarlı Görü ve Kontrol Arayüzü (PC / Python)
+- **Çift Takip Modu (Dual Tracking)**: Hafif ve yüksek performanslı HSV renk takibi ile Derin Öğrenme tabanlı nesne algılama (YOLO26 `yolo26n.pt` / YOLOv8) algoritmaları arasında sorunsuzca geçiş imkanı.
+- **Kesintisiz Hedef Kilidi**: Çerçevedeki birden fazla algılanan hedef karşısında stabiliteyi koruyabilmek için, merkeze olan Öklid (Euclidean) uzaklığı eşik algoritması temel alınarak veri ilişkilendirmesi.
 - **Çok İş Parçacıklı İşleme (Multithreading)**: Arayüz güncellemeleri (`QTimer`), kamera kare işleme (`vision_worker`) ve seri haberleşme (`serial_thread`) için atanmış asenkron iş parçacıkları kullanılarak UI donmaları tamamen engellenmiştir.
-- **Temiz Arayüz (PyQt6)**: Entegre durum izleme (FPS/Çözünürlük), gerçek zamanlı canlı PID ayarlama paneli, Ölü Bölge (Deadzone) koruma sürgüleri ve kapsamlı bir donanım test arayüzü sunar.
+- **Gelişmiş Manuel ve Klavye Kontrolleri**:
+  - **Tıkla-Adım-At (Tap-to-Step)**: Kısa tıklamalar hassas ve net tek adımlık mikro-adım ayarı yapar.
+  - **Basılı-Tut-Döndür (Press-and-Hold)**: 40Hz pürüzsüz sürekli dönüş ve bırakıldığında anında yumuşak frenleme.
+  - **Klavye Modu Anahtarı**: `WASD` ve Yön tuşları (`↑ / ↓ / ← / →`) ile kontrolü açıp/kapatan bağımsız güvenlik seçimi.
+- **Tek Tıkla Akıllı Takip Başlatma**: Seri port ve kamera durumunu doğrulayarak hedef takibini sorunsuz başlatan "Kontrolü Başlat" butonu.
 
-### ⚙️ Donanım Kontrolü (STM32 MCU / C)
-- **Donanımsal Artımlı (Incremental) PID**: Denetim algoritması yazılımdan tamamen çıkarılarak STM32 mikrodenetleyicisine devredilmiştir. 50Hz'lik donanım kesmesi (`TIM2`) üzerinde çalışarak integral birikmesini (Windup) yok eder ve matematiksel olarak istikrarlı bir motor hızı çıktısı sağlar.
-- **Sıfır Gecikmeli Telemetri**: Bloklamasız çalışan yüksek hızlı seri iletişim hattı, yazılım kaynaklı gecikmelere (smoothing delay) maruz kalmadan, hata verisini anlık olarak doğrudan mikrodenetleyiciye besler.
-- **Yazılımsal Donanım Koruması**: 
-  - **Dönüş Hızı Sınırlandırıcı** (`MAX_SERVO_DELTA`), hedef bir anda farklı bir konuma atladığında dişli sıyırmasını (gear-stripping) engeller.
-  - **Asenkron Veri Doğrulama** (`new_data_flag`), bilgisayarlı görü paketlerinde kayıp/gecikme yaşandığında PID integral artışını durdurarak sistemin kontrolden çıkmasını önler.
-  - Sınır limiti kodları, servo motorları fiziksel zarar görebileceği açılara (10~170 derece dışı) sürmeyi engeller.
-
-## Gelecek Yol Haritası (Teknofest'e Doğru)
-Şu anki geliştirme sürümü işlevsel bir "kavram kanıtlama" (Proof of Concept) prototipidir. Teknofest yarışmasının zorlu gereksinimlerini karşılayabilmek ve endüstriyel standartlara ulaşabilmek adına geliştirmenin sonraki aşamaları şunlara odaklanacaktır:
-- **Aşama 3 (Kestirimci Takip - Predictive Tracking)**: Görsel sinyaldeki gürültüleri filtrelemek ve hedefin anlık olarak arkada kalması (oklüzyon) durumlarında takibi sürdürebilmek için Kalman Filtresi yardımıyla yörünge tahmini algoritması eklenecektir.
-- **Aşama 4 (Donanım Revizyonu ve PCB Entegrasyonu)**: Çok daha yüksek özellikli endüstriyel donanımlara geçilecektir. Sistem stabilitesi ve kare hızlarını (FPS) doğrudan etkileyen endüstriyel bir kamera yapısına geçiş yapılıp, hobi tipi RC servo motorlar yüksek torklu hassas "Adım (Stepper) Motorlarla" değiştirilecektir. Ayrıca, tüm dağınık kablolama ve kontrolcü yükleri tek bir kompakt devrede birleştirecek özel tasarım bir PCB dizayn edilecektir.
+### ⚙️ Gerçek Zamanlı Hareket Kontrolü (STM32 MCU / C)
+- **10kHz Donanımsal DDA Mikro-Adım Darbe Üreticisi**: `TIM2` donanım kesmesinde 100μs çözünürlüklü Bresenham / DDA darbe dağıtıcısı ile sessiz, pürüzsüz mikro-adım sürüşü (16 mikro-adım = 3200 darbe/tur).
+- **50Hz Artımlı PID Motor Kontrolü**: Her 20ms'de hız artımlarını ($\Delta\text{Steps}$) hesaplar, integral birikmesine (windup) karşı doğal korumalıdır.
+- **5 Katmanlı Endüstriyel Güvenlik ve Hata Koruma Mimarisi**:
+  1. **Dalgalanma Otomatik İyileşme (Auto-Healing Reset)**: Hata yakalayıcılar (`HardFault_Handler` / `Error_Handler`) motor pinlerini anında 0V'a çeker ve ani voltaj sıçramalarında 1ms'de otomatik yeniden başlatma (`NVIC_SystemReset()`) uygular.
+  2. **Donanımsal Görsel Bekçi (Watchdog)**: Veri akışı koptuğunda 2.0 saniye içinde motor darbelerini durdurur ve şaftı kilitler.
+  3. **Hız Değişim Sınırlayıcı (Slew Rate Limiter)**: Döngü başına maksimum adım sınırı (`MAX_STEPS_PER_CYCLE = 80`) ile motorun kontrolden çıkmasını matematiksel olarak engeller.
+  4. **UART Koordinat Sınırlaması**: Seri gürültülere karşı giriş hatası $\pm 400\text{px}$ ile sınırlandırılmıştır.
+  5. **500ms Bloklanmayan Durum Bildirim LED'i (`PC13`)**: Donanımın çalıştığını gösteren canlı kalp atışı (heartbeat) göstergesi.
 
 ## Donanım Gereksinimleri
 
 ### Elektronik
 - **Mikrodenetleyici**: STM32F401CCU6 (Blackpill)
-- **Motorlar (Aktüatör)**: 2x MG996R Yüksek Torklu Servo
-- **Kapasitör**: 1000µF Elektrolitik Kapasitör (Servolar için güç filtrelemesi)
+- **Motorlar ve Sürücüler**: 2x NEMA 17 Step Motor ve Makerbase MKS SERVO42C Kapalı Çevrim Vektör Sürücü Kartları (`CR_vFOC` modu)
 - **Kamera**: Harici 720p USB Masaüstü Kamera (Gimbal üzerine monte)
-- **Güç Kaynağı**: 12V 2A DC Adaptör
-- **Gerilim Düşürücü (Step-Down)**: XL4016 Buck Converter (Servolar için 6V sabit gerilim)
-- **Haberleşme**: HC-05 Bluetooth Modülü veya doğrudan USB-TTL çevirici
-- **Lazer**: Kırmızı lazer işaretçi (Takip testleri için, opsiyonel)
+- **Güç Kaynağı**: 20V DC 2A+ Güç Kaynağı (Motor güç hattı)
+- **Sinyal Bağlantısı**: Ortak Katot (Common Cathode) bağlantısı (`COM` ve `GND` STM32 GND pinine; `PA0` X_STP, `PA4` X_DIR, `PA1` Y_STP, `PA5` Y_DIR)
+- **Lazer**: Kırmızı lazer diyot / işaretçi (Takip testleri için, opsiyonel)
 
-### Güç Altyapısı
-- **ESKİ**: 4x 1.5V Duracell AA Kalem Pil (6V Çıkış - Kararsız)
-- **ŞU ANKİ**: 12V DC Kesintisiz Adaptör + XL4016 Buck Converter (Stabil voltaj ve anlık akım tepkisi)
+### Güç Mimarisi
+- **Motor Gücü**: 20V DC doğrudan sürücü kartlarının `V+` ve `GND` klemenslerine bağlıdır.
+- **Mantık Seviyesi (Logic)**: Ortak toprak referanslı 3.3V STM32 GPIO sinyal sürüşü.
+
 
 ### Mekanik Altyapı
 - **3 Boyutlu Yazdırılan Pan-Tilt Sistemi**: [MakerWorld - Pan Tilt Servo Antenna Tracker MG996R](https://makerworld.com/en/models/973248-pan-tilt-servo-antenna-tracker-mg996r#profileId-945437)

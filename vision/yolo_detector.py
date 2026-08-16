@@ -1,4 +1,10 @@
-from ultralytics import YOLO
+try:
+    from ultralytics import YOLO
+    HAS_YOLO = True
+except ImportError:
+    YOLO = None
+    HAS_YOLO = False
+
 import cv2
 import numpy as np
 import math
@@ -26,8 +32,12 @@ class YOLODetectionResult:
 
 class YOLODetector:
     def __init__(self, model_path="vision/models/yolo26n.pt"):
+        if not HAS_YOLO:
+            self.model = None
+            return
         self.model = YOLO(model_path)
         # 目标锁定状态记录
+
         self.locked_target_position: Optional[Tuple[int, int]] = None
         self.lost_frames = 0
         self.max_lost_frames = 10  # 丢失多少帧后认为目标彻底丢失，重新寻找全局最优
@@ -38,6 +48,9 @@ class YOLODetector:
         Detects multiple targets. Returns all targets and selects one main target for tracking.
         改进：优先选择距离上一帧被锁定目标最近的候选者，防止追踪目标在不同人/物体间横跳。
         """
+        if self.model is None:
+            return YOLODetectionResult(detected=False, all_targets=[])
+
         results = self.model(frame, verbose=False)
         
         all_targets = []

@@ -2,7 +2,7 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : Main program body
+  * @brief          : Main program body - MKS SERVO42C Closed-Loop Stepper Engine
   ******************************************************************************
   * @attention
   *
@@ -24,18 +24,14 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdlib.h> // abs, atoi, atof
+#include <string.h>
+#include <stdio.h>
+#include <math.h>   // fabsf, roundf
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-// --------------------------------------------------------------------------
-// 工业级双轴伺服闭环变量与串口协议
-// --------------------------------------------------------------------------
-#include <stdlib.h> // atoi
-#include <string.h>
-#include <stdio.h>
-
 typedef enum {
     STATE_IDLE,
     STATE_RECEIVING_POS,
@@ -46,10 +42,10 @@ typedef enum {
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define SERVO_MIN_PULSE 600   // 对应约 0度
-#define SERVO_MAX_PULSE 2400  // 对应约 180度
 #define RX_BUFFER_SIZE 64
-#define PID_INTEGRAL_MAX 200.0f   // 积分限幅
+#define PID_SUBTICKS_PER_CYCLE 200    // 10kHz 采样下，200 ticks = 20ms = 50Hz PID 周期
+#define MAX_STEPS_PER_CYCLE 80.0f     // 单个 20ms 周期最大步数 (80步/20ms = 4000 steps/s 速度保护限幅)
+#define DEADZONE_PIXELS 3             // 准星死区 (像素)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -61,10 +57,10 @@ typedef enum {
 
 /* USER CODE BEGIN PV */
 
-// PID 参数 (与上位机初始化对齐)
+// PID 参数 (与上位机 GUI 实时同步)
 volatile float Kp = 0.4f, Ki = 0.16f, Kd = 0.5f;
 
-// 误差状态
+// 视觉误差状态
 volatile int16_t current_error_x = 0;
 volatile int16_t current_error_y = 0;
 volatile int16_t prev_error_x = 0;
@@ -72,19 +68,22 @@ volatile int16_t prev_error_y = 0;
 volatile int16_t prev_prev_error_x = 0;
 volatile int16_t prev_prev_error_y = 0;
 
-volatile float integral_x = 0.0f;
-volatile float integral_y = 0.0f;
+// 10kHz 高频 DDA 脉冲分发器变量
+volatile uint16_t pid_subtick_counter = 0;
+volatile uint16_t steps_to_send_x = 0;
+volatile uint16_t steps_to_send_y = 0;
+volatile uint16_t step_accumulator_x = 0;
+volatile uint16_t step_accumulator_y = 0;
+volatile uint8_t pulse_active_x = 0;
+volatile uint8_t pulse_active_y = 0;
 
-// 舵机脉宽
-volatile float servo_x_pulse = 1500.0f;
-volatile float servo_y_pulse = 1500.0f;
-
+// 运行控制与安全标志
 volatile uint8_t current_fire = 0;
-volatile uint8_t vision_timeout_counter = 0; 
-volatile uint8_t new_data_flag = 0;   // 核心改进：防瞎积分的数据锁
-volatile uint32_t control_epoch = 0;  // STOP 后使正在计算的旧控制量失效
+volatile uint16_t vision_timeout_counter = 0;
+volatile uint8_t new_data_flag = 0;   // 异步数据锁：拿到新图像帧才做增量
+volatile uint32_t control_epoch = 0;  // 抢占式急停纪元锁
 
-// 串口变量
+// 串口接收变量
 volatile RxState rx_state = STATE_IDLE;
 uint8_t rx_byte;
 char rx_buffer[RX_BUFFER_SIZE];
@@ -96,7 +95,7 @@ volatile uint8_t rx_index = 0;
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 static void StopMotion(void);
-static void CenterServos(void);
+static void ResetPosition(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -110,20 +109,33 @@ static void StopMotion(void)
     prev_error_y = 0;
     prev_prev_error_x = 0;
     prev_prev_error_y = 0;
-    integral_x = 0.0f;
-    integral_y = 0.0f;
     new_data_flag = 0;
+    steps_to_send_x = 0;
+    steps_to_send_y = 0;
+    step_accumulator_x = 0;
+    step_accumulator_y = 0;
+    
+    // 强制拉低脉冲引脚
+    if (pulse_active_x) {
+        HAL_GPIO_WritePin(GPIOA, X_STP_Pin, GPIO_PIN_RESET);
+        pulse_active_x = 0;
+    }
+    if (pulse_active_y) {
+        HAL_GPIO_WritePin(GPIOA, Y_STP_Pin, GPIO_PIN_RESET);
+        pulse_active_y = 0;
+    }
+    
     current_fire = 0;
     vision_timeout_counter = 0;
 }
 
-static void CenterServos(void)
+static void ResetPosition(void)
 {
     StopMotion();
-    servo_x_pulse = 1500.0f;
-    servo_y_pulse = 1500.0f;
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 1500);
-    __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 1500);
+    // 简单的 LED 闪烁提示
+    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET); // On
+    HAL_Delay(100);
+    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);   // Off
 }
 /* USER CODE END 0 */
 
@@ -159,46 +171,40 @@ int main(void)
   MX_TIM2_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-  // 启动定时器 PWM 输出
-  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1); // 启动舵机 X
-  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_2); // 启动舵机 Y
+  // 启动 TIM2 10kHz 高频微步时钟中断
+  HAL_TIM_Base_Start_IT(&htim2);
 
-  // 开启 TIM2 的更新中断 (50Hz), 用于 PID 控制循环
-  HAL_NVIC_SetPriority(TIM2_IRQn, 1, 0);
-  HAL_NVIC_EnableIRQ(TIM2_IRQn);
-  __HAL_TIM_ENABLE_IT(&htim2, TIM_IT_UPDATE);
-
-  // 开启串口接收中断：告诉 STM32，“准备收这 1 个字节，收到了叫我”
+  // 开启串口接收中断 (115200bps)
   HAL_UART_Receive_IT(&huart1, &rx_byte, 1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  uint32_t last_led_tick = 0;
   while (1)
   {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    // 简单的按键检测 (PA2) - Active Low (按下接地)
-    if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2) == GPIO_PIN_RESET) 
+    // 心跳指示灯 (每 500ms 翻转一次，直观确认 STM32 正常运行)
+    if (HAL_GetTick() - last_led_tick >= 500) {
+        last_led_tick = HAL_GetTick();
+        HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
+    }
+
+    // 板载按键检测 (PA2) - Active Low (按下接地)
+    if (HAL_GPIO_ReadPin(KEY_GPIO_Port, KEY_Pin) == GPIO_PIN_RESET) 
     {
         HAL_Delay(20); // 防抖
-        if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2) == GPIO_PIN_RESET)
+        if (HAL_GPIO_ReadPin(KEY_GPIO_Port, KEY_Pin) == GPIO_PIN_RESET)
         {
-             // 归位 (Center)
-             CenterServos();
-             
-             // 简单的 LED 闪烁提示
-             HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET); // On
-             HAL_Delay(100);
-             HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);   // Off
-             
-             // 等待按键释放，防止重复触发
-             while(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_2) == GPIO_PIN_RESET);
+             ResetPosition();
+             while(HAL_GPIO_ReadPin(KEY_GPIO_Port, KEY_Pin) == GPIO_PIN_RESET);
         }
     }
   }
   /* USER CODE END 3 */
+
 }
 
 /**
@@ -249,113 +255,138 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 
-#define MAX_SERVO_DELTA 30.0f  // 核心提升：每次最大脉宽变化量（限幅步长），防止目标瞬移导致舵机抽搐扫齿
-
 /**
- * @brief 工业级 PID 核心循环 (50Hz), 由定时器中断周期性挂载
+ * @brief 10kHz 硬件微步插补与 50Hz 增量 PID 核心中断回调
  * 
- * 核心设计思想：
- * 1. 采用“增量式 PID”而非“位置式 PID”，天然免疫因为积分积累带来的积分饱和 (Integral Windup) 问题。
- * 2. 解耦异步数据通讯：只在拿到确切的新影像帧后计算补偿，杜绝瞎积分。
+ * 核心设计原理：
+ * 1. 【10kHz 极速 DDA 插补】: 以 100μs 粒度非阻塞生成高精度步进脉冲，均匀平摊在 20ms 时间窗内，
+ *    彻底消除步进电机的离散敲击震动与噪音，运转如丝般顺滑。
+ * 2. 【50Hz 增量式 PID】: 相比位置式 PID，增量式天然免疫积分饱和，直接解算出速度微步增量 ΔSteps。
+ * 3. 【全双工安全看门狗】: 2秒无上位机指令自动停机锁轴，防丢控乱转。
  */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   if (htim->Instance == TIM2)
   {
       // ==========================================================
-      // [1] 安全看门狗 (Security Watchdog) - 防云台“锁死失控”
+      // [1] 脉冲清零 (Falling Edge: 保证 100μs 充沛的高电平脉宽)
       // ==========================================================
-      if (vision_timeout_counter < 100) { 
-          vision_timeout_counter++;
-      } else {
-          // 超过100个Tick(即2秒)没有收到Python下发指令，认为目标丢失/程序崩溃。
-          StopMotion();
+      if (pulse_active_x) {
+          HAL_GPIO_WritePin(GPIOA, X_STP_Pin, GPIO_PIN_RESET);
+          pulse_active_x = 0;
+      }
+      if (pulse_active_y) {
+          HAL_GPIO_WritePin(GPIOA, Y_STP_Pin, GPIO_PIN_RESET);
+          pulse_active_y = 0;
       }
 
       // ==========================================================
-      // [2] 异步数据防抖锁 (Asynchronous Data Lock)
+      // [2] Bresenham / DDA 均匀脉冲分配器 (Rising Edge)
       // ==========================================================
-      // STM32中断频率极其恒定(50Hz)，但上位机因YOLO算力可能会掉到 30Hz 甚至偶尔卡顿。
-      // 没有这把锁，STM32就会用“过期数据”重复多次积分。
-      if (!new_data_flag) {
-          return; // 暂无新指挥，维持原样不输出增量。
+      if (steps_to_send_x > 0) {
+          step_accumulator_x += steps_to_send_x;
+          if (step_accumulator_x >= PID_SUBTICKS_PER_CYCLE) {
+              step_accumulator_x -= PID_SUBTICKS_PER_CYCLE;
+              HAL_GPIO_WritePin(GPIOA, X_STP_Pin, GPIO_PIN_SET);
+              pulse_active_x = 1;
+          }
       }
-      // 确认有新指令，下发计算通行证
-      new_data_flag = 0;
-      uint32_t command_epoch = control_epoch;
 
-      // ==========================================================
-      // [3] 增量式 PID 姿态解算 (Incremental PID Core)
-      // ==========================================================
-      float delta_x = 0.0f;
-      
-      // 开启死区(Deadzone)：当目标在准星中心 3 像素以内时，不输出增量(不拉扯)，防止因像噪反复震荡。
-      if (abs(current_error_x) >= 3) {
-          /* 
-           * 增量式PID标准公式: ΔU(k) = Kp*[e(k)-e(k-1)] + Ki*e(k) + Kd*[e(k) - 2e(k-1) + e(k-2)] 
-           * 相比位置式直接计算出绝对坐标，这里解算的是“未来20ms云台需要的移动步数和方向 (Velocity)”
-           */
-          delta_x = Kp * (float)(current_error_x - prev_error_x) + 
-                    Ki * (float)current_error_x + 
-                    Kd * (float)(current_error_x - 2 * prev_error_x + prev_prev_error_x);
+      if (steps_to_send_y > 0) {
+          step_accumulator_y += steps_to_send_y;
+          if (step_accumulator_y >= PID_SUBTICKS_PER_CYCLE) {
+              step_accumulator_y -= PID_SUBTICKS_PER_CYCLE;
+              HAL_GPIO_WritePin(GPIOA, Y_STP_Pin, GPIO_PIN_SET);
+              pulse_active_y = 1;
+          }
       }
-      
-      // ⚠️极限环境修复：无论是否在死区，历史误差状态(State History)必须无条件流转！
-      // 若进入死区时冻结替换，则目标走出死区的第一帧时，e(k) 与 e(k-1) 的时间是不连续的，会引发剧烈的微分暴走(Derivative Kick)。
-      prev_prev_error_x = prev_error_x;
-      prev_error_x = current_error_x;
-
-      float delta_y = 0.0f;
-      if (abs(current_error_y) >= 3) {
-          delta_y = Kp * (float)(current_error_y - prev_error_y) + 
-                    Ki * (float)current_error_y + 
-                    Kd * (float)(current_error_y - 2 * prev_error_y + prev_prev_error_y);
-      }
-      prev_prev_error_y = prev_error_y;
-      prev_error_y = current_error_y;
-
 
       // ==========================================================
-      // [4] Slew Rate Limiter (加速度/输出变化率限幅) - 专业级标配
+      // [3] 50Hz 增量 PID 控制解算周期 (每 200 个 10kHz 滴答 = 20ms)
       // ==========================================================
-      // 极力保护机械结构：当目标突然闪现、或者PID算出了几百的极限增量时，强行切断为最大步长，保护舵机不被大电流烧毁或扫齿。
-      if (delta_x > MAX_SERVO_DELTA) delta_x = MAX_SERVO_DELTA;
-      if (delta_x < -MAX_SERVO_DELTA) delta_x = -MAX_SERVO_DELTA;
-      if (delta_y > MAX_SERVO_DELTA) delta_y = MAX_SERVO_DELTA;
-      if (delta_y < -MAX_SERVO_DELTA) delta_y = -MAX_SERVO_DELTA;
+      pid_subtick_counter++;
+      if (pid_subtick_counter >= PID_SUBTICKS_PER_CYCLE)
+      {
+          pid_subtick_counter = 0;
 
+          // ------------------------------------------------------
+          // 3.1 安全看门狗 (2秒无有效视觉包自动挂起)
+          // ------------------------------------------------------
+          if (vision_timeout_counter < 100) {
+              vision_timeout_counter++;
+          } else {
+              StopMotion();
+          }
 
-      // ==========================================================
-      // [5] 执行积分叠加并物理限位 (Execution & Hard-Limits)
-      // ==========================================================
-      // STOP 可抢占 PID 计算。最终提交时短暂关闭中断，保证 STOP
-      // 不会在已经解析完成后又被本周期的旧增量覆盖。
-      uint32_t primask = __get_PRIMASK();
-      __disable_irq();
-      if (command_epoch == control_epoch) {
-          servo_x_pulse += delta_x;
-          servo_y_pulse += delta_y;
+          // ------------------------------------------------------
+          // 3.2 异步数据防瞎积分锁
+          // ------------------------------------------------------
+          if (!new_data_flag) {
+              // 暂无新视觉帧，平滑刹车停发脉冲
+              steps_to_send_x = 0;
+              steps_to_send_y = 0;
+              step_accumulator_x = 0;
+              step_accumulator_y = 0;
+              return;
+          }
+          new_data_flag = 0;
+          uint32_t command_epoch = control_epoch;
 
-          // 绝对死限位，防止撞死壳体
-          if(servo_x_pulse > SERVO_MAX_PULSE) servo_x_pulse = SERVO_MAX_PULSE;
-          if(servo_x_pulse < SERVO_MIN_PULSE) servo_x_pulse = SERVO_MIN_PULSE;
-          if(servo_y_pulse > SERVO_MAX_PULSE) servo_y_pulse = SERVO_MAX_PULSE;
-          if(servo_y_pulse < SERVO_MIN_PULSE) servo_y_pulse = SERVO_MIN_PULSE;
+          // ------------------------------------------------------
+          // 3.3 增量式 PID 解算 (X 轴 & Y 轴)
+          // ------------------------------------------------------
+          float delta_x = 0.0f;
+          if (abs(current_error_x) >= DEADZONE_PIXELS) {
+              delta_x = Kp * (float)(current_error_x - prev_error_x) + 
+                        Ki * (float)current_error_x + 
+                        Kd * (float)(current_error_x - 2 * prev_error_x + prev_prev_error_x);
+          }
+          prev_prev_error_x = prev_error_x;
+          prev_error_x = current_error_x;
 
-          __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, (uint32_t)servo_x_pulse);
-          __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, (uint32_t)servo_y_pulse);
-      }
-      if (!primask) {
-          __enable_irq();
+          float delta_y = 0.0f;
+          if (abs(current_error_y) >= DEADZONE_PIXELS) {
+              delta_y = Kp * (float)(current_error_y - prev_error_y) + 
+                        Ki * (float)current_error_y + 
+                        Kd * (float)(current_error_y - 2 * prev_error_y + prev_prev_error_y);
+          }
+          prev_prev_error_y = prev_error_y;
+          prev_error_y = current_error_y;
+
+          // ------------------------------------------------------
+          // 3.4 加速度 / 速度限幅 (Slew Rate Limiter)
+          // ------------------------------------------------------
+          if (delta_x > MAX_STEPS_PER_CYCLE) delta_x = MAX_STEPS_PER_CYCLE;
+          if (delta_x < -MAX_STEPS_PER_CYCLE) delta_x = -MAX_STEPS_PER_CYCLE;
+          if (delta_y > MAX_STEPS_PER_CYCLE) delta_y = MAX_STEPS_PER_CYCLE;
+          if (delta_y < -MAX_STEPS_PER_CYCLE) delta_y = -MAX_STEPS_PER_CYCLE;
+
+          // ------------------------------------------------------
+          // 3.5 提交方向与微步脉冲数
+          // ------------------------------------------------------
+          if (command_epoch == control_epoch) {
+              // 设置 X 轴方向 (PA4)
+              HAL_GPIO_WritePin(GPIOA, X_DIR_Pin, (delta_x >= 0.0f) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+              // 设置 Y 轴方向 (PA5)
+              HAL_GPIO_WritePin(GPIOA, Y_DIR_Pin, (delta_y >= 0.0f) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+
+              steps_to_send_x = (uint16_t)roundf(fabsf(delta_x));
+              steps_to_send_y = (uint16_t)roundf(fabsf(delta_y));
+              step_accumulator_x = 0;
+              step_accumulator_y = 0;
+          }
       }
   }
 }
 
+/**
+ * @brief 串口中断接收状态机 (115200bps)
+ */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
   if(huart->Instance == USART1)
   {
-    // STOP 帧可从任何不完整协议状态抢占并重新同步解析器。
+    // STOP 抢占指令
     if (rx_byte == '!') {
         rx_state = STATE_RECEIVING_COMMAND;
         rx_index = 0;
@@ -381,12 +412,20 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             char *token3 = strtok(NULL, ",");
             
             if (token1 && token2 && token3) {
-                current_error_x = atoi(token1);
-                current_error_y = atoi(token2);
+                int parsed_x = atoi(token1);
+                int parsed_y = atoi(token2);
                 
-                // 核心改进：通知PID主循环有新数据可以做积分了
+                // 工业级物理输入限幅：防止乱码或意外超大误差导致电机失控
+                if (parsed_x > 400) parsed_x = 400;
+                if (parsed_x < -400) parsed_x = -400;
+                if (parsed_y > 400) parsed_y = 400;
+                if (parsed_y < -400) parsed_y = -400;
+
+                current_error_x = (int16_t)parsed_x;
+                current_error_y = (int16_t)parsed_y;
+                current_fire = (uint8_t)atoi(token3);
+                
                 new_data_flag = 1;
-                
                 vision_timeout_counter = 0; // 喂狗
             }
             
@@ -410,13 +449,9 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             char *token3 = strtok(NULL, ",");
             
             if (token1 && token2 && token3) {
-                Kp = atof(token1);
-                Ki = atof(token2);
-                Kd = atof(token3);
-                
-                // 更换参数后通常需要重置积分
-                integral_x = 0;
-                integral_y = 0;
+                Kp = (float)atof(token1);
+                Ki = (float)atof(token2);
+                Kd = (float)atof(token3);
             }
             
             rx_state = STATE_IDLE;
@@ -435,7 +470,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
             if (strcmp((char*)rx_buffer, "STOP") == 0) {
                 StopMotion();
             } else if (strcmp((char*)rx_buffer, "CENTER") == 0) {
-                CenterServos();
+                ResetPosition();
             }
             rx_state = STATE_IDLE;
             rx_index = 0;
@@ -461,10 +496,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+  NVIC_SystemReset();
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT
@@ -483,3 +515,4 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
