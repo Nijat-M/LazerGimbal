@@ -1,57 +1,61 @@
 @echo off
 chcp 65001 >nul
-title LaserGimbal WebUI HSS Command Center
+title LaserGimbal WebUI Launcher
 cd /d "%~dp0"
 
 echo ===================================================
-echo   🎯 LaserGimbal WebUI HSS Command Center
+echo       LaserGimbal WebUI HSS Command Center
 echo ===================================================
 
-:: 1. 检查 Python 虚拟环境
+rem 1. Check Python virtual environment
 if exist ".venv\Scripts\python.exe" (
-    set "PYTHON_EXE=.venv\Scripts\python.exe"
-) else (
-    where python >nul 2>nul
-    if %errorlevel% neq 0 goto NO_PYTHON
-    set "PYTHON_EXE=python"
+    set "PYTHON_CMD=.venv\Scripts\python.exe"
+    goto CHECK_WEBUI
 )
 
-:: 2. 检查并编译前端 React + Three.js 界面 (若未编译)
-if not exist "webui\dist\index.html" (
-    echo [INFO] WebUI 静态文件未构建，正在自动打包 React + Three.js 前端...
-    where npm >nul 2>nul
-    if %errorlevel% neq 0 (
-        echo [WARNING] 未检测到 npm 命令，跳过自动构建。如果前端无法加载，请先安装 Node.js。
-    ) else (
-        echo [INFO] 正在安装前端依赖 (npm install)...
-        cd webui
-        call npm install
-        echo [INFO] 正在编译前端生产包 (npm run build)...
-        call npm run build
-        cd ..
-    )
+where python >nul 2>nul
+if %errorlevel% neq 0 goto NO_PYTHON
+set "PYTHON_CMD=python"
+
+:CHECK_WEBUI
+rem 2. Check if WebUI build exists
+if exist "webui\dist\index.html" goto LAUNCH_BROWSER
+
+echo [INFO] WebUI frontend build not found. Building React + Three.js app...
+where npm >nul 2>nul
+if %errorlevel% neq 0 (
+    echo [WARNING] npm not found. Skipping auto-build. Please install Node.js if UI fails to load.
+    goto LAUNCH_BROWSER
 )
 
-:: 3. 自动在后台启动浏览器打开前端页面 (延迟2秒等待服务就绪)
-start "" cmd /c "timeout /t 2 >nul & start http://localhost:8000"
+echo [INFO] Installing frontend dependencies (npm install)...
+cd webui
+call npm install
+echo [INFO] Building production bundle (npm run build)...
+call npm run build
+cd ..
 
-:: 4. 启动 FastAPI 后端服务
+:LAUNCH_BROWSER
+rem 3. Launch browser in background after 2 seconds
+start "" cmd /c "timeout /t 2 /nobreak >nul & start http://localhost:8000"
+
+rem 4. Start FastAPI server
 echo ===================================================
-echo 🚀 正在启动 WebUI 战术指挥服务器: http://localhost:8000
-echo 💡 按 Ctrl+C 可停止服务器
+echo [INFO] Starting WebUI Server on http://localhost:8000
+echo [INFO] Press Ctrl+C to stop server
 echo ===================================================
-%PYTHON_EXE% web_server.py --port 8000 --host 0.0.0.0
+%PYTHON_CMD% web_server.py --port 8000 --host 0.0.0.0
 
 if %errorlevel% neq 0 (
     echo.
-    echo [WARNING] 服务异常退出，错误码: %errorlevel%
+    echo [WARNING] Server exited with code: %errorlevel%
 )
 pause
 exit /b 0
 
 :NO_PYTHON
-echo [ERROR] 未找到 Python 解释器！
-echo 请先安装 Python 3.10+ 并勾选 "Add Python to PATH"。
-echo 下载地址: https://www.python.org/downloads/
+echo [ERROR] Python not found in PATH!
+echo Please install Python 3.10+ and ensure Add Python to PATH is checked.
+echo Download: https://www.python.org/downloads/
 pause
 exit /b 1
