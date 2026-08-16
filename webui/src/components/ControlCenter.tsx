@@ -43,7 +43,6 @@ export const ControlCenter: React.FC<ControlCenterProps> = ({
 
   const handleLaserFirePress = () => {
     if (!laserArmed) return;
-    soundManager.playLaserFire();
     onSendCommand({
       action: 'FIRE_LASER',
       payload: { firing: true },
@@ -57,6 +56,7 @@ export const ControlCenter: React.FC<ControlCenterProps> = ({
       payload: { firing: false },
     });
   };
+
 
   const setTrackingMode = (mode: string) => {
     onSendCommand({
@@ -196,10 +196,12 @@ export const ControlCenter: React.FC<ControlCenterProps> = ({
             <button
               onMouseDown={handleLaserFirePress}
               onMouseUp={handleLaserFireRelease}
+              onMouseLeave={handleLaserFireRelease}
               onTouchStart={handleLaserFirePress}
               onTouchEnd={handleLaserFireRelease}
+              onTouchCancel={handleLaserFireRelease}
               disabled={!laserArmed}
-              className={`py-2.5 px-2 rounded-lg text-xs font-mono font-black tracking-wider border transition-all flex items-center justify-center gap-1.5 ${
+              className={`py-2.5 px-2 rounded-lg text-xs font-mono font-black tracking-wider border transition-all flex items-center justify-center gap-1.5 select-none ${
                 !laserArmed
                   ? 'bg-red-950/20 border-red-950 text-red-800 cursor-not-allowed'
                   : laserFiring
@@ -210,6 +212,7 @@ export const ControlCenter: React.FC<ControlCenterProps> = ({
               <Flame className="w-4 h-4" />
               {laserFiring ? 'ATEŞLENİYOR...' : 'BASILI TUT (ATEŞ)'}
             </button>
+
           </div>
           <div className="text-[10px] font-mono text-cyan-600/90 text-center">
             İpucu: Boşluk (Space) tuşuna basılı tutarak da ateşleyebilirsiniz

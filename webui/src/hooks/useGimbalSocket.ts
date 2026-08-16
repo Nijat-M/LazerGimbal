@@ -43,13 +43,39 @@ export function useGimbalSocket() {
   }, []);
 
   const sendCommand = useCallback((cmd: SystemCommand) => {
+    // 1. Instant Optimistic UI & Sound Synchronization (Zero Latency)
+    if (cmd.action === 'FIRE_LASER') {
+      setTelemetry((prev) => ({ ...prev, laser_firing: true }));
+      soundManager.startLaserContinuousFire();
+    } else if (cmd.action === 'STOP_LASER') {
+      setTelemetry((prev) => ({ ...prev, laser_firing: false }));
+      soundManager.stopLaserContinuousFire();
+    } else if (cmd.action === 'ARM_LASER') {
+      const isArmed = Boolean(cmd.payload?.armed);
+      setTelemetry((prev) => ({
+        ...prev,
+        laser_armed: isArmed,
+        laser_firing: isArmed ? prev.laser_firing : false,
+      }));
+      if (!isArmed) {
+        soundManager.stopLaserContinuousFire();
+      }
+    } else if (cmd.action === 'EMERGENCY_STOP') {
+      setTelemetry((prev) => ({ ...prev, laser_firing: false, laser_armed: false }));
+      soundManager.stopLaserContinuousFire();
+    }
+
+    // 2. Transmit to backend WebSocket
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(cmd));
-      soundManager.playClick();
+      if (cmd.action !== 'FIRE_LASER' && cmd.action !== 'STOP_LASER') {
+        soundManager.playClick();
+      }
     } else {
       console.warn('WebSocket not connected. Command buffered or ignored:', cmd);
     }
   }, []);
+
 
   const connect = useCallback(() => {
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {

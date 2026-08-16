@@ -4,6 +4,13 @@ class SoundManager {
   private ctx: AudioContext | null = null;
   private isMuted: boolean = false;
 
+  // Active Laser Continuous Audio Nodes
+  private laserOsc1: OscillatorNode | null = null;
+  private laserOsc2: OscillatorNode | null = null;
+  private laserLfo: OscillatorNode | null = null;
+  private laserGain: GainNode | null = null;
+  private isLaserAudioRunning: boolean = false;
+
   private initContext() {
     if (!this.ctx) {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -18,6 +25,9 @@ class SoundManager {
 
   public setMuted(muted: boolean) {
     this.isMuted = muted;
+    if (muted) {
+      this.stopLaserContinuousFire();
+    }
   }
 
   public getIsMuted(): boolean {
@@ -80,28 +90,88 @@ class SoundManager {
     osc2.stop(t + 0.22);
   }
 
-  // Laser Weapon Fire Sound
-  public playLaserFire() {
-    if (this.isMuted) return;
+  // Continuous Synchronized Laser Weapon Hum & Blast (While Holding Button)
+  public startLaserContinuousFire() {
+    if (this.isMuted || this.isLaserAudioRunning) return;
     this.initContext();
     if (!this.ctx) return;
 
-    const t = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
+    try {
+      const t = this.ctx.currentTime;
+      this.isLaserAudioRunning = true;
 
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(2800, t);
-    osc.frequency.exponentialRampToValueAtTime(120, t + 0.25);
+      // Primary High-Frequency Plasma Beam Carrier
+      const osc1 = this.ctx.createOscillator();
+      osc1.type = 'sawtooth';
+      osc1.frequency.setValueAtTime(2400, t);
+      osc1.frequency.exponentialRampToValueAtTime(1600, t + 0.08);
 
-    gain.gain.setValueAtTime(0.2, t);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+      // Secondary Sub-Bass Heavy Beam Core
+      const osc2 = this.ctx.createOscillator();
+      osc2.type = 'square';
+      osc2.frequency.setValueAtTime(140, t);
 
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
+      // LFO Tremolo Modulation for Pulsating Laser Shockwave Rhythm
+      const lfo = this.ctx.createOscillator();
+      const lfoGain = this.ctx.createGain();
+      lfo.frequency.setValueAtTime(28, t); // 28Hz rapid tactical energy pulse
+      lfoGain.gain.setValueAtTime(0.08, t);
+      lfo.connect(lfoGain.gain);
 
-    osc.start(t);
-    osc.stop(t + 0.28);
+      const mainGain = this.ctx.createGain();
+      mainGain.gain.setValueAtTime(0.01, t);
+      mainGain.gain.linearRampToValueAtTime(0.18, t + 0.04);
+
+      osc1.connect(mainGain);
+      osc2.connect(mainGain);
+      mainGain.connect(this.ctx.destination);
+
+      osc1.start(t);
+      osc2.start(t);
+      lfo.start(t);
+
+      this.laserOsc1 = osc1;
+      this.laserOsc2 = osc2;
+      this.laserLfo = lfo;
+      this.laserGain = mainGain;
+    } catch (e) {
+      console.warn('Could not start continuous laser sound:', e);
+    }
+  }
+
+  // Stop Continuous Laser Sound on Release
+  public stopLaserContinuousFire() {
+    if (!this.isLaserAudioRunning || !this.ctx) return;
+    try {
+      const t = this.ctx.currentTime;
+      if (this.laserGain) {
+        this.laserGain.gain.setValueAtTime(this.laserGain.gain.value, t);
+        this.laserGain.gain.exponentialRampToValueAtTime(0.0001, t + 0.08);
+      }
+
+      const osc1 = this.laserOsc1;
+      const osc2 = this.laserOsc2;
+      const lfo = this.laserLfo;
+
+      setTimeout(() => {
+        try {
+          osc1?.stop();
+          osc1?.disconnect();
+          osc2?.stop();
+          osc2?.disconnect();
+          lfo?.stop();
+          lfo?.disconnect();
+        } catch {}
+      }, 90);
+
+      this.isLaserAudioRunning = false;
+      this.laserOsc1 = null;
+      this.laserOsc2 = null;
+      this.laserLfo = null;
+      this.laserGain = null;
+    } catch (e) {
+      this.isLaserAudioRunning = false;
+    }
   }
 
   // Emergency Alert Sound
