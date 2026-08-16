@@ -79,12 +79,17 @@ latest_frame_bytes: Optional[bytes] = None
 is_camera_live: bool = False
 
 
+def get_camera_backend() -> int:
+    return cv2.CAP_DSHOW if sys.platform.startswith("win") else cv2.CAP_ANY
+
+
 def scan_available_cameras() -> List[Dict[str, Any]]:
-    """Scan and probe system video capture devices (indices 0..5) and simulation mode"""
+    """Scan and probe system video capture devices (indices 0..2) and simulation mode"""
     global cap, current_camera_id, is_camera_live
     cams = []
+    backend = get_camera_backend()
 
-    for idx in range(6):
+    for idx in range(3):
         try:
             if is_camera_live and current_camera_id == idx and cap is not None and cap.isOpened():
                 w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or VisionConfig.FRAME_WIDTH)
@@ -100,7 +105,7 @@ def scan_available_cameras() -> List[Dict[str, Any]]:
                 })
                 continue
 
-            test_cap = cv2.VideoCapture(idx)
+            test_cap = cv2.VideoCapture(idx, backend)
             if test_cap.isOpened():
                 ret, _ = test_cap.read()
                 if ret:
@@ -138,7 +143,10 @@ def init_camera(preferred_id: int = 0) -> bool:
     global cap, is_camera_live, current_camera_id
     with camera_lock:
         if cap is not None and cap.isOpened():
-            cap.release()
+            try:
+                cap.release()
+            except Exception:
+                pass
 
         # If user explicitly picks simulation (-1)
         if preferred_id == -1:
@@ -147,14 +155,14 @@ def init_camera(preferred_id: int = 0) -> bool:
             current_camera_id = -1
             bridge.camera_id = -1
             bridge.is_camera_live = False
-            scan_available_cameras()
             logger.info("[CAMERA] Switched to High-Tech Simulation Feed Mode.")
             return True
 
-        candidate_ids = [preferred_id] if preferred_id is not None else [0, 1, 2]
+        backend = get_camera_backend()
+        candidate_ids = [preferred_id] if preferred_id is not None and preferred_id >= 0 else [0]
         for cam_id in candidate_ids:
             try:
-                test_cap = cv2.VideoCapture(cam_id)
+                test_cap = cv2.VideoCapture(cam_id, backend)
                 if test_cap.isOpened():
                     test_cap.set(cv2.CAP_PROP_FRAME_WIDTH, VisionConfig.FRAME_WIDTH)
                     test_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, VisionConfig.FRAME_HEIGHT)
@@ -167,7 +175,6 @@ def init_camera(preferred_id: int = 0) -> bool:
                         is_camera_live = True
                         bridge.camera_id = cam_id
                         bridge.is_camera_live = True
-                        scan_available_cameras()
                         logger.info(f"[CAMERA] ✓ Successfully opened Camera ID: {cam_id}")
                         return True
                     test_cap.release()
@@ -179,8 +186,7 @@ def init_camera(preferred_id: int = 0) -> bool:
         bridge.camera_id = -1
         current_camera_id = -1
         bridge.is_camera_live = False
-        scan_available_cameras()
-        logger.warning("[CAMERA] No physical camera found. Using high-tech simulation mode.")
+        logger.info("[CAMERA] No physical camera found. Using high-tech simulation mode.")
         return False
 
 # Register callbacks with WebBridge
@@ -519,8 +525,9 @@ async def telemetry_broadcast_loop():
 
 @app.on_event("startup")
 async def startup_event():
-    logger.info("[SERVER] Initializing Camera and Vision Systems...")
-    init_camera(VisionConfig.CAMERA_ID)
+    logger.info("[SERVER] Starting Web Command Center...")
+    # Initialize camera in a non-blocking background thread so server starts instantly
+    threading.Thread(target=lambda: init_camera(VisionConfig.CAMERA_ID), daemon=True).start()
     logger.info("[SERVER] Starting background telemetry broadcaster...")
     asyncio.create_task(telemetry_broadcast_loop())
 
@@ -561,15 +568,31 @@ def switch_camera(camera_id: int):
     return {"success": success, "camera_id": camera_id, "live": is_camera_live}
 
 
-
 # Serve React SPA static build if exists
 webui_dist_path = os.path.join(os.path.dirname(__file__), "webui", "dist")
 if os.path.exists(webui_dist_path):
-    app.mount("/assets", StaticFiles(directory=os.path.join(webui_dist_path, "assets")), name="assets")
+    assets_path = os.path.join(webui_dist_path, "assets")
+    if os.path.exists(assets_path):
+        app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
 
-    @app.get("/")
-    def serve_spa():
+    @app.get("/favicon.svg")
+    def serve_favicon():
+        return FileResponse(os.path.join(webui_dist_path, "favicon.svg"))
+
+    @app.get("/icons.svg")
+    def serve_icons():
+        return FileResponse(os.path.join(webui_dist_path, "icons.svg"))
+
+    @app.get("/{full_path:path}")
+    def serve_spa_catchall(full_path: str):
+        file_path = os.path.join(webui_dist_path, full_path)
+        if full_path and os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
         return FileResponse(os.path.join(webui_dist_path, "index.html"))
+else:
+    @app.get("/")
+    def serve_placeholder():
+        return {"status": "running", "message": "WebUI dist not found. Run 'npm run build' inside webui directory."}
 
 
 def main():
