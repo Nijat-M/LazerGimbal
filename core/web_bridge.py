@@ -45,6 +45,7 @@ class WebBridge:
         self.camera_id: int = VisionConfig.CAMERA_ID
         self.is_camera_live: bool = False
         self.flip_mode: str = getattr(VisionConfig, "FLIP_MODE", "NONE")
+        self.available_cameras: List[Dict[str, Any]] = []
         self.on_switch_camera_cb = None
 
         self.last_broadcast_time = time.monotonic()
@@ -114,12 +115,14 @@ class WebBridge:
             "camera_id": self.camera_id,
             "is_camera_live": self.is_camera_live,
             "flip_mode": self.flip_mode,
+            "available_cameras": self.available_cameras,
             "pid": {
                 "kp": getattr(ControlConfig, "KP", 0.60),
                 "ki": getattr(ControlConfig, "KI", 0.16),
                 "kd": getattr(ControlConfig, "KD", 0.50),
             },
         }
+
 
 
     async def connect_client(self, websocket: WebSocket):
@@ -136,7 +139,16 @@ class WebBridge:
         if not self.active_connections:
             return
 
-        payload = json.dumps(self.get_telemetry_dict())
+        def _json_default(obj):
+            if isinstance(obj, (np.integer, np.int64, np.int32)):
+                return int(obj)
+            elif isinstance(obj, (np.floating, np.float32, np.float64)):
+                return float(obj)
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            return str(obj)
+
+        payload = json.dumps(self.get_telemetry_dict(), default=_json_default)
         dead_connections = set()
 
         for ws in self.active_connections:
@@ -147,6 +159,7 @@ class WebBridge:
 
         for ws in dead_connections:
             self.active_connections.discard(ws)
+
 
     def handle_command(self, cmd_data: Dict[str, Any]):
         """Execute commands received from the WebUI"""
@@ -246,12 +259,17 @@ class WebBridge:
             if self.on_switch_camera_cb:
                 self.on_switch_camera_cb(cam_id)
 
+        elif action == "SCAN_CAMERAS":
+            if getattr(self, "on_scan_cameras_cb", None):
+                self.on_scan_cameras_cb()
+
         elif action == "SET_FLIP_MODE":
             flip = payload.get("flip_mode", "NONE")
             self.flip_mode = flip
             VisionConfig.FLIP_MODE = flip
             if self.vision_worker:
                 self.vision_worker.set_flip_mode(flip)
+
 
 
     def _send_laser_command(self, fire: bool):

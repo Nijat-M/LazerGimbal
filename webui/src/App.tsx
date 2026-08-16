@@ -159,9 +159,12 @@ export function App() {
             cameraId={telemetry.camera_id}
             isCameraLive={telemetry.is_camera_live}
             flipMode={telemetry.flip_mode}
+            availableCameras={telemetry.available_cameras}
             onSwitchCamera={(id) => sendCommand({ action: 'SET_CAMERA', payload: { camera_id: id } })}
             onSetFlipMode={(mode) => sendCommand({ action: 'SET_FLIP_MODE', payload: { flip_mode: mode } })}
+            onRescanCameras={() => sendCommand({ action: 'SCAN_CAMERAS' })}
           />
+
 
           {/* Tactical Weapon & Mode Controls (Directly Under Video Feed) */}
           <ControlCenter

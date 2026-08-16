@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { HudOverlay } from './HudOverlay';
-import type { TargetDetection } from '../types/telemetry';
+import type { TargetDetection, CameraDevice } from '../types/telemetry';
 import {
   Maximize2,
   Minimize2,
@@ -12,6 +12,9 @@ import {
   Camera,
   RotateCw,
   Tv,
+  RefreshCw,
+  CheckCircle2,
+  Radio,
 } from 'lucide-react';
 import { soundManager } from '../utils/audioEffects';
 
@@ -30,8 +33,10 @@ interface VideoFeedProps {
   cameraId?: number;
   isCameraLive?: boolean;
   flipMode?: string;
+  availableCameras?: CameraDevice[];
   onSwitchCamera?: (id: number) => void;
   onSetFlipMode?: (mode: 'NONE' | '180' | 'V' | 'H') => void;
+  onRescanCameras?: () => void;
 }
 
 export const VideoFeed: React.FC<VideoFeedProps> = ({
@@ -49,13 +54,16 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({
   cameraId = 0,
   isCameraLive = false,
   flipMode = 'NONE',
+  availableCameras = [],
   onSwitchCamera,
   onSetFlipMode,
+  onRescanCameras,
 }) => {
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [streamError, setStreamError] = useState<boolean>(false);
   const [showCamMenu, setShowCamMenu] = useState<boolean>(false);
+  const [isScanning, setIsScanning] = useState<boolean>(false);
 
   const toggleFullscreen = () => {
     const el = document.getElementById('tactical-video-container');
@@ -74,12 +82,30 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({
     soundManager.setMuted(newMuted);
   };
 
-  const cameraOptions = [
-    { id: 0, label: '📷 CAM 0: Ana Kamera (Built-in / USB)' },
-    { id: 1, label: '📷 CAM 1: Gimbal EO/IR Kamera' },
-    { id: 2, label: '📷 CAM 2: Harici USB Kamera' },
-    { id: -1, label: '🛸 SİMÜLASYON: Taktiksel Hedef Modu' },
+  const handleRescan = async () => {
+    setIsScanning(true);
+    soundManager.playClick();
+    if (onRescanCameras) {
+      onRescanCameras();
+    } else {
+      try {
+        await fetch('/api/cameras/scan', { method: 'POST' });
+      } catch (e) {
+        console.warn('Failed to trigger camera scan:', e);
+      }
+    }
+    setTimeout(() => setIsScanning(false), 1200);
+  };
+
+  // Default camera fallback list if no active scan yet
+  const defaultCameras: CameraDevice[] = [
+    { id: 0, name: 'Kamera 0 (Dahili / USB Ana Kamera)', resolution: '1280x720', fps: 30, is_live: true },
+    { id: 1, name: 'Kamera 1 (Harici Gimbal / EO Kamera)', resolution: '1280x720', fps: 30, is_live: true },
+    { id: 2, name: 'Kamera 2 (USB Video Aygıtı)', resolution: '640x480', fps: 30, is_live: true },
+    { id: -1, name: 'Simülasyon / Test Akışı', resolution: '640x480', fps: 30, is_live: false },
   ];
+
+  const cameraList = availableCameras.length > 0 ? availableCameras : defaultCameras;
 
   const flipOptions: Array<{ mode: 'NONE' | '180' | 'V' | 'H'; label: string }> = [
     { mode: 'NONE', label: 'Normal (0°)' },
@@ -161,66 +187,102 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({
             </div>
           )}
 
-          {/* Camera Selector Dropdown Trigger */}
+          {/* Camera Device Selector Dropdown Trigger Button */}
           <button
             onClick={() => setShowCamMenu(!showCamMenu)}
-            title="Kamera ve Görüntü Ayarları"
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-black/70 hover:bg-cyan-950 border border-cyan-500/40 rounded text-cyan-300 text-xs font-mono transition-colors"
+            title="Kamera Aygıt Seçimi & Ayarları"
+            className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-mono font-bold transition-all border ${
+              showCamMenu
+                ? 'bg-cyan-500/30 border-cyan-400 text-cyan-200 glow-cyan'
+                : 'bg-black/70 hover:bg-cyan-950/80 border-cyan-500/40 text-cyan-300'
+            }`}
           >
             <Camera className="w-3.5 h-3.5 text-cyan-400" />
             <span>
-              {cameraId === -1 ? 'SİMÜLASYON' : isCameraLive ? `CAM ${cameraId} (LIVE)` : `CAM ${cameraId}`}
+              {cameraId === -1 ? 'SİMÜLASYON' : isCameraLive ? `KAMERA ${cameraId} (CANLI)` : `KAMERA ${cameraId}`}
             </span>
           </button>
 
-          {/* Camera Selection Popup Modal / Dropdown */}
+          {/* Comprehensive Camera Selection Popup Modal / Dropdown */}
           {showCamMenu && (
-            <div className="absolute right-0 top-9 w-64 bg-[#070e1c] border border-cyan-500/50 rounded-xl p-3 shadow-2xl z-50 flex flex-col gap-2 font-mono text-xs text-cyan-200">
-              <div className="flex items-center justify-between border-b border-cyan-500/30 pb-1.5 text-cyan-400 font-bold">
-                <span className="flex items-center gap-1">
-                  <Tv className="w-3.5 h-3.5" /> KAMERA SEÇİMİ
-                </span>
-                <button
-                  onClick={() => setShowCamMenu(false)}
-                  className="text-cyan-500 hover:text-white"
-                >
-                  ✕
-                </button>
+            <div className="absolute right-0 top-9 w-80 bg-[#070e1c]/95 backdrop-blur-xl border border-cyan-500/60 rounded-xl p-3.5 shadow-2xl z-50 flex flex-col gap-3 font-mono text-xs text-cyan-200">
+              {/* Header with Rescan Button */}
+              <div className="flex items-center justify-between border-b border-cyan-500/30 pb-2">
+                <div className="flex items-center gap-1.5 text-cyan-300 font-bold text-xs">
+                  <Tv className="w-4 h-4 text-cyan-400" />
+                  <span>KAMERA AYGIT SEÇİMİ</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={handleRescan}
+                    disabled={isScanning}
+                    title="Bağlı Kameraları Yeniden Tara"
+                    className="p-1 bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 rounded text-cyan-300 transition-colors flex items-center gap-1 text-[10px]"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isScanning ? 'animate-spin text-amber-400' : 'text-cyan-400'}`} />
+                    <span>{isScanning ? 'TARANIYOR...' : 'YENİDEN TARA'}</span>
+                  </button>
+                  <button
+                    onClick={() => setShowCamMenu(false)}
+                    className="p-1 text-cyan-500 hover:text-white rounded hover:bg-cyan-950"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
 
-              {/* Camera List */}
-              <div className="flex flex-col gap-1">
-                {cameraOptions.map((opt) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => {
-                      if (onSwitchCamera) onSwitchCamera(opt.id);
-                      setShowCamMenu(false);
-                    }}
-                    className={`p-2 rounded text-left transition-colors border ${
-                      cameraId === opt.id
-                        ? 'bg-cyan-950 border-cyan-400 text-cyan-200 font-bold'
-                        : 'bg-black/30 border-transparent hover:bg-cyan-950/50 text-cyan-400'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
+              {/* Dynamic Camera Devices List */}
+              <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto pr-1">
+                {cameraList.map((cam) => {
+                  const isSelected = cameraId === cam.id;
+                  return (
+                    <button
+                      key={cam.id}
+                      onClick={() => {
+                        if (onSwitchCamera) onSwitchCamera(cam.id);
+                        setShowCamMenu(false);
+                      }}
+                      className={`p-2.5 rounded-lg text-left transition-all border flex items-center justify-between ${
+                        isSelected
+                          ? 'bg-cyan-950/90 border-cyan-400 text-cyan-100 glow-cyan font-bold'
+                          : 'bg-black/40 border-cyan-500/20 hover:bg-cyan-950/50 text-cyan-400'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {cam.id === -1 ? (
+                          <Radio className={`w-3.5 h-3.5 ${isSelected ? 'text-cyan-300' : 'text-cyan-600'}`} />
+                        ) : (
+                          <Camera className={`w-3.5 h-3.5 ${isSelected ? 'text-cyan-300' : 'text-cyan-600'}`} />
+                        )}
+                        <div className="flex flex-col">
+                          <span className="text-[11px] leading-tight">{cam.name}</span>
+                          {cam.resolution && (
+                            <span className="text-[9px] text-cyan-500">
+                              {cam.resolution} @ {cam.fps || 30} FPS
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {isSelected && <CheckCircle2 className="w-4 h-4 text-cyan-300" />}
+                    </button>
+                  );
+                })}
               </div>
 
               {/* Image Orientation Flip Selection */}
-              <div className="border-t border-cyan-500/20 pt-2 flex flex-col gap-1">
-                <span className="text-[10px] text-cyan-400 flex items-center gap-1">
-                  <RotateCw className="w-3 h-3" /> GÖRÜNTÜ YÖNÜ / FLIP:
+              <div className="border-t border-cyan-500/20 pt-2.5 flex flex-col gap-1.5">
+                <span className="text-[10px] text-cyan-400 flex items-center gap-1 font-bold">
+                  <RotateCw className="w-3 h-3 text-cyan-400" /> GÖRÜNTÜ YÖNÜ / FLIP AYARI:
                 </span>
-                <div className="grid grid-cols-2 gap-1">
+                <div className="grid grid-cols-2 gap-1.5">
                   {flipOptions.map((f) => (
                     <button
                       key={f.mode}
                       onClick={() => {
                         if (onSetFlipMode) onSetFlipMode(f.mode);
                       }}
-                      className={`p-1.5 rounded text-[10px] text-center border ${
+                      className={`py-1.5 px-2 rounded text-[10px] text-center border transition-colors ${
                         flipMode === f.mode
                           ? 'bg-cyan-900/80 border-cyan-400 text-white font-bold'
                           : 'bg-black/40 border-cyan-500/20 text-cyan-400 hover:bg-cyan-950/40'

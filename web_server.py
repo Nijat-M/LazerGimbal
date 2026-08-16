@@ -79,24 +79,80 @@ latest_frame_bytes: Optional[bytes] = None
 is_camera_live: bool = False
 
 
+def scan_available_cameras() -> List[Dict[str, Any]]:
+    """Scan and probe system video capture devices (indices 0..5) and simulation mode"""
+    global cap, current_camera_id, is_camera_live
+    cams = []
+
+    for idx in range(6):
+        try:
+            if is_camera_live and current_camera_id == idx and cap is not None and cap.isOpened():
+                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or VisionConfig.FRAME_WIDTH)
+                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or VisionConfig.FRAME_HEIGHT)
+                fps = int(cap.get(cv2.CAP_PROP_FPS) or VisionConfig.TARGET_FPS)
+                cams.append({
+                    "id": idx,
+                    "name": f"Kamera {idx} (Aktif Aygıt)",
+                    "resolution": f"{w}x{h}",
+                    "fps": fps if fps > 0 else 30,
+                    "is_live": True,
+                    "is_selected": True,
+                })
+                continue
+
+            test_cap = cv2.VideoCapture(idx)
+            if test_cap.isOpened():
+                ret, _ = test_cap.read()
+                if ret:
+                    w = int(test_cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 640)
+                    h = int(test_cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 480)
+                    fps = int(test_cap.get(cv2.CAP_PROP_FPS) or 30)
+                    cams.append({
+                        "id": idx,
+                        "name": f"Kamera {idx} (USB / Dahili)",
+                        "resolution": f"{w}x{h}",
+                        "fps": fps if fps > 0 else 30,
+                        "is_live": True,
+                        "is_selected": (current_camera_id == idx),
+                    })
+                test_cap.release()
+        except Exception as e:
+            logger.debug(f"[CAMERA SCAN] Probe failed on cam {idx}: {e}")
+
+    # Add Simulation Mode
+    cams.append({
+        "id": -1,
+        "name": "Simülasyon / Test Akışı",
+        "resolution": f"{VisionConfig.FRAME_WIDTH}x{VisionConfig.FRAME_HEIGHT}",
+        "fps": VisionConfig.TARGET_FPS,
+        "is_live": False,
+        "is_selected": (current_camera_id == -1),
+    })
+
+    bridge.available_cameras = cams
+    return cams
+
+
 def init_camera(preferred_id: int = 0) -> bool:
-    """Initialize physical camera device"""
+    """Initialize physical camera device or simulation"""
     global cap, is_camera_live, current_camera_id
     with camera_lock:
         if cap is not None and cap.isOpened():
             cap.release()
 
-        # If user explicitly picks simulation (-1), switch to simulation
+        # If user explicitly picks simulation (-1)
         if preferred_id == -1:
             cap = None
             is_camera_live = False
             current_camera_id = -1
             bridge.camera_id = -1
             bridge.is_camera_live = False
+            scan_available_cameras()
             logger.info("[CAMERA] Switched to High-Tech Simulation Feed Mode.")
             return True
 
-        for cam_id in [preferred_id, 0, 1, 2]:
+        candidate_ids = [preferred_id] if preferred_id is not None else [0, 1, 2]
+        for cam_id in candidate_ids:
             try:
                 test_cap = cv2.VideoCapture(cam_id)
                 if test_cap.isOpened():
@@ -111,6 +167,7 @@ def init_camera(preferred_id: int = 0) -> bool:
                         is_camera_live = True
                         bridge.camera_id = cam_id
                         bridge.is_camera_live = True
+                        scan_available_cameras()
                         logger.info(f"[CAMERA] ✓ Successfully opened Camera ID: {cam_id}")
                         return True
                     test_cap.release()
@@ -119,12 +176,18 @@ def init_camera(preferred_id: int = 0) -> bool:
 
         cap = None
         is_camera_live = False
+        bridge.camera_id = -1
+        current_camera_id = -1
         bridge.is_camera_live = False
+        scan_available_cameras()
         logger.warning("[CAMERA] No physical camera found. Using high-tech simulation mode.")
         return False
 
-# Register callback with WebBridge
+# Register callbacks with WebBridge
 bridge.on_switch_camera_cb = init_camera
+bridge.on_scan_cameras_cb = scan_available_cameras
+
+
 
 
 
@@ -473,10 +536,30 @@ def list_serial_ports():
     return {"ports": ports}
 
 
+@app.get("/api/cameras")
+def list_cameras():
+    return {
+        "cameras": bridge.available_cameras if bridge.available_cameras else scan_available_cameras(),
+        "active_camera_id": current_camera_id,
+        "is_camera_live": is_camera_live,
+    }
+
+
+@app.post("/api/cameras/scan")
+def scan_cameras_endpoint():
+    cams = scan_available_cameras()
+    return {
+        "cameras": cams,
+        "active_camera_id": current_camera_id,
+        "is_camera_live": is_camera_live,
+    }
+
+
 @app.post("/api/camera/switch")
 def switch_camera(camera_id: int):
     success = init_camera(camera_id)
     return {"success": success, "camera_id": camera_id, "live": is_camera_live}
+
 
 
 # Serve React SPA static build if exists

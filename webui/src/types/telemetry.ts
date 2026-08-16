@@ -7,6 +7,15 @@ export interface TargetDetection {
   distance_m?: number;
 }
 
+export interface CameraDevice {
+  id: number;
+  name: string;
+  resolution?: string;
+  fps?: number;
+  is_live: boolean;
+  is_selected?: boolean;
+}
+
 export interface TelemetryData {
   timestamp: number;
   connected: boolean;
@@ -29,6 +38,7 @@ export interface TelemetryData {
   camera_id?: number;
   is_camera_live?: boolean;
   flip_mode?: 'NONE' | '180' | 'V' | 'H';
+  available_cameras?: CameraDevice[];
   pid: {
     kp: number;
     ki: number;
@@ -37,7 +47,7 @@ export interface TelemetryData {
 }
 
 export interface SystemCommand {
-  action: 
+  action:
     | 'SET_MODE'
     | 'MANUAL_JOG'
     | 'ARM_LASER'
@@ -49,7 +59,7 @@ export interface SystemCommand {
     | 'CONNECT_SERIAL'
     | 'DISCONNECT_SERIAL'
     | 'SET_CAMERA'
-    | 'SET_FLIP_MODE';
+    | 'SET_FLIP_MODE'
+    | 'SCAN_CAMERAS';
   payload?: any;
 }
-
