@@ -88,13 +88,15 @@ def iff_analiz(frame_bgr, box):
     max_color = max(kirmizi, mavi)
     oran = max_color / total
 
-    # 判定规则
-    if max_color < 8 or oran < MIN_RENK_ORANI:
+    # 判定规则 (自适应微小尺寸目标/细长导弹)
+    min_px = 4 if total < 500 else 6
+    min_ratio = 0.020 if total < 500 else MIN_RENK_ORANI
+    if max_color < min_px or oran < min_ratio:
         return NEUTRAL, kirmizi, mavi, oran
 
-    if mavi >= 8 and (mavi > kirmizi * BASKINLIK or kirmizi < 6):
+    if mavi >= min_px and (mavi > kirmizi * BASKINLIK or kirmizi < 4):
         return FRIENDLY, kirmizi, mavi, oran
-    if kirmizi >= 8 and (kirmizi > mavi * BASKINLIK or mavi < 6):
+    if kirmizi >= min_px and (kirmizi > mavi * BASKINLIK or mavi < 4):
         return ENEMY, kirmizi, mavi, oran
 
     if mavi > kirmizi:

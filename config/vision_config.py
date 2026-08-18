@@ -129,6 +129,24 @@ class VisionConfig:
         return (cls.CENTER_OFFSET_X, cls.CENTER_OFFSET_Y,
                 cls.PARALLAX_X_AT_1M, cls.PARALLAX_Y_AT_1M)
 
+    # calibration_panel.py'nin bekledigi kisa adlar / 面板期望的简写接口
+    @classmethod
+    def get_center_x(cls):
+        """Nisangahin ekrandaki X'i (offset uygulanmis) / 十字线屏幕 X（含偏移）"""
+        return cls.aim_point(cls.AKTIF_MESAFE_M)[0]
+
+    @classmethod
+    def get_center_y(cls):
+        return cls.aim_point(cls.AKTIF_MESAFE_M)[1]
+
+    @classmethod
+    def save_calibration(cls):
+        try:
+            cls.save_crosshair_calibration()
+            return True
+        except Exception:
+            return False
+
     @classmethod
     def load_crosshair_calibration(cls):
         import json, os

@@ -39,7 +39,7 @@ try:
     from gui.test_panel import TestModePanel
     from gui.widgets import (
         CameraView, CameraPanel, SerialPanel, ModePanel,
-        PIDTuner, ControlPanel, MouseControlPanel, DetectionPanel
+        PIDTuner, ControlPanel, MouseControlPanel, DetectionPanel, CrosshairCalibrationPanel
     )
 except ImportError:
     sys.path.append("..")
@@ -51,7 +51,7 @@ except ImportError:
     from gui.test_panel import TestModePanel
     from gui.widgets import (
         CameraView, CameraPanel, SerialPanel, ModePanel,
-        PIDTuner, ControlPanel, MouseControlPanel, DetectionPanel
+        PIDTuner, ControlPanel, MouseControlPanel, DetectionPanel, CrosshairCalibrationPanel
     )
 
 class MainWindow(QMainWindow):
@@ -71,6 +71,11 @@ class MainWindow(QMainWindow):
         self.resize(1260, 820)
         self.setMinimumSize(960, 640)
         self.is_camera_fullscreen = False
+
+        # Kayitli boresight kalibrasyonunu yukle (lazer-kamera es eksenli degil)
+        # 启动时加载保存的光轴校准（相机和激光不同轴，必须补偿）
+        from config.vision_config import VisionConfig
+        VisionConfig.load_crosshair_calibration()
 
         # [核心线程和控制器]
         self.serial_thread = SerialThread()
@@ -175,6 +180,11 @@ class MainWindow(QMainWindow):
         self.detection_panel.setVisible(False)
         right_layout.addWidget(self.detection_panel)
 
+        # Lazer-Kamera boresight kalibrasyon paneli
+        # 激光-相机光轴校准面板
+        self.calibration_panel = CrosshairCalibrationPanel()
+        right_layout.addWidget(self.calibration_panel)
+
         # 4. PID 调参面板
         self.pid_tuner = PIDTuner(
             initial_kp=cfg.PID_KP,
@@ -231,6 +241,7 @@ class MainWindow(QMainWindow):
         self.vision_thread.stats_signal.connect(self.camera_panel.update_vision_stats)
         self.vision_thread.camera_state_signal.connect(self.on_camera_state_changed)
         self.vision_thread.iff_signal.connect(self.on_iff_update)
+        self.calibration_panel.offset_changed.connect(self.on_crosshair_offset)
         self.vision_thread.detections_signal.connect(self.detection_panel.update_detections)
         # 物体追踪模式发送目标原始坐标，误差由控制器计算
         self.vision_thread.target_pos_signal.connect(self.controller.handle_target_position)
@@ -422,6 +433,11 @@ class MainWindow(QMainWindow):
             else f"Mode: {mode}"
         )
     
+    def on_crosshair_offset(self, ox: int, oy: int):
+        """Boresight offset degisti -> hem cizim hem nisan alma bundan etkilenir."""
+        logger.info(f"[GUI] Boresight offset: dX={ox:+d} dY={oy:+d}")
+        self.status_label.setText(f"Boresight: dX={ox:+d}  dY={oy:+d}")
+
     def on_iff_update(self, info: dict):
         """Yetenek 7: vision thread'den gelen dost/dusman durumu -> panel"""
         self.detection_panel.update_iff(info)

@@ -37,15 +37,141 @@ class YOLODetectionResult:
     all_targets: List[YOLOSingleResult] = None
 
 
+class TemporalBoxTracker:
+    """
+    时域目标生命周期与防抖平滑追踪器 (Anti-Jitter & Temporal EMA Smoother)
+    - 解决 F-16 / 战机高频边界抖动与置信度跳跃问题 (EMA 65% 历史加权)
+    - 解决 导弹 (BALISTIK_FUZE) 等细长/小目标瞬时漏检与闪烁问题
+    """
+    def __init__(self, max_lost_frames: int = 6, iou_thresh: float = 0.15, dist_thresh: float = 120.0):
+        self.max_lost_frames = max_lost_frames
+        self.iou_thresh = iou_thresh
+        self.dist_thresh = dist_thresh
+        self.tracks = {}  # track_id -> dict
+        self.next_id = 1
+
+    @staticmethod
+    def _iou(box1, box2):
+        x1 = max(box1[0], box2[0])
+        y1 = max(box1[1], box2[1])
+        x2 = min(box1[2], box2[2])
+        y2 = min(box1[3], box2[3])
+        inter = max(0, x2 - x1) * max(0, y2 - y1)
+        area1 = max(1, (box1[2] - box1[0]) * (box1[3] - box1[1]))
+        area2 = max(1, (box2[2] - box2[0]) * (box2[3] - box2[1]))
+        union = area1 + area2 - inter
+        return inter / max(1, union)
+
+    def update(self, raw_targets: List[YOLOSingleResult]) -> List[YOLOSingleResult]:
+        matched_track_ids = set()
+        matched_raw_indices = set()
+
+        for idx, t in enumerate(raw_targets):
+            best_id = None
+            best_iou = self.iou_thresh
+            best_dist = self.dist_thresh
+
+            d_box = t.box
+            d_cx = t.position[0]
+            d_cy = t.position[1]
+
+            for tid, track in self.tracks.items():
+                if tid in matched_track_ids:
+                    continue
+                t_box = track["box"]
+                t_cx = track["position"][0]
+                t_cy = track["position"][1]
+
+                iou_val = self._iou(d_box, t_box)
+                dist_val = math.hypot(d_cx - t_cx, d_cy - t_cy)
+                same_cls = (t.class_id == track["class_id"])
+
+                if (iou_val > best_iou) or (same_cls and dist_val < best_dist):
+                    best_iou = iou_val
+                    best_dist = dist_val
+                    best_id = tid
+
+            if best_id is not None:
+                matched_track_ids.add(best_id)
+                matched_raw_indices.add(idx)
+                track = self.tracks[best_id]
+                track["hits"] += 1
+                track["lost"] = 0
+                track["confirmed"] = True
+
+                # EMA 平滑坐标框 (35% 新 + 65% 旧) -> 彻底消除抖动
+                nb = t.box
+                ob = track["box"]
+                smooth_box = (
+                    int(0.35 * nb[0] + 0.65 * ob[0]),
+                    int(0.35 * nb[1] + 0.65 * ob[1]),
+                    int(0.35 * nb[2] + 0.65 * ob[2]),
+                    int(0.35 * nb[3] + 0.65 * ob[3]),
+                )
+                smooth_pos = (
+                    (smooth_box[0] + smooth_box[2]) // 2,
+                    (smooth_box[1] + smooth_box[3]) // 2,
+                )
+                track["box"] = smooth_box
+                track["position"] = smooth_pos
+                # 平滑置信度
+                track["confidence"] = 0.30 * t.confidence + 0.70 * track["confidence"]
+                track["class_id"] = t.class_id
+                track["class_name"] = t.class_name
+
+        # 新增 Track
+        for idx, t in enumerate(raw_targets):
+            if idx not in matched_raw_indices:
+                tid = self.next_id
+                self.next_id += 1
+                self.tracks[tid] = {
+                    "position": t.position,
+                    "box": t.box,
+                    "class_id": t.class_id,
+                    "confidence": t.confidence,
+                    "class_name": t.class_name,
+                    "hits": 1,
+                    "lost": 0,
+                    "confirmed": (t.confidence >= 0.25),
+                }
+
+        # 丢帧衰减与保活
+        dead_ids = []
+        for tid, track in self.tracks.items():
+            if tid not in matched_track_ids:
+                track["lost"] += 1
+                track["confidence"] *= 0.94
+                if track["lost"] > self.max_lost_frames:
+                    dead_ids.append(tid)
+
+        for tid in dead_ids:
+            del self.tracks[tid]
+
+        # 输出确认的目标列表
+        result_targets: List[YOLOSingleResult] = []
+        for track in self.tracks.values():
+            if track["confirmed"] or track["hits"] >= 2:
+                result_targets.append(YOLOSingleResult(
+                    position=track["position"],
+                    box=track["box"],
+                    class_id=track["class_id"],
+                    confidence=track["confidence"],
+                    class_name=track["class_name"]
+                ))
+
+        result_targets.sort(key=lambda x: x.confidence, reverse=True)
+        return result_targets
+
+
 class YOLODetector:
     """
     YOLO 深度学习目标检测引擎
     
     支持:
-    - 针对国防防空模型 (savunma_yolo26.pt) 与通用模型 (yolo26n.pt / yolov8n.pt) 的自动发现与动态热切换
+    - 针对国防防空模型 (savunma_yolo26.pt / yetenek6_best.pt) 与通用模型 (yolo26n.pt / yolov8n.pt) 的自动发现与动态热切换
     - 目标类别过滤 (如单独追踪 BALISTIK_FUZE, F16, HELIKOPTER, MINI_IHA)
     - 动态调节置信度阈值
-    - 目标锁定最近距离优先算法 (Anti-Jitter)
+    - 时域防抖平滑追踪算法 (Anti-Jitter EMA Filter)
     """
 
     @classmethod
@@ -77,13 +203,13 @@ class YOLODetector:
 
         # 默认备选模型（防空模型优先，通用模型次之）
         candidates.extend([
-            models_dir / "savunma_yolo26.pt",
             models_dir / "yetenek6_best.pt",
+            models_dir / "savunma_yolo26.pt",
             models_dir / "yolo26n.pt",
             models_dir / "yolov8n.pt",
             models_dir / "yolo11n.pt",
-            project_root / "savunma_yolo26.pt",
             project_root / "yetenek6_best.pt",
+            project_root / "savunma_yolo26.pt",
             project_root / "yolo26n.pt",
             project_root / "yolov8n.pt"
         ])
@@ -112,10 +238,10 @@ class YOLODetector:
                         rel_path = f"vision/models/{pt_file.name}" if pt_file.parent == models_dir else pt_file.name
                         
                         # 友好描述
-                        if "savunma" in pt_file.name.lower():
-                            display_name = f"{pt_file.name} (Air Defense Model / 4 Classes)"
-                        elif "yetenek" in pt_file.name.lower():
+                        if "yetenek" in pt_file.name.lower():
                             display_name = f"{pt_file.name} (Air Defense Target / 4 Classes)"
+                        elif "savunma" in pt_file.name.lower():
+                            display_name = f"{pt_file.name} (Air Defense Model / 4 Classes)"
                         elif "yolo26n" in pt_file.name.lower():
                             display_name = f"{pt_file.name} (COCO General / 80 Classes)"
                         elif "yolov8" in pt_file.name.lower():
@@ -132,17 +258,19 @@ class YOLODetector:
 
         # 确保 savunma / yetenek 防空模型排在最前面
         found_models.sort(key=lambda m: (
-            0 if "savunma" in m["filename"].lower() else (1 if "yetenek" in m["filename"].lower() else 2),
+            0 if "yetenek" in m["filename"].lower() else (1 if "savunma" in m["filename"].lower() else 2),
             m["filename"]
         ))
         return found_models
 
-    def __init__(self, model_path: str = "vision/models/savunma_yolo26.pt", conf_threshold: float = 0.50):
+    def __init__(self, model_path: str = "vision/models/yetenek6_best.pt", conf_threshold: float = 0.30):
         self.model = None
         self.current_model_path: Optional[str] = None
         self.conf_threshold: float = conf_threshold
-        self.min_box_size: int = 16
-        self.imgsz: int = 640
+        self.min_box_size: int = 4  # 极小框容差，支持细长导弹 (Missile) 与小微无人机
+        self.imgsz: int = 960
+        self.tracker = TemporalBoxTracker(max_lost_frames=6, iou_thresh=0.15, dist_thresh=120.0)
+
         # 硬件加速设备检测 (RTX GPU / CUDA 极速加速)
         try:
             import torch
@@ -156,13 +284,12 @@ class YOLODetector:
         except Exception:
             self.device = "cpu"
 
-        # 目标锁定状态记录与平滑追踪器
+        # 目标锁定状态记录
         self.locked_target_position: Optional[Tuple[int, int]] = None
         self.locked_target_class: Optional[int] = None
-        self.locked_target_smooth_pos: Optional[Tuple[float, float]] = None
         self.lost_frames = 0
-        self.max_lost_frames = 10  # 丢失多少帧后认为目标彻底丢失，重新寻找全局最优
-        self.lock_distance_threshold = 180  # 锁定追踪的最大跳变距离 (像素)
+        self.max_lost_frames = 10
+        self.lock_distance_threshold = 200
 
         # 加载初始模型
         self.load_model(model_path)
@@ -178,7 +305,6 @@ class YOLODetector:
 
         resolved_path = self.resolve_model_path(model_path)
         if resolved_path is None:
-            # 尝试回退加载 yolo26n.pt
             resolved_path = "yolo26n.pt"
             logger.warning(f"[YOLO] 未找到指定模型 {model_path}，回退到自动在线模型: {resolved_path}")
 
@@ -187,13 +313,12 @@ class YOLODetector:
             self.current_model_path = resolved_path
             model_name = os.path.basename(resolved_path)
             
-            # 国防防空模型在 GPU 上优先使用训练尺寸 (960)，通用模型使用 640
+            # 防空模型在 GPU 上使用高清 960 尺寸，确保远距细长导弹高分辨率特征保留
             if ("savunma" in resolved_path.lower() or "yetenek" in resolved_path.lower()) and self.device.startswith("cuda"):
                 self.imgsz = 960
             else:
                 self.imgsz = 640
 
-            # 读取类别名称
             class_names = self.get_class_names()
             names_summary = ", ".join([f"{k}:{v}" for k, v in list(class_names.items())[:6]])
             if len(class_names) > 6:
@@ -202,10 +327,10 @@ class YOLODetector:
             logger.info(f"[YOLO] ✓ 成功载入模型 ({model_name} @ imgsz={self.imgsz}): {resolved_path}")
             logger.info(f"[YOLO]   支持类别: [{names_summary}]")
             
-            # 重置锁定状态
+            # 重置锁定状态与追踪器
+            self.tracker = TemporalBoxTracker(max_lost_frames=6, iou_thresh=0.15, dist_thresh=120.0)
             self.locked_target_position = None
             self.locked_target_class = None
-            self.locked_target_smooth_pos = None
             self.lost_frames = 0
             return True
         except Exception as e:
@@ -226,20 +351,21 @@ class YOLODetector:
         conf_threshold: Optional[float] = None
     ) -> YOLODetectionResult:
         """
-        多目标检测与战术追踪锁定 (抗误识别 + 平滑去抖)
+        多目标检测与战术追踪锁定 (时域平滑去抖 + 细长导弹增强检出)
         
         Args:
             frame: 输入 BGR 图像
-            target_class: 过滤目标类别 (None 表示追踪所有类别，int 为类别ID，str 为类别名称)
-            conf_threshold: 置信度阈值 (None 则使用实例默认值)
+            target_class: 过滤目标类别 (None 表示追踪所有类别)
+            conf_threshold: 置信度阈值
         """
         if self.model is None:
             return YOLODetectionResult(detected=False, all_targets=[])
 
-        conf = conf_threshold if conf_threshold is not None else self.conf_threshold
+        user_conf = conf_threshold if conf_threshold is not None else self.conf_threshold
+        # 推理时采用自适应敏捷阈值（捕获细小导弹），后续由时域追踪器确认
+        infer_conf = max(0.18, user_conf * 0.65)
         class_names = self.get_class_names()
 
-        # 解析 target_class (如果传入了类别名称字符串，转换为类别 ID)
         target_class_id: Optional[int] = None
         if isinstance(target_class, str):
             for cid, cname in class_names.items():
@@ -255,19 +381,18 @@ class YOLODetector:
                 verbose=False, 
                 device=self.device, 
                 imgsz=self.imgsz, 
-                conf=conf,
-                iou=0.45,
-                max_det=20
+                conf=infer_conf,
+                iou=0.40,
+                max_det=25
             )
         except Exception:
-            # 回退保护
             try:
-                results = self.model(frame, verbose=False, conf=conf)
+                results = self.model(frame, verbose=False, conf=infer_conf)
             except Exception as e:
                 logger.error(f"[YOLO ERROR] 推理执行异常: {e}")
                 return YOLODetectionResult(detected=False, all_targets=[])
 
-        all_targets: List[YOLOSingleResult] = []
+        raw_targets: List[YOLOSingleResult] = []
 
         for r in results:
             boxes = r.boxes
@@ -282,8 +407,8 @@ class YOLODetector:
                     w = x2 - x1
                     h = y2 - y1
 
-                    # 噪点几何过滤：过滤过小碎片/非正常框，防止背景噪点误报
-                    if w < self.min_box_size or h < self.min_box_size or (w * h) < 256:
+                    # 极小噪点过滤（放宽至 4px，允许细长导弹通过）
+                    if w < self.min_box_size or h < self.min_box_size or (w * h) < 16:
                         continue
 
                     cx = (x1 + x2) // 2
@@ -297,7 +422,10 @@ class YOLODetector:
                         confidence=score,
                         class_name=cname
                     )
-                    all_targets.append(target)
+                    raw_targets.append(target)
+
+        # ====== 时域 EMA 平滑滤波 (彻底消除 F-16 抖动并保活导弹) ======
+        all_targets = self.tracker.update(raw_targets)
 
         # --- 目标锁定逻辑：同类别优先 + 距离加权连续追踪 ---
         best_target = None
@@ -311,23 +439,16 @@ class YOLODetector:
                         t.position[1] - self.locked_target_position[1]
                     )
                     if dist < self.lock_distance_threshold:
-                        # 类别一致性权重奖励：如果与上帧目标类别相同，优先锁定
-                        class_penalty = 0.0 if (self.locked_target_class is not None and t.class_id == self.locked_target_class) else 60.0
-                        conf_bonus = t.confidence * 30.0
+                        class_penalty = 0.0 if (self.locked_target_class is not None and t.class_id == self.locked_target_class) else 50.0
+                        conf_bonus = t.confidence * 40.0
                         score = dist + class_penalty - conf_bonus
                         if score < best_score:
                             best_score = score
                             best_target = t
 
-            # 如果没找到上一帧附近的目标，则选择置信度最高的目标作为新锁定目标
             if best_target is None:
-                best_conf = 0.0
-                for t in all_targets:
-                    if t.confidence > best_conf:
-                        best_conf = t.confidence
-                        best_target = t
+                best_target = all_targets[0]
 
-        # 更新锁定的目标状态
         if best_target is not None:
             self.locked_target_position = best_target.position
             self.locked_target_class = best_target.class_id

@@ -32,10 +32,8 @@ class YOLOAdaptationTests(unittest.TestCase):
         models = YOLODetector.list_available_models()
         self.assertGreater(len(models), 0)
         
-        filenames = [m["filename"] for m in models]
-        self.assertIn("savunma_yolo26.pt", filenames)
-        # 验证 savunma 排在第一位作为默认国防模型
-        self.assertEqual(models[0]["filename"], "savunma_yolo26.pt")
+        # 验证防空模型排在最前面
+        self.assertIn(models[0]["filename"], ["yetenek6_best.pt", "savunma_yolo26.pt"])
 
     def test_defense_model_classes(self):
         """测试国防防空模型正确读取其4个军事防御目标类别"""

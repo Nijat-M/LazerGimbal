@@ -13,6 +13,7 @@ from .pid_tuner import PIDTuner
 from .control_panel import ControlPanel
 from .mouse_control_panel import MouseControlPanel
 from .detection_panel import DetectionPanel
+from .calibration_panel import CrosshairCalibrationPanel
 
 __all__ = [
     'CameraView',
@@ -23,4 +24,5 @@ __all__ = [
     'ControlPanel',
     'MouseControlPanel',
     'DetectionPanel',
+    'CrosshairCalibrationPanel',
 ]
