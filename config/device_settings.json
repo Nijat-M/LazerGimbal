@@ -1,6 +1,6 @@
 {
   "camera": {
-    "camera_id": 0,
+    "camera_id": 1,
     "resolution_width": 640,
     "resolution_height": 480,
     "flip_mode": "NONE",

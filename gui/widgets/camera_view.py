@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Camera display with optional FPS-style relative mouse capture."""
 
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QPoint
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QPoint, QSize
 from PyQt6.QtGui import (
     QColor,
     QCursor,
@@ -637,8 +637,11 @@ class CameraView(QWidget):
             self._update_mouse_input_state()
         self.lbl_camera.set_current_frame_size(qt_img.width(), qt_img.height())
         pixmap = QPixmap.fromImage(qt_img)
+        lbl_sz = self.lbl_camera.size()
+        if lbl_sz.width() < 100 or lbl_sz.height() < 100:
+            lbl_sz = QSize(max(480, self.width()), max(360, self.height()))
         scaled = pixmap.scaled(
-            self.lbl_camera.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+            lbl_sz, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
         )
         self.lbl_camera.setPixmap(scaled)
 

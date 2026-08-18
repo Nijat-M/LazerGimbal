@@ -443,7 +443,6 @@ class MainWindow(QMainWindow):
             self.status_label.setText("Camera closed")
         else:
             logger.info("[GUI] User triggered open camera")
-            self.camera_view.set_camera_active(False)
             cam_id = self.camera_panel.get_current_camera_id()
             w, h = self.camera_panel.get_selected_resolution()
             self.vision_thread.switch_camera(cam_id, w, h)
