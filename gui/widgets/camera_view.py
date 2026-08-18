@@ -141,7 +141,9 @@ class MouseAimLabel(QLabel):
             painter.drawEllipse(center, 3, 3)
 
         # 战术状态角标
-        hud_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
+        hud_font = QFont("Segoe UI")
+        hud_font.setPixelSize(12)
+        hud_font.setBold(True)
         painter.setFont(hud_font)
 
         if self.laser_firing:

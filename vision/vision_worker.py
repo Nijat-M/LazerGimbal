@@ -219,8 +219,20 @@ class VisionWorker(QThread):
             logger.info("[VISION] DSHOW后端失败，尝试默认后端...")
             candidate = cv2.VideoCapture(camera_id)
 
+        # 智能容错：如果指定 ID (如 1) 打开失败且不是 0，自动回退尝试 0 (默认主摄)
+        if not candidate.isOpened() and camera_id != 0:
+            logger.warning(f"[VISION] 摄像头 ID={camera_id} 打开失败，自动尝试回退至默认主摄 ID=0...")
+            candidate.release()
+            candidate = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            if not candidate.isOpened():
+                candidate.release()
+                candidate = cv2.VideoCapture(0)
+            if candidate.isOpened():
+                camera_id = 0
+                logger.info("[VISION] ✓ 自动回退至默认主摄 ID=0 成功！")
+
         if not candidate.isOpened():
-            message = f"无法打开摄像头 ID={camera_id}"
+            message = f"无法打开摄像头 ID={camera_id} (请检查设备连接或权限)"
             logger.error(f"[VISION ERROR] {message}")
             candidate.release()
             if self._is_camera_request_current(generation):
