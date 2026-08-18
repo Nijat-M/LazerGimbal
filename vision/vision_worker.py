@@ -34,6 +34,7 @@ from collections import deque
 
 from config.vision_config import VisionConfig
 from vision.detector import TargetDetector
+from vision.iff import iff_analiz, IFF_BGR, IFF_ETIKET, ENEMY, FRIENDLY, NEUTRAL
 from utils.logger import Logger
 
 logger = Logger("VisionWorker")
@@ -55,6 +56,8 @@ class VisionWorker(QThread):
     target_pos_signal = pyqtSignal(int, int)  # 物体追踪原始坐标
     stats_signal = pyqtSignal(float, int, int) # (fps, width, height)
     camera_state_signal = pyqtSignal(int, bool, str) # (request generation, ready, message)
+    iff_signal = pyqtSignal(dict)   # Yetenek 7: dost/dusman durumu / 敌我态势
+    detections_signal = pyqtSignal(list) # Yetenek 6/7: 完整检测目标列表 (给裁判UI表格展示)
 
     def __init__(self):
         super().__init__()
@@ -74,6 +77,16 @@ class VisionWorker(QThread):
         self.yolo_model_path: str = getattr(VisionConfig, "DEFAULT_YOLO_MODEL", "vision/models/savunma_yolo26.pt")
         self.yolo_target_class = getattr(VisionConfig, "YOLO_TARGET_CLASS", None)
         self.yolo_conf_threshold: float = getattr(VisionConfig, "YOLO_CONF_THRESHOLD", 0.35)
+
+        # ---- Yetenek 7: dost/dusman (IFF) ----
+        # iff_enabled=True iken DOST hedef icin target_pos_signal GONDERILMEZ,
+        # yani nisangah dost unsura surulmez. Sartname 2.4.4.1 Yetenek 7'nin
+        # puanlanan davranisi tam olarak budur.
+        # 开启后，友军目标【不会】发出 target_pos_signal，云台不会指向友军。
+        # 这正是规范能力7 要看到的行为。
+        from vision.iff import IFFKarari
+        self.iff_enabled: bool = True
+        self._iff = IFFKarari()
 
         # 状态跟踪（避免重复打印）
         self.blue_object_detected = False   # 蓝色物体检测状态
@@ -114,6 +127,7 @@ class VisionWorker(QThread):
             )
             self.yolo_detector.set_target_class(self.yolo_target_class)
             logger.info("[VISION] YOLO 异步引擎初始化完成。")
+        self._iff.temizle()
         logger.info(f"[VISION] 视觉线程模式: {mode}")
 
     def set_yolo_model(self, model_path: str) -> None:
@@ -434,19 +448,20 @@ class VisionWorker(QThread):
 
     def _process_yolo_tracking(self, frame: cv2.Mat) -> None:
         """
-        YOLO_TRACKING 模式：YOLO 物体居中追踪
+        YOLO_TRACKING 模式：YOLO 目标检测与敌我识别 (IFF) 自主追踪
         
-        发送目标的原始像素坐标，由 GimbalController 计算误差。
-        采用后台异步并发架构，主视觉线程零阻塞，保证相机以 60 FPS 满速流畅采集与显示。
-        特别针对防空国防模型 (savunma_yolo26.pt) 实现了战术防空 HUD 渲染与分级威胁色彩。
+        核心火控规则：
+        1. 严格只瞄准并摧毁红色敌方目标 (ENEMY / RED)；
+        2. 绝对不对蓝色友军 (FRIENDLY / BLUE) 发送云台追踪或开火指令，蓝色友军全程受安全门保护；
+        3. 画面清晰区分敌我：敌方红框锁定引导、友军蓝框高亮保护 (DO NOT FIRE)；
+        4. 全程向 UI 实时推送 4 列详细检测列表与态势判定，为裁判提供最直接的视觉与表格证据。
         """
         if self.yolo_detector is None:
             return
 
-        # 非阻塞提交并获取最新目标锁定结果（主线程耗时 <0.01ms）
         result = self.yolo_detector.detect_target(frame)
 
-        # 画面中心十字线与战术瞄准圆环
+        # 画面中心十字准星与战术瞄准环
         cx = self.frame_width // 2
         cy = self.frame_height // 2
         cv2.line(frame, (cx - 25, cy), (cx + 25, cy), (0, 255, 255), 1)
@@ -454,84 +469,154 @@ class VisionWorker(QThread):
         cv2.circle(frame, (cx, cy), 6, (0, 255, 255), 1)
         cv2.circle(frame, (cx, cy), 40, (0, 180, 255), 1)
 
-        # 类别警戒色映射 (BGR)
-        threat_colors = {
-            "BALISTIK_FUZE": (0, 0, 255),      # 弹道导弹: 极高危 纯红
-            "F16": (0, 140, 255),              # 战机: 高危 亮橙
-            "HELIKOPTER": (0, 215, 255),       # 直升机: 中危 琥珀金
-            "MINI_IHA": (0, 255, 128),         # 小型无人机: 荧光青绿
-        }
-        default_color = (0, 255, 255)         # 默认/其他目标: 明黄
-
-        # 1. 遍历并画出视野里发现的所有目标 (雷达态势探测框)
+        # 1. 收集所有检测到的目标
+        raw_targets = []
         if hasattr(result, 'all_targets') and result.all_targets:
-            for t in result.all_targets:
-                tx1, ty1, tx2, ty2 = t.box
-                t_pos = t.position
+            raw_targets = result.all_targets
+        elif result.detected:
+            from vision.yolo_detector import YOLOSingleResult
+            raw_targets = [YOLOSingleResult(
+                position=result.position,
+                box=result.box,
+                class_id=result.class_id,
+                confidence=result.confidence,
+                class_name=result.class_name
+            )]
+
+        # 2. 遍历所有目标进行 IFF 敌我识别与测距
+        analyzed_targets = []
+        for t in raw_targets:
+            raw_cname = t.class_name if t.class_name else f"Cls_{t.class_id}"
+            display_name = VisionConfig.get_class_display_name(raw_cname)
+            
+            # IFF 颜色识别
+            taraf = NEUTRAL
+            if self.iff_enabled:
+                taraf_raw, _, _, _ = iff_analiz(frame, t.box)
+                t_key = f"{raw_cname}_{t.box[0]//30}_{t.box[1]//30}"
+                taraf = self._iff.guncelle(t_key, taraf_raw)
+
+            # 光学测距估算 (~10m 标准比赛场景)
+            bw = max(t.box[2] - t.box[0], 1)
+            mesafe_m = (self.frame_width * 0.45) / (2.0 * bw * math.tan(math.radians(30.0)))
+            mesafe_m = max(1.0, min(30.0, mesafe_m))
+
+            analyzed_targets.append({
+                "target": t,
+                "raw_name": raw_cname,
+                "display_name": display_name,
+                "sinif": raw_cname,
+                "gorunen": display_name,
+                "guven": float(t.confidence or 0.0),
+                "box": t.box,
+                "position": t.position,
+                "mesafe_m": mesafe_m,
+                "taraf": taraf,
+                "renk": taraf,
+            })
+
+        # 分类统计
+        enemy_list = [d for d in analyzed_targets if d["taraf"] == ENEMY]
+        friendly_list = [d for d in analyzed_targets if d["taraf"] == FRIENDLY]
+        neutral_list = [d for d in analyzed_targets if d["taraf"] == NEUTRAL]
+
+        # 3. 目标火控锁定逻辑：严格只锁定敌方目标 (ENEMY)
+        locked_enemy = None
+        atis_izni = False
+
+        if enemy_list:
+            # 优先选择最靠近十字中心或置信度最高的敌方目标
+            def _enemy_priority(d):
+                dx = d["position"][0] - cx
+                dy = d["position"][1] - cy
+                dist_center = math.hypot(dx, dy)
+                return d["guven"] * 100.0 - (dist_center * 0.05)
+            
+            enemy_list.sort(key=_enemy_priority, reverse=True)
+            locked_enemy = enemy_list[0]
+            atis_izni = True
+
+        # 4. 画面战术 HUD 绘制
+        for d in analyzed_targets:
+            x1, y1, x2, y2 = d["box"]
+            pos = d["position"]
+            conf_pct = int(d["guven"] * 100)
+            disp_name = d["display_name"]
+            taraf = d["taraf"]
+
+            if locked_enemy and d == locked_enemy:
+                # ====== 锁定敌方目标 (RED HOSTILE - ENGAGING) ======
+                c_color = (40, 40, 240) # BGR Red
+                # 绘制四角加厚瞄准角框
+                line_len = min(22, (x2 - x1) // 3, (y2 - y1) // 3)
+                cv2.line(frame, (x1, y1), (x1 + line_len, y1), c_color, 2)
+                cv2.line(frame, (x1, y1), (x1, y1 + line_len), c_color, 2)
+                cv2.line(frame, (x2, y1), (x2 - line_len, y1), c_color, 2)
+                cv2.line(frame, (x2, y1), (x2, y1 + line_len), c_color, 2)
+                cv2.line(frame, (x1, y2), (x1 + line_len, y2), c_color, 2)
+                cv2.line(frame, (x1, y2), (x1, y2 - line_len), c_color, 2)
+                cv2.line(frame, (x2, y2), (x2 - line_len, y2), c_color, 2)
+                cv2.line(frame, (x2, y2), (x2, y2 - line_len), c_color, 2)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), c_color, 1)
+
+                # 中心红点与红色追踪引导箭头 (仅指向敌方)
+                cv2.circle(frame, pos, 5, c_color, -1)
+                cv2.arrowedLine(frame, (cx, cy), pos, c_color, 2, tipLength=0.15)
+
+                # 顶部标签
+                cv2.putText(frame, f"[HOSTILE] {disp_name} ({conf_pct}%)",
+                            (x1, max(20, y1 - 22)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.52, c_color, 2)
+                cv2.putText(frame, f"FIRE AUTHORIZED >> ENEMY | {d['mesafe_m']:.1f}m",
+                            (x1, max(36, y1 - 6)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (60, 60, 255), 1)
+
+            elif taraf == FRIENDLY:
+                # ====== 友军保护目标 (BLUE FRIENDLY - PROTECTED) ======
+                c_color = (240, 180, 40) # BGR Blue / Cyan
+                cv2.rectangle(frame, (x1, y1), (x2, y2), c_color, 2)
+                cv2.circle(frame, pos, 3, c_color, -1)
                 
-                raw_cname = t.class_name if t.class_name else f"Cls_{t.class_id}"
-                c_color = threat_colors.get(raw_cname, default_color)
+                # 顶部标签：明确标明 FRIENDLY - DO NOT FIRE
+                cv2.putText(frame, f"[FRIENDLY] {disp_name} ({conf_pct}%)",
+                            (x1, max(20, y1 - 22)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.50, c_color, 2)
+                cv2.putText(frame, "PROTECTED -- DO NOT FIRE",
+                            (x1, max(36, y1 - 6)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (100, 230, 255), 1)
 
-                # 绘制次要目标线框与中心点
-                cv2.rectangle(frame, (tx1, ty1), (tx2, ty2), c_color, 1)
-                cv2.circle(frame, t_pos, 3, c_color, -1)
-                
-                display_label = f"{raw_cname} {t.confidence:.2f}"
-                cv2.putText(frame, display_label,
-                            (tx1, max(15, ty1 - 5)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, c_color, 1)
+            else:
+                # ====== 未定中立目标 (NEUTRAL) ======
+                c_color = (170, 170, 170)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), c_color, 1)
+                cv2.circle(frame, pos, 3, c_color, -1)
+                cv2.putText(frame, f"{disp_name} ({conf_pct}%)",
+                            (x1, max(20, y1 - 6)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, c_color, 1)
 
-        # 2. 特别高亮画出被“锁定”要追踪的那一个主目标 (战术火控锁定瞄具)
-        if result.detected:
-            pos = result.position
-            x1, y1, x2, y2 = result.box
-            raw_cname = result.class_name if result.class_name else f"Target_{result.class_id}"
-            lock_color = threat_colors.get(raw_cname, (0, 0, 255))
-            
-            # 绘制战术四角包围框 (Corner HUD Reticle)
-            line_len = min(20, (x2 - x1) // 3, (y2 - y1) // 3)
-            # 左上
-            cv2.line(frame, (x1, y1), (x1 + line_len, y1), lock_color, 2)
-            cv2.line(frame, (x1, y1), (x1, y1 + line_len), lock_color, 2)
-            # 右上
-            cv2.line(frame, (x2, y1), (x2 - line_len, y1), lock_color, 2)
-            cv2.line(frame, (x2, y1), (x2, y1 + line_len), lock_color, 2)
-            # 左下
-            cv2.line(frame, (x1, y2), (x1 + line_len, y2), lock_color, 2)
-            cv2.line(frame, (x1, y2), (x1, y2 - line_len), lock_color, 2)
-            # 右下
-            cv2.line(frame, (x2, y2), (x2 - line_len, y2), lock_color, 2)
-            cv2.line(frame, (x2, y2), (x2, y2 - line_len), lock_color, 2)
-
-            # 中心锁定点与追踪引导虚线/箭头
-            cv2.circle(frame, pos, 5, lock_color, -1)
-            cv2.arrowedLine(frame, (cx, cy), pos, (0, 255, 0), 2, tipLength=0.15)
-            
-            # 偏差值与置信度指示
-            dx = pos[0] - cx
-            dy = pos[1] - cy
-            conf_pct = int((result.confidence or 0.0) * 100)
-            lock_header = f"[LOCKED] {raw_cname} ({conf_pct}%)"
-            lock_sub = f"dX:{dx:+d} dY:{dy:+d}"
-            
-            cv2.putText(frame, lock_header,
-                        (x1, max(22, y1 - 20)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, lock_color, 2)
-            cv2.putText(frame, lock_sub,
-                        (x1, max(38, y1 - 5)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 0), 1)
-
+        # 5. 云台驱动控制
+        if atis_izni and locked_enemy:
+            pos = locked_enemy["position"]
             self.target_pos_signal.emit(pos[0], pos[1])
-
             if not self.blue_object_detected:
-                logger.info(f"[VISION] ✓ YOLO 锁定目标: {raw_cname} (置信度: {conf_pct}%)")
+                logger.info(f"[VISION] ✓ YOLO 锁定敌方目标: {locked_enemy['display_name']} (置信度: {int(locked_enemy['guven']*100)}%)")
                 self.blue_object_detected = True
         else:
             if self.blue_object_detected:
-                logger.info("[VISION] ✗ YOLO: 未发现或丢失目标")
+                logger.info("[VISION] ✗ YOLO: 无敌方目标或已消灭，停止火控追踪并保护友军")
                 self.blue_object_detected = False
 
-        # 对于YOLO我们不需要发送特定的掩码蒙版，直接填黑
+        # 6. 向 UI 广播 IFF 态势和完整 4 列检测表格数据
+        if self.iff_enabled:
+            self.iff_signal.emit({
+                "enemy": len(enemy_list),
+                "friendly": len(friendly_list),
+                "neutral": len(neutral_list),
+                "locked": locked_enemy["display_name"] if locked_enemy else None,
+                "fire": atis_izni,
+            })
+            self.detections_signal.emit(analyzed_targets)
+
         mask_black = np.zeros(frame.shape[:2], dtype=np.uint8)
         self._send_mask(mask_black)
 

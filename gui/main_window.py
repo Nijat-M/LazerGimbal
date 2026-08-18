@@ -39,7 +39,7 @@ try:
     from gui.test_panel import TestModePanel
     from gui.widgets import (
         CameraView, CameraPanel, SerialPanel, ModePanel,
-        PIDTuner, ControlPanel, MouseControlPanel
+        PIDTuner, ControlPanel, MouseControlPanel, DetectionPanel
     )
 except ImportError:
     sys.path.append("..")
@@ -51,7 +51,7 @@ except ImportError:
     from gui.test_panel import TestModePanel
     from gui.widgets import (
         CameraView, CameraPanel, SerialPanel, ModePanel,
-        PIDTuner, ControlPanel, MouseControlPanel
+        PIDTuner, ControlPanel, MouseControlPanel, DetectionPanel
     )
 
 class MainWindow(QMainWindow):
@@ -169,6 +169,12 @@ class MainWindow(QMainWindow):
         self.mode_panel = ModePanel()
         right_layout.addWidget(self.mode_panel)
 
+        # Yetenek 7: dost/dusman + ates izni paneli
+        # 能力7：敌我识别 + 开火授权面板（只在 YOLO Defense Tracking 下显示）
+        self.detection_panel = DetectionPanel()
+        self.detection_panel.setVisible(False)
+        right_layout.addWidget(self.detection_panel)
+
         # 4. PID 调参面板
         self.pid_tuner = PIDTuner(
             initial_kp=cfg.PID_KP,
@@ -224,6 +230,8 @@ class MainWindow(QMainWindow):
         # 实时信息更新
         self.vision_thread.stats_signal.connect(self.camera_panel.update_vision_stats)
         self.vision_thread.camera_state_signal.connect(self.on_camera_state_changed)
+        self.vision_thread.iff_signal.connect(self.on_iff_update)
+        self.vision_thread.detections_signal.connect(self.detection_panel.update_detections)
         # 物体追踪模式发送目标原始坐标，误差由控制器计算
         self.vision_thread.target_pos_signal.connect(self.controller.handle_target_position)
 
@@ -391,6 +399,9 @@ class MainWindow(QMainWindow):
         """Switch modes while keeping automatic and manual motion exclusive."""
         logger.info(f"[GUI] Mode switched: {mode}")
 
+        self.detection_panel.setVisible(mode == "YOLO_TRACKING")
+        if mode != "YOLO_TRACKING":
+            self.detection_panel.clear_detections()
         is_test = mode == "TEST"
         is_mouse = mode == "MANUAL_MOUSE"
         self.test_panel.setVisible(is_test)
@@ -411,6 +422,10 @@ class MainWindow(QMainWindow):
             else f"Mode: {mode}"
         )
     
+    def on_iff_update(self, info: dict):
+        """Yetenek 7: vision thread'den gelen dost/dusman durumu -> panel"""
+        self.detection_panel.update_iff(info)
+
     def on_pid_changed(self, kp, ki, kd):
         """PID 参数改变"""
         cfg.PID_KP = kp
@@ -512,6 +527,7 @@ class MainWindow(QMainWindow):
         self.controller.stop_motion("🛑 Emergency Stop Triggered")
         self.status_label.setText("🛑 EMERGENCY STOP TRIGGERED")
         self.status_label.setStyleSheet("color: red; font-weight: bold; padding: 5px;")
+        self.detection_panel.set_emergency_stop_visual()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         """全局快捷键：F11 全屏切换、空格键发射激光、Esc 退出全屏/急停、方向键/WASD 手动点动"""
