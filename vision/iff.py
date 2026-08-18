@@ -106,14 +106,13 @@ def iff_analiz(frame_bgr, box):
     max_color = max(kirmizi_sayisi, mavi_sayisi)
     oran = max_color / float(max(total_px, 1))
 
-    # 动态像素门限 (微小目标 3 像素，标准目标 5 像素)
-    min_px = 3 if total_px < 300 else 5
-    min_ratio = 0.008 if total_px < 300 else 0.015
+    # 细长无人机/导弹目标自适应门限 (只要有 4 颗清晰色彩像素即足以判决)
+    min_px = 3 if total_px < 300 else 4
 
-    if max_color < min_px or oran < min_ratio:
+    if max_color < min_px:
         return NEUTRAL, kirmizi_sayisi, mavi_sayisi, oran
 
-    # 主导色彩裁决：友军保护绝对优先 (发现蓝色且占优必判友军，杜绝误击友军)
+    # 主导色彩裁决：友军保护绝对优先 (发现蓝色立即保护)
     if mavi_sayisi >= min_px and (mavi_sayisi >= kirmizi_sayisi or kirmizi_sayisi < min_px):
         return FRIENDLY, kirmizi_sayisi, mavi_sayisi, oran
     elif kirmizi_sayisi >= min_px and (kirmizi_sayisi > mavi_sayisi * 1.2 or mavi_sayisi < min_px):
@@ -148,11 +147,11 @@ class TrackedIFFObject:
         self.missing_frames = 0
         self.history.append(raw_side)
 
-        # 稳态多数表决 (友军保护优先)
+        # 稳态表决：友军保护优先 (一旦出现蓝色证据，立即锁定为友军保护模式)
         f_votes = self.history.count(FRIENDLY)
         e_votes = self.history.count(ENEMY)
         
-        if f_votes >= 2 and f_votes >= e_votes:
+        if f_votes >= 1 and f_votes >= e_votes:
             self.current_side = FRIENDLY
         elif e_votes >= 2 and e_votes > f_votes:
             self.current_side = ENEMY
