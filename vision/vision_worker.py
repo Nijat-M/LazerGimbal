@@ -91,6 +91,8 @@ class VisionWorker(QThread):
         self.writer_h: int = 0
         self._rec_lock = threading.Lock()
         self._last_rec_sec: int = -1
+        self._recording_fps: float = 30.0
+        self._recording_frames_written: int = 0
 
         # 麦克风录音系统 (Microphone Audio Capture)
         self._audio_stream = None
@@ -242,15 +244,18 @@ class VisionWorker(QThread):
                 self._video_temp_path = os.path.join(output_dir, f"temp_v_{timestamp}.mp4")
                 self._audio_temp_path = os.path.join(output_dir, f"temp_a_{timestamp}.wav")
 
+                self._recording_fps = 30.0
+                self._recording_frames_written = 0
+
                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                self.video_writer = cv2.VideoWriter(self._video_temp_path, fourcc, fps, (w, h))
+                self.video_writer = cv2.VideoWriter(self._video_temp_path, fourcc, self._recording_fps, (w, h))
                 if not self.video_writer.isOpened():
                     fourcc = cv2.VideoWriter_fourcc(*'avc1')
-                    self.video_writer = cv2.VideoWriter(self._video_temp_path, fourcc, fps, (w, h))
+                    self.video_writer = cv2.VideoWriter(self._video_temp_path, fourcc, self._recording_fps, (w, h))
                 if not self.video_writer.isOpened():
                     self._video_temp_path = os.path.join(output_dir, f"temp_v_{timestamp}.avi")
                     fourcc = cv2.VideoWriter_fourcc(*'XVID')
-                    self.video_writer = cv2.VideoWriter(self._video_temp_path, fourcc, fps, (w, h))
+                    self.video_writer = cv2.VideoWriter(self._video_temp_path, fourcc, self._recording_fps, (w, h))
 
                 # 启动麦克风录音 (Microphone Stream)
                 try:
@@ -1242,7 +1247,7 @@ class VisionWorker(QThread):
                 cv2.putText(frame, sys_info_str, (14, hud_y + 58),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.48, (52, 211, 153), 1, cv2.LINE_AA)
 
-            # 4. 视频录像安全写入与 REC / PAUSE 状态角标
+            # 4. 视频录像安全写入与 REC / PAUSE 状态角标 (基于真实物理挂钟时间消除跳帧与快进)
             with self._rec_lock:
                 if self.recording_state != "IDLE" and self.video_writer is not None:
                     try:
@@ -1251,9 +1256,20 @@ class VisionWorker(QThread):
                                 frame_to_write = cv2.resize(frame, (self.writer_w, self.writer_h))
                             else:
                                 frame_to_write = frame
-                            self.video_writer.write(np.ascontiguousarray(frame_to_write))
 
-                            elapsed_s = max(0, int(now - self.recording_start_time - self.recording_total_paused_sec))
+                            # 计算自录制开始以来的实际真实物理时间所应输出的帧数
+                            elapsed_actual = max(0.0, now - self.recording_start_time - self.recording_total_paused_sec)
+                            target_frames = int(round(elapsed_actual * self._recording_fps))
+                            frames_needed = max(1, target_frames - self._recording_frames_written)
+                            # 限制单次突发写入上限，平滑负载
+                            frames_needed = min(frames_needed, 6)
+
+                            contiguous_frame = np.ascontiguousarray(frame_to_write)
+                            for _ in range(frames_needed):
+                                self.video_writer.write(contiguous_frame)
+                                self._recording_frames_written += 1
+
+                            elapsed_s = int(elapsed_actual)
                             m, s = divmod(elapsed_s, 60)
                             blink = int(now * 2) % 2 == 0
                             rec_color = (40, 40, 240) if blink else (100, 100, 255)
