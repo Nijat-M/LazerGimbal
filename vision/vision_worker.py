@@ -617,26 +617,69 @@ class VisionWorker(QThread):
         g = frame[:, :, 1].astype(np.float32)
         r = frame[:, :, 2].astype(np.float32)
 
-        # 橙色特征：H在[5, 25]区间，中高饱和度S>=65，亮度V>=55，且R通道显著高于G和B
-        hsv_mask = cv2.inRange(hsv, (5, 65, 55), (25, 255, 255))
-        bgr_mask = (r > g + 25) & (r > b + 45) & (r >= 95)
+        # 橙色特征：H在[5, 24]区间，高饱和度S>=75（排除米色/木质桌面/皮肤），亮度V>=50，且R通道显著高于G和B
+        hsv_mask = cv2.inRange(hsv, (5, 75, 50), (24, 255, 255))
+        bgr_mask = (r > g + 22) & (r > b + 45) & (r >= 105)
         mask_orange = hsv_mask & (bgr_mask.astype(np.uint8) * 255)
 
-        # 形态学滤波：去除孤立杂点并平滑气球边缘
-        kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        # 形态学滤波：使用椭圆结构元平滑气球边缘并断开细长线缆杂斑
+        kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 13))
         mask_clean = cv2.morphologyEx(mask_orange, cv2.MORPH_OPEN, kernel_open)
         mask_clean = cv2.morphologyEx(mask_clean, cv2.MORPH_CLOSE, kernel_close)
 
         contours, _ = cv2.findContours(mask_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        valid_contours = [c for c in contours if cv2.contourArea(c) >= 350]
+        
+        # 2. 严苛几何形态学过滤：只识别气球形状的椭圆/圆形饱满凸面体
+        valid_balloons = []
+        for c in contours:
+            area = cv2.contourArea(c)
+            if area < 500: # 过滤杂散小噪点
+                continue
+            
+            perimeter = cv2.arcLength(c, True)
+            if perimeter <= 0:
+                continue
+            
+            # (1) 圆度/紧凑度 (Circularity = 4 * pi * Area / P^2): 气球>=0.45，排除细长电线/杂乱多边形
+            circularity = 4.0 * math.pi * area / (perimeter * perimeter)
+            
+            # (2) 凸包实心度 (Solidity = Area / ConvexHullArea): 气球为饱满无凹坑曲面>=0.82，排除手指/凹凸杂物
+            hull = cv2.convexHull(c)
+            hull_area = cv2.contourArea(hull)
+            solidity = area / float(max(hull_area, 1.0))
+            
+            # (3) 边界框宽高比: 气球呈椭球或球形，长宽比在 0.45 ~ 2.2 之间，排除条状横木/线管
+            x_b, y_b, w_b, h_b = cv2.boundingRect(c)
+            aspect_ratio = float(w_b) / float(max(h_b, 1))
+            
+            # (4) 最小外接圆覆盖率 (Extent)
+            (cx_b, cy_b), radius = cv2.minEnclosingCircle(c)
+            circle_extent = area / float(max(math.pi * (radius ** 2), 1.0))
+
+            # (5) 椭圆拟合几何校验
+            ellipse_valid = True
+            ellipse_ratio = 1.0
+            if len(c) >= 5:
+                (ex, ey), (d1, d2), e_angle = cv2.fitEllipse(c)
+                ellipse_ratio = min(d1, d2) / max(d1, d2) if max(d1, d2) > 0 else 0
+                if ellipse_ratio < 0.35: # 过于扁平则非气球
+                    ellipse_valid = False
+
+            # 综合判定：必须同时满足气球的椭圆/圆形几何特征
+            if (circularity >= 0.45 and solidity >= 0.82 and 
+                0.45 <= aspect_ratio <= 2.2 and circle_extent >= 0.45 and ellipse_valid):
+                # 气球几何质量评分
+                score = circularity * solidity * circle_extent * ellipse_ratio * math.sqrt(area)
+                valid_balloons.append((c, score, area, (cx_b, cy_b), radius))
 
         is_touching = False
 
-        if valid_contours:
-            c_max = max(valid_contours, key=cv2.contourArea)
-            area = cv2.contourArea(c_max)
-            (cx_b, cy_b), radius = cv2.minEnclosingCircle(c_max)
+        if valid_balloons:
+            # 选取几何特征最符合气球标准的最佳候选目标
+            valid_balloons.sort(key=lambda item: item[1], reverse=True)
+            c_max, best_score, area, (cx_b, cy_b), radius = valid_balloons[0]
+            
             M = cv2.moments(c_max)
             if M['m00'] > 0:
                 bx = int(M['m10'] / M['m00'])

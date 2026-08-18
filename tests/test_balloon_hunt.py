@@ -50,5 +50,26 @@ class TestBalloonHunt(unittest.TestCase):
         self.assertTrue(is_touch, "Aim point inside balloon should trigger touch")
         self.assertFalse(is_miss, "Aim point far away should not trigger touch")
 
+    def test_geometric_shape_filtering(self):
+        # 1. Round Balloon
+        m_round = np.zeros((300, 300), dtype=np.uint8)
+        cv2.circle(m_round, (150, 150), 70, 255, -1)
+        c_round = max(cv2.findContours(m_round, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0], key=cv2.contourArea)
+        area_r = cv2.contourArea(c_round)
+        perim_r = cv2.arcLength(c_round, True)
+        circ_r = 4.0 * math.pi * area_r / (perim_r ** 2)
+        solid_r = area_r / float(cv2.contourArea(cv2.convexHull(c_round)))
+        self.assertGreaterEqual(circ_r, 0.45)
+        self.assertGreaterEqual(solid_r, 0.82)
+
+        # 2. Long Thin Wire (Should be rejected)
+        m_wire = np.zeros((300, 300), dtype=np.uint8)
+        cv2.line(m_wire, (150, 20), (150, 280), 255, 6)
+        c_wire = max(cv2.findContours(m_wire, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0], key=cv2.contourArea)
+        area_w = cv2.contourArea(c_wire)
+        perim_w = cv2.arcLength(c_wire, True)
+        circ_w = 4.0 * math.pi * area_w / (perim_w ** 2)
+        self.assertLess(circ_w, 0.45, "Long wire should be rejected by circularity")
+
 if __name__ == '__main__':
     unittest.main()
