@@ -68,6 +68,9 @@ class VisionWorker(QThread):
         self.is_running: bool = True
         self.mode: str = "IDLE"
         self.balloon_firing: bool = False
+        self._active_balloon_pos: tuple[int, int] | None = None
+        self._active_balloon_missing_count: int = 0
+        self._eliminated_balloon_count: int = 0
         self.cap = None
         self.camera_id: int = VisionConfig.CAMERA_ID
         self.frame_width: int = VisionConfig.FRAME_WIDTH
@@ -166,6 +169,10 @@ class VisionWorker(QThread):
                 self.balloon_firing = False
                 self.laser_fire_request_signal.emit(False, 0)
         self.mode = mode
+        if mode == "BALLOON_HUNT":
+            self._active_balloon_pos = None
+            self._active_balloon_missing_count = 0
+            self._eliminated_balloon_count = 0
         if mode == "YOLO_TRACKING" and self.yolo_detector is None:
             logger.info(f"[VISION] 正在初始化 YOLO 异步深度学习引擎 (模型: {self.yolo_model_path})...")
             self.yolo_detector = AsyncYOLODetector(
@@ -673,13 +680,59 @@ class VisionWorker(QThread):
                 score = circularity * solidity * circle_extent * ellipse_ratio * math.sqrt(area)
                 valid_balloons.append((c, score, area, (cx_b, cy_b), radius))
 
-        is_touching = False
+        # 3. 多目标连续打击锁相匹配 (Target Persistence & Sequential Kill Chain)
+        # 若视野中有多个气球，死死咬住当前正在锁定的第1个气球，打爆后再无缝切换第2个气球
+        active_item = None
+        queued_items = []
 
         if valid_balloons:
-            # 选取几何特征最符合气球标准的最佳候选目标
-            valid_balloons.sort(key=lambda item: item[1], reverse=True)
-            c_max, best_score, area, (cx_b, cy_b), radius = valid_balloons[0]
-            
+            # (A) 若已有正在锁定的气球，通过空间欧氏距离优先匹配同一个目标，绝不左右跳变摇摆
+            if self._active_balloon_pos is not None:
+                closest = min(valid_balloons, key=lambda item: math.hypot(item[3][0] - self._active_balloon_pos[0], item[3][1] - self._active_balloon_pos[1]))
+                dist = math.hypot(closest[3][0] - self._active_balloon_pos[0], closest[3][1] - self._active_balloon_pos[1])
+                if dist <= 160: # 160像素内认为是同一个平稳运动的气球
+                    active_item = closest
+                    self._active_balloon_pos = (int(closest[3][0]), int(closest[3][1]))
+                    self._active_balloon_missing_count = 0
+                    queued_items = [b for b in valid_balloons if b is not closest]
+                else:
+                    self._active_balloon_missing_count += 1
+                    if self._active_balloon_missing_count >= 3:
+                        # 确认当前第1个目标已打爆消失，准备切下一个
+                        self._eliminated_balloon_count += 1
+                        logger.info(f"[BALLOON HUNT] 💥 气球 #{self._eliminated_balloon_count} 已被打爆歼灭！自动锁定下一个气球...")
+                        self._active_balloon_pos = None
+                        self._active_balloon_missing_count = 0
+
+            # (B) 若当前无锁定目标（刚开机或上一个已歼灭），从候选列表中锁定最优目标
+            if self._active_balloon_pos is None:
+                def _target_priority(item):
+                    dist_reticle = math.hypot(aim_x - item[3][0], aim_y - item[3][1])
+                    return item[1] - (dist_reticle * 0.15)
+                active_item = max(valid_balloons, key=_target_priority)
+                self._active_balloon_pos = (int(active_item[3][0]), int(active_item[3][1]))
+                self._active_balloon_missing_count = 0
+                queued_items = [b for b in valid_balloons if b is not active_item]
+        else:
+            if self._active_balloon_pos is not None:
+                self._active_balloon_missing_count += 1
+                if self._active_balloon_missing_count >= 3:
+                    self._eliminated_balloon_count += 1
+                    logger.info(f"[BALLOON HUNT] 💥 气球 #{self._eliminated_balloon_count} 已被打爆歼灭！")
+                    self._active_balloon_pos = None
+                    self._active_balloon_missing_count = 0
+
+        # 4. 绘制排队待打的气球（黄色虚线圈提示）
+        for q_idx, q_b in enumerate(queued_items, start=2):
+            q_c, q_score, q_area, (q_cx, q_cy), q_r = q_b
+            cv2.circle(frame, (int(q_cx), int(q_cy)), int(q_r), (255, 200, 0), 2)
+            cv2.putText(frame, f"[QUEUED #{q_idx}]", (int(q_cx) - 40, int(q_cy) - int(q_r) - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.50, (255, 200, 0), 1, cv2.LINE_AA)
+
+        is_touching = False
+
+        if active_item is not None:
+            c_max, best_score, area, (cx_b, cy_b), radius = active_item
             M = cv2.moments(c_max)
             if M['m00'] > 0:
                 bx = int(M['m10'] / M['m00'])
@@ -687,18 +740,20 @@ class VisionWorker(QThread):
             else:
                 bx, by = int(cx_b), int(cy_b)
 
-            # 准星是否触碰/位于气球轮廓内部或包络圆内
+            # 准星是否触碰/位于当前锁定气球轮廓内部或包络圆内
             is_inside_poly = cv2.pointPolygonTest(c_max, (float(aim_x), float(aim_y)), False) >= 0
             dist_to_center = math.hypot(aim_x - bx, aim_y - by)
             is_touching = is_inside_poly or (dist_to_center <= max(12.0, radius * 0.92))
 
-            # 发送目标坐标驱动云台追踪
+            # 发送目标坐标驱动云台只追踪当前目标
             self.target_pos_signal.emit(bx, by)
 
-            # 绘制气球战术轮廓与发光边界
+            # 绘制当前主打击气球（鲜明红色/橙色轮廓）
             cv2.drawContours(frame, [c_max], -1, (0, 140, 255), 2)
             cv2.circle(frame, (int(cx_b), int(cy_b)), int(radius), (0, 165, 255), 2)
             cv2.circle(frame, (bx, by), 6, (0, 215, 255), -1)
+            cv2.putText(frame, "[ENGAGING #1]", (int(cx_b) - 50, int(cy_b) - int(radius) - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 215, 255), 2, cv2.LINE_AA)
 
             # 绘制从激光准星到气球质心的导引箭头
             line_color = (0, 0, 255) if is_touching else (0, 255, 255)
@@ -709,36 +764,36 @@ class VisionWorker(QThread):
                 if not self.balloon_firing:
                     self.balloon_firing = True
                     self.laser_fire_request_signal.emit(True, 100)
-                    logger.info(f"[BALLOON HUNT] 🔥 准星触碰气球 (Dist={dist_to_center:.1f}px) -> 触发 100% 激光打爆！")
+                    logger.info(f"[BALLOON HUNT] 🔥 准星触碰当前目标气球 (Dist={dist_to_center:.1f}px) -> 触发 100% 激光打爆！")
 
                 # 绘制高亮开火告警 HUD
-                hud_text = "🔥 [LOCKED ON BALLOON] 100% LASER FIRING!"
-                cv2.rectangle(frame, (10, _h - 75), (520, _h - 35), (0, 0, 160), -1)
-                cv2.rectangle(frame, (10, _h - 75), (520, _h - 35), (0, 0, 255), 2)
+                hud_text = f"🔥 [LOCKED ON TARGET] 100% LASER FIRING! (Popped: {self._eliminated_balloon_count})"
+                cv2.rectangle(frame, (10, _h - 75), (560, _h - 35), (0, 0, 160), -1)
+                cv2.rectangle(frame, (10, _h - 75), (560, _h - 35), (0, 0, 255), 2)
                 cv2.putText(frame, hud_text, (20, _h - 48),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.70, (255, 255, 255), 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
             else:
                 # 准星偏离/未触及气球：激光停火，继续伺服对准
                 if self.balloon_firing:
                     self.balloon_firing = False
                     self.laser_fire_request_signal.emit(False, 0)
-                    logger.info("[BALLOON HUNT] 准星偏离气球 -> 激光停火并继续追踪")
+                    logger.info("[BALLOON HUNT] 准星偏离当前气球 -> 激光停火并继续追踪")
 
-                hud_text = f"🎈 [ACQUIRING BALLOON] Tracking (Dist: {dist_to_center:.1f}px)"
-                cv2.rectangle(frame, (10, _h - 75), (500, _h - 35), (20, 20, 20), -1)
-                cv2.rectangle(frame, (10, _h - 75), (500, _h - 35), (0, 165, 255), 2)
+                hud_text = f"🎈 [ENGAGING #1] Tracking (Dist: {dist_to_center:.1f}px | Queued: {len(queued_items)})"
+                cv2.rectangle(frame, (10, _h - 75), (530, _h - 35), (20, 20, 20), -1)
+                cv2.rectangle(frame, (10, _h - 75), (530, _h - 35), (0, 165, 255), 2)
                 cv2.putText(frame, hud_text, (20, _h - 48),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 215, 255), 2)
         else:
-            # 画面中没有橙色气球（气球已爆炸或未出现）：立即关闭激光，保持安全搜索
+            # 画面中没有橙色气球（全部气球已爆炸或未出现）：立即关闭激光，保持安全搜索
             if self.balloon_firing:
                 self.balloon_firing = False
                 self.laser_fire_request_signal.emit(False, 0)
-                logger.info("[BALLOON HUNT] ✓ 橙色气球已爆炸/消失 -> 激光安全关闭")
+                logger.info("[BALLOON HUNT] ✓ 全部橙色气球已爆炸/消失 -> 激光安全关闭")
 
-            hud_text = "🎈 [BALLOON POPPED / SEARCHING] Laser SAFE"
-            cv2.rectangle(frame, (10, _h - 75), (460, _h - 35), (20, 20, 20), -1)
-            cv2.rectangle(frame, (10, _h - 75), (460, _h - 35), (52, 211, 153), 2)
+            hud_text = f"🎈 [ALL BALLOONS CLEARED] Total Popped: {self._eliminated_balloon_count}"
+            cv2.rectangle(frame, (10, _h - 75), (510, _h - 35), (20, 20, 20), -1)
+            cv2.rectangle(frame, (10, _h - 75), (510, _h - 35), (52, 211, 153), 2)
             cv2.putText(frame, hud_text, (20, _h - 48),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.65, (52, 211, 153), 2)
 
