@@ -14,6 +14,7 @@ from .control_panel import ControlPanel
 from .mouse_control_panel import MouseControlPanel
 from .detection_panel import DetectionPanel
 from .calibration_panel import CrosshairCalibrationPanel
+from .stage3_mission_panel import Stage3MissionPanel
 
 __all__ = [
     'CameraView',
@@ -25,4 +26,5 @@ __all__ = [
     'MouseControlPanel',
     'DetectionPanel',
     'CrosshairCalibrationPanel',
+    'Stage3MissionPanel',
 ]

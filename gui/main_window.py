@@ -37,9 +37,11 @@ try:
     from core.gimbal_controller import GimbalController
     from vision.vision_worker import VisionWorker
     from gui.test_panel import TestModePanel
+    from core.stage3_mission_director import Stage3MissionDirector
     from gui.widgets import (
         CameraView, CameraPanel, SerialPanel, ModePanel,
-        PIDTuner, ControlPanel, MouseControlPanel, DetectionPanel, CrosshairCalibrationPanel
+        PIDTuner, ControlPanel, MouseControlPanel, DetectionPanel, CrosshairCalibrationPanel,
+        Stage3MissionPanel
     )
 except ImportError:
     sys.path.append("..")
@@ -49,9 +51,11 @@ except ImportError:
     from core.gimbal_controller import GimbalController
     from vision.vision_worker import VisionWorker
     from gui.test_panel import TestModePanel
+    from core.stage3_mission_director import Stage3MissionDirector
     from gui.widgets import (
         CameraView, CameraPanel, SerialPanel, ModePanel,
-        PIDTuner, ControlPanel, MouseControlPanel, DetectionPanel, CrosshairCalibrationPanel
+        PIDTuner, ControlPanel, MouseControlPanel, DetectionPanel, CrosshairCalibrationPanel,
+        Stage3MissionPanel
     )
 
 class MainWindow(QMainWindow):
@@ -180,6 +184,12 @@ class MainWindow(QMainWindow):
         self.detection_panel.setVisible(False)
         right_layout.addWidget(self.detection_panel)
 
+        # Stage 3 Autonomous Mission Panel (第三阶段自主防空竞赛加分流程)
+        self.stage3_director = Stage3MissionDirector(main_window=self)
+        self.stage3_mission_panel = Stage3MissionPanel(director=self.stage3_director)
+        self.stage3_mission_panel.setVisible(False)
+        right_layout.addWidget(self.stage3_mission_panel)
+
         # Lazer-Kamera boresight kalibrasyon paneli
         # 激光-相机光轴校准面板
         self.calibration_panel = CrosshairCalibrationPanel()
@@ -243,6 +253,7 @@ class MainWindow(QMainWindow):
         self.vision_thread.iff_signal.connect(self.on_iff_update)
         self.calibration_panel.offset_changed.connect(self.on_crosshair_offset)
         self.vision_thread.detections_signal.connect(self.detection_panel.update_detections)
+        self.vision_thread.detections_signal.connect(self.stage3_director.on_detections_update)
         # 物体追踪模式发送目标原始坐标，误差由控制器计算
         self.vision_thread.target_pos_signal.connect(self.controller.handle_target_position)
 
@@ -411,8 +422,11 @@ class MainWindow(QMainWindow):
         logger.info(f"[GUI] Mode switched: {mode}")
 
         self.detection_panel.setVisible(mode == "YOLO_TRACKING")
+        self.stage3_mission_panel.setVisible(mode == "YOLO_TRACKING")
         if mode != "YOLO_TRACKING":
             self.detection_panel.clear_detections()
+            if hasattr(self, "stage3_director") and self.stage3_director.is_running:
+                self.stage3_director.abort_mission("Mode Switched Away")
         is_test = mode == "TEST"
         is_mouse = mode == "MANUAL_MOUSE"
         self.test_panel.setVisible(is_test)
