@@ -630,8 +630,11 @@ class CameraView(QWidget):
 
     @pyqtSlot(QImage)
     def update_camera_feed(self, qt_img: QImage) -> None:
-        if not self.is_camera_active:
+        if qt_img is None or qt_img.isNull() or qt_img.width() <= 0:
             return
+        if not self.is_camera_active:
+            self.is_camera_active = True
+            self._update_mouse_input_state()
         self.lbl_camera.set_current_frame_size(qt_img.width(), qt_img.height())
         pixmap = QPixmap.fromImage(qt_img)
         scaled = pixmap.scaled(

@@ -1,9 +1,9 @@
 {
   "camera": {
-    "camera_id": 1,
-    "resolution_width": 1920,
-    "resolution_height": 1080,
-    "flip_mode": "180",
+    "camera_id": 0,
+    "resolution_width": 640,
+    "resolution_height": 480,
+    "flip_mode": "NONE",
     "auto_open": true
   },
   "serial": {

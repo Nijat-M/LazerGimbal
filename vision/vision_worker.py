@@ -892,34 +892,34 @@ class VisionWorker(QThread):
             cv2.putText(frame, f"⚡ SPEED: {gear_label}", (pad_x, badge_y),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, gear_color, 1, cv2.LINE_AA)
 
-            # 3. 录屏视频流写入与 REC / PAUSE 状态角标及全英文遥测 OSD 叠加
+            # 3. 画面底部常驻全英文战术遥测 HUD 仪表条 (All-Time Live Screen & Recorded Video OSD)
+            now = time.time()
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+            pan_tilt_str = f"PAN: {self.telemetry_pan:+.2f} deg   TILT: {self.telemetry_tilt:+.2f} deg"
+            
+            tgt_name = str(self.yolo_target_class) if self.yolo_target_class is not None else "ALL"
+            range_val = getattr(VisionConfig, "AKTIF_MESAFE_M", None)
+            range_str = f"{range_val:.0f}m" if range_val else "FIX"
+            laser_str = "FIRE ⚡" if self.telemetry_laser_firing else ("ARMED" if self.telemetry_laser_armed else "SAFE")
+            sys_info_str = f"SYS: {self.mode} | TGT: {tgt_name} | RNG: {range_str} | SPD: {gear_label} | LASER: {laser_str}"
+
+            hud_h = 68
+            hud_y = fh - hud_h
+            if hud_y > 0:
+                sub_img = frame[hud_y:fh, 0:fw]
+                black_rect = np.zeros_like(sub_img)
+                cv2.addWeighted(sub_img, 0.40, black_rect, 0.60, 0, sub_img)
+                frame[hud_y:fh, 0:fw] = sub_img
+
+                cv2.putText(frame, f"TIME: {now_str}", (14, hud_y + 18),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.putText(frame, f"GIMBAL: {pan_tilt_str}", (14, hud_y + 38),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.48, (56, 189, 248), 1, cv2.LINE_AA)
+                cv2.putText(frame, sys_info_str, (14, hud_y + 58),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.48, (52, 211, 153), 1, cv2.LINE_AA)
+
+            # 4. 视频录像写入与 REC / PAUSE 状态角标
             if self.recording_state != "IDLE" and self.video_writer is not None:
-                now = time.time()
-                # 录制画面 OSD 战术水印与数据叠加 (全英文 HUD)
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-                pan_tilt_str = f"PAN: {self.telemetry_pan:+.2f} deg   TILT: {self.telemetry_tilt:+.2f} deg"
-                
-                tgt_name = str(self.yolo_target_class) if self.yolo_target_class is not None else "ALL"
-                range_val = getattr(VisionConfig, "AKTIF_MESAFE_M", None)
-                range_str = f"{range_val:.0f}m" if range_val else "FIX"
-                laser_str = "FIRE ⚡" if self.telemetry_laser_firing else ("ARMED" if self.telemetry_laser_armed else "SAFE")
-                sys_info_str = f"SYS: {self.mode} | TGT: {tgt_name} | RNG: {range_str} | SPD: {gear_label} | LASER: {laser_str}"
-
-                hud_h = 68
-                hud_y = fh - hud_h
-                if hud_y > 0:
-                    sub_img = frame[hud_y:fh, 0:fw]
-                    black_rect = np.zeros_like(sub_img)
-                    cv2.addWeighted(sub_img, 0.45, black_rect, 0.55, 0, sub_img)
-                    frame[hud_y:fh, 0:fw] = sub_img
-
-                    cv2.putText(frame, f"TIME: {now_str}", (14, hud_y + 18),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1, cv2.LINE_AA)
-                    cv2.putText(frame, f"GIMBAL: {pan_tilt_str}", (14, hud_y + 38),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (56, 189, 248), 1, cv2.LINE_AA)
-                    cv2.putText(frame, sys_info_str, (14, hud_y + 58),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (52, 211, 153), 1, cv2.LINE_AA)
-
                 if self.recording_state == "RECORDING":
                     if fw != self.writer_w or fh != self.writer_h:
                         frame_to_write = cv2.resize(frame, (self.writer_w, self.writer_h))

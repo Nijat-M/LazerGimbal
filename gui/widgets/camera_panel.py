@@ -181,12 +181,20 @@ class CameraPanel(QGroupBox):
             self.lbl_status.setStyleSheet("color: green; font-size: 10px;")
 
             if DeviceConfig.AUTO_OPEN_CAMERA and not self.is_camera_open:
-                QTimer.singleShot(150, self._on_toggle_clicked)
+                QTimer.singleShot(600, self._auto_start_camera)
         else:
             msg = "No cameras detected! Check connection"
             self.lbl_status.setText(msg)
             self.lbl_status.setStyleSheet("color: red; font-size: 10px;")
     
+    def _auto_start_camera(self):
+        """启动时平稳自动开启保存的摄像头"""
+        if not self.is_camera_open and self.available_cameras:
+            self.is_camera_open = True
+            self.btn_toggle.setText("Close Camera")
+            self.btn_toggle.setStyleSheet("background-color: #dc3545; color: white;")
+            self._on_apply_clicked()
+
     def _on_toggle_clicked(self):
         """开启或关闭摄像头"""
         if not self.available_cameras:
@@ -199,8 +207,7 @@ class CameraPanel(QGroupBox):
         if self.is_camera_open:
             self.btn_toggle.setText("Close Camera")
             self.btn_toggle.setStyleSheet("background-color: #dc3545; color: white;")
-            self.camera_toggled.emit(True)
-            self._on_apply_clicked()  # 触发发送 camera_changed
+            self._on_apply_clicked()  # 触发发送唯一的 camera_changed 信号
         else:
             self.btn_toggle.setText("Open Camera")
             self.btn_toggle.setStyleSheet("background-color: #007bff; color: white;")
