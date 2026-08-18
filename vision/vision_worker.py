@@ -346,6 +346,11 @@ class VisionWorker(QThread):
 
             ret, frame = self.cap.read()
 
+            # Boresight "crop" modu: lazerin vurdugu nokta merkeze gelsin.
+            # crop 模式：先把画面裁到激光落点居中，之后全流程自动一致。
+            if ret and frame is not None:
+                frame = self._boresight_crop(frame)
+
             if not ret or frame is None:
                 error_count += 1
                 if error_count <= 5:
@@ -419,8 +424,9 @@ class VisionWorker(QThread):
         # 画面中心十字线
         # Nisangah = lazerin GERCEK vurus noktasi (boresight kalibrasyonu uygulanmis).
         # 十字线画在【激光实际落点】上 —— 所见即所打。
-        VisionConfig.CENTER_X = self.frame_width // 2
-        VisionConfig.CENTER_Y = self.frame_height // 2
+        _h, _w = frame.shape[:2]          # kirpilmis olabilir / 可能已被裁剪
+        VisionConfig.CENTER_X = _w // 2
+        VisionConfig.CENTER_Y = _h // 2
         cx, cy = VisionConfig.aim_point(VisionConfig.AKTIF_MESAFE_M)
         cv2.line(frame, (cx - 20, cy), (cx + 20, cy), (0, 255, 255), 1)
         cv2.line(frame, (cx, cy - 20), (cx, cy + 20), (0, 255, 255), 1)
@@ -450,6 +456,36 @@ class VisionWorker(QThread):
         self._send_mask(mask_blue)
 
 
+    def _boresight_crop(self, frame):
+        """
+        Goruntuyu, lazerin vurdugu nokta MERKEZ olacak sekilde kirpar.
+        裁剪画面，让激光实际落点成为新画面的中心。
+
+        Boylece nisangah ekranin tam ortasinda kalir ve alt katmanlarin
+        (tespit, hata hesabi, cizim) kaymadan haberi olmasina gerek kalmaz —
+        hepsi otomatik olarak dogru referansa gore calisir.
+        这样十字线就在正中，而且下游（检测/误差/绘制）完全不需要知道偏移，
+        自动就以正确基准工作。
+
+        BEDELI / 代价: yatayda 2*|ox|, dikeyde 2*|oy| piksel FOV kaybi.
+        损失 2*|ox| 宽、2*|oy| 高的视场。
+        """
+        if VisionConfig.BORESIGHT_MODE != "crop" or frame is None:
+            return frame
+        ox, oy = VisionConfig.raw_offset(VisionConfig.AKTIF_MESAFE_M)
+        if ox == 0 and oy == 0:
+            return frame
+        h, w = frame.shape[:2]
+        px, py = w // 2 + ox, h // 2 + oy
+        # merkez disari tasmissa kirpma anlamsiz -> dokunma
+        if not (0 < px < w and 0 < py < h):
+            return frame
+        hw = min(px, w - px)
+        hh = min(py, h - py)
+        if hw < 32 or hh < 32:
+            return frame
+        return frame[py - hh:py + hh, px - hw:px + hw]
+
     def _process_yolo_tracking(self, frame: cv2.Mat) -> None:
         """
         YOLO_TRACKING 模式：YOLO 目标检测与敌我识别 (IFF) 自主追踪
@@ -468,8 +504,9 @@ class VisionWorker(QThread):
         # 画面中心十字准星与战术瞄准环
         # Nisangah = lazerin GERCEK vurus noktasi (boresight kalibrasyonu uygulanmis).
         # 十字线画在【激光实际落点】上 —— 所见即所打。
-        VisionConfig.CENTER_X = self.frame_width // 2
-        VisionConfig.CENTER_Y = self.frame_height // 2
+        _h, _w = frame.shape[:2]          # kirpilmis olabilir / 可能已被裁剪
+        VisionConfig.CENTER_X = _w // 2
+        VisionConfig.CENTER_Y = _h // 2
         cx, cy = VisionConfig.aim_point(VisionConfig.AKTIF_MESAFE_M)
         cv2.line(frame, (cx - 25, cy), (cx + 25, cy), (0, 255, 255), 1)
         cv2.line(frame, (cx, cy - 25), (cx, cy + 25), (0, 255, 255), 1)

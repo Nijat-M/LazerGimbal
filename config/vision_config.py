@@ -87,15 +87,41 @@ class VisionConfig:
     # 比赛里距离是已知的，界面上直接选。
     AKTIF_MESAFE_M = None
 
+    # Boresight duzeltme yontemi / 光轴补偿方式:
+    #   "offset" = nisangahi lazerin vurdugu yere TASI (tam FOV korunur,
+    #              ama nisangah ekran ortasinda durmaz)
+    #              把十字线移到激光落点（保留全部视场，但十字线不居中）
+    #   "crop"   = goruntuyu lazer noktasi MERKEZ olacak sekilde KIRP
+    #              (nisangah ortada kalir, karsiliginda biraz FOV kaybi:
+    #               yatayda 2*|ox|, dikeyde 2*|oy| piksel)
+    #              裁剪画面让激光点成为中心（十字线居中，代价是损失
+    #               2*|ox| 宽和 2*|oy| 高的视场）
+    BORESIGHT_MODE = "offset"
+
     @classmethod
     def aim_point(cls, mesafe_m=None):
         """Lazerin GERCEKTEN vuracagi ekran noktasi.
            激光【实际】会打到的屏幕点。云台要把目标驱动到这里，而不是画面正中。"""
+        # crop modunda kayma zaten goruntu kirpilirken uygulandi;
+        # burada tekrar uygularsak iki kez saparız.
+        # crop 模式下偏移已在裁剪时生效，这里再加一次就会偏两倍。
+        if cls.BORESIGHT_MODE == "crop":
+            return int(cls.CENTER_X), int(cls.CENTER_Y)
         ox, oy = cls.CENTER_OFFSET_X, cls.CENTER_OFFSET_Y
         if mesafe_m and mesafe_m > 0.2:
             ox += cls.PARALLAX_X_AT_1M / mesafe_m
             oy += cls.PARALLAX_Y_AT_1M / mesafe_m
         return int(round(cls.CENTER_X + ox)), int(round(cls.CENTER_Y + oy))
+
+    @classmethod
+    def raw_offset(cls, mesafe_m=None):
+        """Moddan bagimsiz ham kayma (px). Kirpma bunu kullanir.
+           与模式无关的原始偏移，裁剪用它。"""
+        ox, oy = float(cls.CENTER_OFFSET_X), float(cls.CENTER_OFFSET_Y)
+        if mesafe_m and mesafe_m > 0.2:
+            ox += cls.PARALLAX_X_AT_1M / mesafe_m
+            oy += cls.PARALLAX_Y_AT_1M / mesafe_m
+        return int(round(ox)), int(round(oy))
 
     @classmethod
     def set_center_offset(cls, ox: int, oy: int):

@@ -329,8 +329,8 @@ class GimbalController(QObject):
                 return
             axis = self._manual_jog_axis
             direction = self._manual_jog_dir
-            # X 轴连续速度 260 (高速敏捷)，Y 轴保持 40 (柔和)
-            speed_error = 260 if axis == "x" else 40
+            # X 轴连续速度 260，Y 轴连续速度 180 (克服俯仰机构重力与摩擦)
+            speed_error = 260 if axis == "x" else 180
             simulated_error = speed_error * direction
 
             command = f"<{simulated_error},0,0>\n" if axis == "x" else f"<0,{simulated_error},0>\n"
@@ -481,16 +481,16 @@ class GimbalController(QObject):
 
     def manual_move(self, axis: str, direction: int) -> None:
         """Send one single distinct jog step."""
-        logger.info(f"[MANUAL] 手动微调请求: 轴={axis}, 方向={direction}")
+        logger.info(f"[MANUAL] 手动点动微调: 轴={axis}, 方向={direction}")
         if not self._is_serial_connected():
-            self.status_update_signal.emit("⚠️ 警告: 串口未连接")
+            self.status_update_signal.emit("⚠️ 警告: 串口未连接，无法控制电机")
             return
         if axis not in ("x", "y") or direction not in (-1, 1):
             logger.warning("[MANUAL] 忽略无效的手动移动参数")
             return
 
-        # X 轴调至 120 (清晰步距)，Y 轴手感保持 25
-        step_error = 120 if axis == "x" else 25
+        # X 轴调至 240，Y 轴调至 160 (克服减速比与静摩擦力)
+        step_error = 240 if axis == "x" else 160
         simulated_error = step_error * direction
 
         command = (
@@ -499,18 +499,15 @@ class GimbalController(QObject):
             else f"<0,{simulated_error},0>\n"
         )
         self.serial_thread.send_realtime_command(command)
-        # 单次点动平稳刹车 (X轴 0.08s, Y轴 0.06s 原样)
-        stop_delay = 0.08 if axis == "x" else 0.06
+        # 单次点动平稳刹车 (0.12s 脉冲宽度，确保单步位移清晰可见)
+        stop_delay = 0.12 if axis == "x" else 0.10
         threading.Timer(stop_delay, self.serial_thread.send_stop_command).start()
-        self.status_update_signal.emit(f"手动微调 {axis.upper()}")
-
-
-
+        self.status_update_signal.emit(f"手动点动 {axis.upper()} (方向 {direction:+d})")
 
     def start_manual_continuous(self, axis: str, direction: int) -> None:
         """按住按钮或按下键盘方向键时：启动连续平滑运动"""
         if not self._is_serial_connected():
-            self.status_update_signal.emit("⚠️ 警告: 串口未连接")
+            self.status_update_signal.emit("⚠️ 警告: 串口未连接，无法控制电机")
             return
         if axis not in ("x", "y") or direction not in (-1, 1):
             return
@@ -520,7 +517,7 @@ class GimbalController(QObject):
             self._manual_jog_dir = direction
             self._manual_jog_active = True
 
-        self.status_update_signal.emit(f"连续移动中: {axis.upper()} (方向 {direction})")
+        self.status_update_signal.emit(f"连续移动中: {axis.upper()} (方向 {direction:+d})")
 
     def stop_manual_continuous(self) -> None:
         """松开按钮或松开键盘时：立即刹车停止"""

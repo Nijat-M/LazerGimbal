@@ -25,6 +25,11 @@ class ControlPanel(QWidget):
     reset_requested = pyqtSignal()           # 归中/原点重置
     emergency_stop_requested = pyqtSignal()  # 急停信号
     
+    # 手动电机点动与连续控制信号
+    manual_move_requested = pyqtSignal(str, int)       # (axis, dir) 单步微调
+    manual_start_continuous = pyqtSignal(str, int)     # (axis, dir) 按住开始连续运动
+    manual_stop_continuous = pyqtSignal()              # 松开停止
+
     # 激光武器控制信号
     laser_armed_toggled = pyqtSignal(bool)   # 激光保险 (ARM/SAFE)
     laser_fire_changed = pyqtSignal(bool)    # 激光击发 (True=开火, False=停火)
@@ -47,10 +52,13 @@ class ControlPanel(QWidget):
         # 1. 云台控制按钮组 (水平)
         # ==========================
         control_group = QGroupBox("Gimbal Motion Control")
-        control_layout = QHBoxLayout(control_group)
+        control_layout = QVBoxLayout(control_group)
         control_layout.setContentsMargins(10, 10, 10, 10)
         control_layout.setSpacing(8)
         
+        top_btn_row = QHBoxLayout()
+        top_btn_row.setSpacing(8)
+
         # 开始/停止追踪按钮
         self.btn_control = QPushButton("▶ Start Tracking")
         self.btn_control.setCheckable(True)
@@ -67,10 +75,10 @@ class ControlPanel(QWidget):
             }
         """)
         self.btn_control.toggled.connect(self._on_control_toggled)
-        control_layout.addWidget(self.btn_control, 2)
+        top_btn_row.addWidget(self.btn_control, 2)
         
         # 停止电机并将当前位置设为软件相对原点
-        self.btn_reset = QPushButton("⟲ Reset Origin")
+        self.btn_reset = QPushButton("⟲ Reset")
         self.btn_reset.setToolTip("Stop motors and set current position as relative origin")
         self.btn_reset.setStyleSheet("""
             QPushButton {
@@ -84,7 +92,7 @@ class ControlPanel(QWidget):
             }
         """)
         self.btn_reset.clicked.connect(self.reset_requested.emit)
-        control_layout.addWidget(self.btn_reset, 1)
+        top_btn_row.addWidget(self.btn_reset, 1)
 
         # 急停按钮
         self.btn_estop = QPushButton("🛑 E-STOP")
@@ -102,8 +110,83 @@ class ControlPanel(QWidget):
             }
         """)
         self.btn_estop.clicked.connect(self.emergency_stop_requested.emit)
-        control_layout.addWidget(self.btn_estop, 1)
-        
+        top_btn_row.addWidget(self.btn_estop, 1)
+        control_layout.addLayout(top_btn_row)
+
+        # 1.2 手动电机微调方向盘 (Manual Motor Jog D-Pad)
+        jog_box = QFrame()
+        jog_box.setStyleSheet("background-color: #0f172a; border-radius: 4px; padding: 4px;")
+        jog_box_layout = QVBoxLayout(jog_box)
+        jog_box_layout.setContentsMargins(4, 4, 4, 4)
+        jog_box_layout.setSpacing(4)
+
+        jog_title = QLabel("🎮 Manual Motor Jog (物理电机上下左右控制)")
+        jog_title.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: bold;")
+        jog_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        jog_box_layout.addWidget(jog_title)
+
+        dpad_grid = QGridLayout()
+        dpad_grid.setSpacing(4)
+        dpad_grid.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        btn_style = """
+            QPushButton {
+                background-color: #1e293b;
+                color: #38bdf8;
+                font-weight: bold;
+                font-size: 14px;
+                border: 1px solid #0284c7;
+                border-radius: 4px;
+                min-width: 38px;
+                min-height: 28px;
+            }
+            QPushButton:hover {
+                background-color: #0284c7;
+                color: #ffffff;
+            }
+            QPushButton:pressed {
+                background-color: #0369a1;
+            }
+        """
+
+        self.btn_jog_up = QPushButton("▲")
+        self.btn_jog_down = QPushButton("▼")
+        self.btn_jog_left = QPushButton("◀")
+        self.btn_jog_right = QPushButton("▶")
+        self.btn_jog_center = QPushButton("⌂")
+
+        for b in (self.btn_jog_up, self.btn_jog_down, self.btn_jog_left, self.btn_jog_right, self.btn_jog_center):
+            b.setStyleSheet(btn_style)
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+
+        self.btn_jog_center.setToolTip("Reset Origin (设为当前相对原点)")
+        self.btn_jog_center.clicked.connect(self.reset_requested.emit)
+
+        # 绑定按住连续转动与松开停止
+        self.btn_jog_up.pressed.connect(lambda: self.manual_start_continuous.emit('y', 1))
+        self.btn_jog_up.released.connect(self.manual_stop_continuous.emit)
+        self.btn_jog_up.clicked.connect(lambda: self.manual_move_requested.emit('y', 1))
+
+        self.btn_jog_down.pressed.connect(lambda: self.manual_start_continuous.emit('y', -1))
+        self.btn_jog_down.released.connect(self.manual_stop_continuous.emit)
+        self.btn_jog_down.clicked.connect(lambda: self.manual_move_requested.emit('y', -1))
+
+        self.btn_jog_left.pressed.connect(lambda: self.manual_start_continuous.emit('x', -1))
+        self.btn_jog_left.released.connect(self.manual_stop_continuous.emit)
+        self.btn_jog_left.clicked.connect(lambda: self.manual_move_requested.emit('x', -1))
+
+        self.btn_jog_right.pressed.connect(lambda: self.manual_start_continuous.emit('x', 1))
+        self.btn_jog_right.released.connect(self.manual_stop_continuous.emit)
+        self.btn_jog_right.clicked.connect(lambda: self.manual_move_requested.emit('x', 1))
+
+        dpad_grid.addWidget(self.btn_jog_up, 0, 1)
+        dpad_grid.addWidget(self.btn_jog_left, 1, 0)
+        dpad_grid.addWidget(self.btn_jog_center, 1, 1)
+        dpad_grid.addWidget(self.btn_jog_right, 1, 2)
+        dpad_grid.addWidget(self.btn_jog_down, 2, 1)
+        jog_box_layout.addLayout(dpad_grid)
+
+        control_layout.addWidget(jog_box)
         main_layout.addWidget(control_group)
 
         # ==========================
