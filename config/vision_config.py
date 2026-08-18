@@ -193,10 +193,10 @@ class VisionConfig:
     # ==========================
     # YOLO 目标检测模型设置
     # ==========================
-    DEFAULT_YOLO_MODEL = "vision/models/savunma_yolo26.pt"  # 默认使用新训练的防空国防目标检测模型
-    YOLO_CONF_THRESHOLD = 0.50                             # 提高置信度阈值至 0.50，有效过滤室内与背景杂波误识别
+    DEFAULT_YOLO_MODEL = "vision/models/yetenek6_best.pt"  # 默认使用最新训练的防空国防目标模型
+    YOLO_CONF_THRESHOLD = 0.30                             # 敏捷置信度阈值 0.30，有效捕获细长导弹与远距无人机
     YOLO_TARGET_CLASS = None                               # 默认追踪目标类别 (None: 视野内全部目标)
-    YOLO_MIN_BOX_SIZE = 16                                 # 最小有效目标框边长（过滤噪点假目标）
+    YOLO_MIN_BOX_SIZE = 4                                  # 最小有效目标框边长（允许细长导弹通过）
 
     # Military / Defense targets and standard COCO class friendly labels (100% English)
     CLASS_LABELS_EN = {
