@@ -89,9 +89,12 @@ class FluentAppWindow(FluentWindow):
         # 5. 安装全局无死角按键拦截器
         self.init_global_hotkeys()
 
-        # 6. 启动视觉线程
+        # 6. 启动视觉线程并自动开启摄像头
         self.vision_thread.start()
-        self.settings_view.set_camera_running_status(True)
+        cam_id = cfg.CAMERA_ID
+        w = cfg.FRAME_WIDTH
+        h = cfg.FRAME_HEIGHT
+        self.vision_thread.switch_camera(cam_id, w, h)
 
     def init_navigation(self):
         """配置侧边导航栏"""
@@ -309,12 +312,18 @@ class FluentAppWindow(FluentWindow):
         self.vision_thread.switch_camera(cam_id, w, h)
 
     def _on_camera_state_changed(self, generation: int, ready: bool, message: str):
+        if generation < self.camera_request_generation:
+            return
         self.camera_request_generation = generation
         self.controller.set_visual_input_enabled(ready)
         self.settings_view.set_camera_running_status(ready)
         self.console_view.set_camera_running_status(ready)
-        if not ready and self.controller.control_enabled:
-            self.console_view.btn_track.setChecked(False)
+        if ready:
+            self.console_view.camera_view.set_camera_active(True)
+        else:
+            self.console_view.camera_view.show_blank_screen("摄像头未运行")
+            if self.controller.control_enabled:
+                self.console_view.btn_track.setChecked(False)
 
     def _on_camera_toggled(self, running: bool):
         if running:
@@ -323,12 +332,17 @@ class FluentAppWindow(FluentWindow):
                 cam_id = cfg.CAMERA_ID
             res_idx = self.settings_view.combo_resolution.currentIndex()
             resolutions = [(640, 480), (1280, 720), (1920, 1080)]
-            w, h = resolutions[res_idx] if 0 <= res_idx < len(resolutions) else (640, 480)
+            w, h = resolutions[res_idx] if 0 <= res_idx < len(resolutions) else (cfg.FRAME_WIDTH, cfg.FRAME_HEIGHT)
+            logger.info(f"[GUI] 开启摄像头: ID={cam_id}, 分辨率={w}x{h}")
             self.vision_thread.switch_camera(cam_id, w, h)
         else:
+            logger.info("[GUI] 关闭摄像头")
+            self.console_view.camera_view.release_mouse_control()
+            self.controller.stop_motion("Camera closed")
             self.vision_thread.close_camera()
-        self.settings_view.set_camera_running_status(running)
-        self.console_view.set_camera_running_status(running)
+            self.console_view.camera_view.show_blank_screen("摄像头已关闭")
+            self.settings_view.set_camera_running_status(False)
+            self.console_view.set_camera_running_status(False)
 
     def _on_save_config(self):
         cfg.PID_KP = self.tuning_view._kp

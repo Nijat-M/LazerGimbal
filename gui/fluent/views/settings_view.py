@@ -329,18 +329,16 @@ class SettingsView(QWidget):
             self.combo_port.setCurrentIndex(stm32_idx)
 
     def detect_cameras(self):
-        """检测可用摄像头"""
-        import cv2
+        """配置可用摄像头选项 (非侵入式，避免与后台采集冲突)"""
+        current_data = self.combo_camera.currentData()
         self.combo_camera.clear()
-        found_any = False
-        for idx in range(4):
-            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-            if cap.isOpened():
-                self.combo_camera.addItem(f"Camera #{idx} (DirectShow)", idx)
-                cap.release()
-                found_any = True
-        if not found_any:
-            self.combo_camera.addItem("Default Camera #0", 0)
+        self.combo_camera.addItem("Camera #0 (默认/主摄 DirectShow)", 0)
+        self.combo_camera.addItem("Camera #1 (辅摄/USB DirectShow)", 1)
+        self.combo_camera.addItem("Camera #2 (外部设备 DirectShow)", 2)
+        if current_data is not None:
+            found = self.combo_camera.findData(current_data)
+            if found >= 0:
+                self.combo_camera.setCurrentIndex(found)
 
     def _on_serial_connect_clicked(self):
         port = self.combo_port.currentData()

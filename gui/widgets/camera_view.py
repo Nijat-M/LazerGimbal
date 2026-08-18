@@ -192,11 +192,15 @@ class CameraView(QWidget):
         """同步激光武器状态至画面准星 HUD"""
         self.lbl_camera.set_laser_status(armed, firing)
 
+    def _on_cam_toggle_button_clicked(self) -> None:
+        """点击摄像头按钮切换启停状态"""
+        target = not self.is_camera_active
+        self.camera_toggled.emit(target)
+
     def set_camera_running_status(self, running: bool) -> None:
-        """同步摄像头启停按钮视觉状态"""
+        """同步摄像头启停按钮视觉状态与画面"""
         self.is_camera_active = running
-        self.btn_cam_toggle.blockSignals(True)
-        self.btn_cam_toggle.setChecked(running)
+        self._update_mouse_input_state()
         if running:
             self.btn_cam_toggle.setText("⏹ 关闭摄像头")
             self.btn_cam_toggle.setStyleSheet("""
@@ -229,7 +233,7 @@ class CameraView(QWidget):
                     background-color: #059669;
                 }
             """)
-        self.btn_cam_toggle.blockSignals(False)
+            self.show_blank_screen("摄像头已关闭 / Camera Stopped")
 
     def init_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -247,23 +251,22 @@ class CameraView(QWidget):
 
         # 摄像头独立启停按钮
         self.btn_cam_toggle = QPushButton("▶ 启动摄像头")
-        self.btn_cam_toggle.setCheckable(True)
-        self.btn_cam_toggle.setChecked(True)
+        self.btn_cam_toggle.setFixedHeight(28)
         self.btn_cam_toggle.setStyleSheet("""
             QPushButton {
-                background-color: #0284c7;
+                background-color: #10b981;
                 color: #ffffff;
-                border: 1px solid #0369a1;
+                border: 1px solid #059669;
                 padding: 4px 10px;
                 border-radius: 4px;
                 font-size: 11px;
                 font-weight: 600;
             }
             QPushButton:hover {
-                background-color: #0369a1;
+                background-color: #059669;
             }
         """)
-        self.btn_cam_toggle.toggled.connect(self.camera_toggled.emit)
+        self.btn_cam_toggle.clicked.connect(self._on_cam_toggle_button_clicked)
         header_layout.addWidget(self.btn_cam_toggle)
 
         # 掩码显示/折叠切换按钮 (默认折叠以保持主界面清爽)
@@ -425,6 +428,7 @@ class CameraView(QWidget):
         self.is_camera_active = False
         self._update_mouse_input_state()
         self.lbl_camera.clear()
-        self.lbl_camera.setText(f"<font color='#888888'><h3>📷 {text}</h3></font>")
+        self.lbl_camera.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_camera.setText(f"<div align='center' style='color: #94a3b8; font-size: 14px;'><b>📷 {text}</b><br><span style='font-size: 12px; color: #64748b;'>点击上方【启动摄像头】开始实时采集</span></div>")
         self.lbl_mask.clear()
-        self.lbl_mask.setText("<font color='#666666'>Debug Mask (Stopped)</font>")
+        self.lbl_mask.setText("<font color='#64748b'>Debug Mask (Stopped)</font>")
