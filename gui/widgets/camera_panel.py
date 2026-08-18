@@ -141,51 +141,23 @@ class CameraPanel(QGroupBox):
         QTimer.singleShot(100, self._detect_cameras_task)
     
     def _detect_cameras_task(self):
-        """实际检测任务 - 智能快速版"""
-        self.available_cameras = []
+        """实际检测任务 - 快速直连版 (避免启动时占用硬件设备导致 DirectShow 锁死)"""
+        # 预置可用设备列表 (Camera 0: 笔记本自带, Camera 1: USB云台相机, Camera 2: 备用)
+        self.available_cameras = [0, 1, 2]
         self.combo_camera.clear()
+        self.combo_camera.addItem("Camera 0 (Integrated Webcam)")
+        self.combo_camera.addItem("Camera 1 (USB Gimbal Camera)")
+        self.combo_camera.addItem("Camera 2 (Aux USB Camera)")
         
-        # 先检测 Camera 0
-        if self._try_open_camera(0):
-            # 成功，检查是否还有 Camera 1（笔记本+USB场景）
-            self._try_open_camera(1)
-            # 如果有两个了，大概率不会有更多，跳过 Camera 2
-        else:
-            # Camera 0 失败，尝试 Camera 1（可能只插了USB摄像头）
-            if self._try_open_camera(1):
-                # 找到了，停止检测
-                pass
-            else:
-                # 都没有，再试试 Camera 2
-                self._try_open_camera(2)
+        saved_id = DeviceConfig.CAMERA_ID if DeviceConfig.CAMERA_ID in self.available_cameras else 1
+        saved_idx = self.available_cameras.index(saved_id)
+        self.combo_camera.setCurrentIndex(saved_idx)
         
-        # 更新状态并智能应用
-        if self.available_cameras:
-            num_cameras = len(self.available_cameras)
-            saved_idx = -1
-            for idx, cid in enumerate(self.available_cameras):
-                if cid == DeviceConfig.CAMERA_ID:
-                    saved_idx = idx
-                    break
+        self.lbl_status.setText(f"✓ Ready: Camera {saved_id}")
+        self.lbl_status.setStyleSheet("color: green; font-size: 10px;")
 
-            if saved_idx >= 0:
-                self.combo_camera.setCurrentIndex(saved_idx)
-                msg = f"✓ Detected Camera {DeviceConfig.CAMERA_ID} (Default)"
-            elif num_cameras == 1:
-                self.combo_camera.setCurrentIndex(0)
-                msg = f"✓ Detected Camera {self.available_cameras[0]}"
-            else:
-                msg = f"✓ Detected {num_cameras} cameras"
-            
-            self.lbl_status.setText(msg)
-            self.lbl_status.setStyleSheet("color: green; font-size: 10px;")
-
-            if DeviceConfig.AUTO_OPEN_CAMERA and not self.is_camera_open:
-                QTimer.singleShot(600, self._auto_start_camera)
-        else:
-            msg = "No cameras detected! Check connection"
-            self.lbl_status.setText(msg)
-            self.lbl_status.setStyleSheet("color: red; font-size: 10px;")
+        if DeviceConfig.AUTO_OPEN_CAMERA and not self.is_camera_open:
+            QTimer.singleShot(100, self._auto_start_camera)
     
     def _auto_start_camera(self):
         """启动时平稳自动开启保存的摄像头"""

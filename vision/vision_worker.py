@@ -86,6 +86,7 @@ class VisionWorker(QThread):
         self.writer_w: int = 0
         self.writer_h: int = 0
         self._rec_lock = threading.Lock()
+        self._last_rec_sec: int = -1
 
         # 电机与激光状态遥测（用于录制视频 HUD 水印叠加，全英文）
         self.telemetry_pan: float = 0.0
@@ -217,18 +218,18 @@ class VisionWorker(QThread):
                 self.writer_w = w
                 self.writer_h = h
 
-                self.recording_path = os.path.join(output_dir, f"rec_{timestamp}.mp4")
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                self.recording_path = os.path.join(output_dir, f"rec_{timestamp}.avi")
+                fourcc = cv2.VideoWriter_fourcc(*'XVID')
                 self.video_writer = cv2.VideoWriter(self.recording_path, fourcc, fps, (w, h))
                 if not self.video_writer.isOpened():
-                    self.recording_path = os.path.join(output_dir, f"rec_{timestamp}.avi")
-                    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                    fourcc = cv2.VideoWriter_fourcc(*'MJPG')
                     self.video_writer = cv2.VideoWriter(self.recording_path, fourcc, fps, (w, h))
 
                 self.recording_state = "RECORDING"
                 self.recording_start_time = time.time()
                 self.recording_paused_time = 0.0
                 self.recording_total_paused_sec = 0.0
+                self._last_rec_sec = -1
                 logger.info(f"[VISION] 🔴 开始录制视频: {self.recording_path} ({w}x{h} @ {fps:.1f}fps)")
                 self.recording_status_signal.emit("RECORDING", self.recording_path, 0)
                 return True
@@ -354,10 +355,18 @@ class VisionWorker(QThread):
         logger.info(f"[VISION] 正在后台打开摄像头: ID={camera_id}, {width}x{height}")
         self._close_camera_in_worker(emit_frame=False)
 
-        candidate = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
-        if not candidate.isOpened():
+        candidate = None
+        for attempt in range(3):
+            if not self._is_camera_request_current(generation):
+                return
+            candidate = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
+            if candidate.isOpened():
+                break
             candidate.release()
-            logger.info("[VISION] DSHOW后端失败，尝试默认后端...")
+            time.sleep(0.15)
+
+        if candidate is None or not candidate.isOpened():
+            logger.info("[VISION] DSHOW后端未就绪，尝试默认后端...")
             candidate = cv2.VideoCapture(camera_id)
 
         if not candidate.isOpened():
@@ -918,32 +927,41 @@ class VisionWorker(QThread):
                 cv2.putText(frame, sys_info_str, (14, hud_y + 58),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.48, (52, 211, 153), 1, cv2.LINE_AA)
 
-            # 4. 视频录像写入与 REC / PAUSE 状态角标
-            if self.recording_state != "IDLE" and self.video_writer is not None:
-                if self.recording_state == "RECORDING":
-                    if fw != self.writer_w or fh != self.writer_h:
-                        frame_to_write = cv2.resize(frame, (self.writer_w, self.writer_h))
-                    else:
-                        frame_to_write = frame
-                    self.video_writer.write(frame_to_write)
+            # 4. 视频录像安全写入与 REC / PAUSE 状态角标
+            with self._rec_lock:
+                if self.recording_state != "IDLE" and self.video_writer is not None:
+                    try:
+                        if self.recording_state == "RECORDING":
+                            if fw != self.writer_w or fh != self.writer_h:
+                                frame_to_write = cv2.resize(frame, (self.writer_w, self.writer_h))
+                            else:
+                                frame_to_write = frame
+                            self.video_writer.write(np.ascontiguousarray(frame_to_write))
 
-                    elapsed_s = max(0, int(now - self.recording_start_time - self.recording_total_paused_sec))
-                    m, s = divmod(elapsed_s, 60)
-                    blink = int(now * 2) % 2 == 0
-                    rec_color = (40, 40, 240) if blink else (100, 100, 255)
-                    cv2.circle(frame, (fw - 145, 26), 7, rec_color, -1)
-                    cv2.putText(frame, f"REC {m:02d}:{s:02d}", (fw - 130, 32),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
-                    self.recording_status_signal.emit("RECORDING", self.recording_path, elapsed_s)
-                elif self.recording_state == "PAUSED":
-                    elapsed_s = max(0, int(self.recording_paused_time - self.recording_start_time - self.recording_total_paused_sec))
-                    m, s = divmod(elapsed_s, 60)
-                    cv2.putText(frame, f"PAUSED {m:02d}:{s:02d}", (fw - 165, 32),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 215, 255), 2)
-                    self.recording_status_signal.emit("PAUSED", self.recording_path, elapsed_s)
+                            elapsed_s = max(0, int(now - self.recording_start_time - self.recording_total_paused_sec))
+                            m, s = divmod(elapsed_s, 60)
+                            blink = int(now * 2) % 2 == 0
+                            rec_color = (40, 40, 240) if blink else (100, 100, 255)
+                            cv2.circle(frame, (fw - 145, 26), 7, rec_color, -1)
+                            cv2.putText(frame, f"REC {m:02d}:{s:02d}", (fw - 130, 32),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
+                            if elapsed_s != self._last_rec_sec:
+                                self._last_rec_sec = elapsed_s
+                                self.recording_status_signal.emit("RECORDING", self.recording_path, elapsed_s)
+                        elif self.recording_state == "PAUSED":
+                            elapsed_s = max(0, int(self.recording_paused_time - self.recording_start_time - self.recording_total_paused_sec))
+                            m, s = divmod(elapsed_s, 60)
+                            cv2.putText(frame, f"PAUSED {m:02d}:{s:02d}", (fw - 165, 32),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 215, 255), 2)
+                            if elapsed_s != self._last_rec_sec:
+                                self._last_rec_sec = elapsed_s
+                                self.recording_status_signal.emit("PAUSED", self.recording_path, elapsed_s)
+                    except Exception as e:
+                        logger.error(f"[VISION ERROR] 视频流写入异常: {e}")
 
-            h, w, ch = frame.shape
-            q_image = QImage(frame.data, w, h, ch * w,
+            frame_cont = np.ascontiguousarray(frame)
+            h, w, ch = frame_cont.shape
+            q_image = QImage(frame_cont.data, w, h, ch * w,
                              QImage.Format.Format_BGR888).copy()
             self.frame_signal.emit(q_image)
         except Exception as e:
