@@ -654,15 +654,15 @@ class MainWindow(QMainWindow):
             return
 
         # 数字键 1, 2, 3: 快速切换电机速度档位 (Gear 1: 0.3x, Gear 2: 1.0x, Gear 3: 2.2x)
-        if key in (Qt.Key.Key_1, Qt.Key.Key_Keypad_1):
+        if key == Qt.Key.Key_1:
             self.controller.set_speed_gear(1)
             event.accept()
             return
-        elif key in (Qt.Key.Key_2, Qt.Key.Key_Keypad_2):
+        elif key == Qt.Key.Key_2:
             self.controller.set_speed_gear(2)
             event.accept()
             return
-        elif key in (Qt.Key.Key_3, Qt.Key.Key_Keypad_3):
+        elif key == Qt.Key.Key_3:
             self.controller.set_speed_gear(3)
             event.accept()
             return

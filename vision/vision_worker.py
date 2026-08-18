@@ -654,37 +654,34 @@ class VisionWorker(QThread):
                 class_name=result.class_name
             )]
 
-        # 2. 遍历所有目标进行 IFF 敌我识别与测距
-        analyzed_targets = []
-        for t in raw_targets:
-            raw_cname = t.class_name if t.class_name else f"Cls_{t.class_id}"
+        # 2. 空间质心多目标时序滤波与多空间 IFF 敌我识别 (彻底消除闪烁与跳变)
+        if self.iff_enabled:
+            analyzed_targets = self._iff.update_frame(frame, raw_targets)
+        else:
+            analyzed_targets = []
+            for t in raw_targets:
+                raw_cname = t.class_name if t.class_name else f"Cls_{t.class_id}"
+                x1, y1, x2, y2 = [int(v) for v in t.box]
+                analyzed_targets.append({
+                    "track_id": 0,
+                    "raw_name": raw_cname,
+                    "sinif": raw_cname,
+                    "guven": float(t.confidence or 0.0),
+                    "box": (x1, y1, x2, y2),
+                    "position": (int((x1 + x2) / 2), int((y1 + y2) / 2)),
+                    "taraf": ENEMY,
+                    "renk": ENEMY,
+                    "missing": 0,
+                })
+
+        for d in analyzed_targets:
+            raw_cname = d["raw_name"]
             display_name = VisionConfig.get_class_display_name(raw_cname)
-            
-            # IFF 颜色识别
-            taraf = NEUTRAL
-            if self.iff_enabled:
-                taraf_raw, _, _, _ = iff_analiz(frame, t.box)
-                t_key = f"{raw_cname}_{t.box[0]//30}_{t.box[1]//30}"
-                taraf = self._iff.guncelle(t_key, taraf_raw)
-
-            # 光学测距估算 (~10m 标准比赛场景)
-            bw = max(t.box[2] - t.box[0], 1)
+            d["display_name"] = display_name
+            d["gorunen"] = display_name
+            bw = max(d["box"][2] - d["box"][0], 1)
             mesafe_m = (self.frame_width * 0.45) / (2.0 * bw * math.tan(math.radians(30.0)))
-            mesafe_m = max(1.0, min(30.0, mesafe_m))
-
-            analyzed_targets.append({
-                "target": t,
-                "raw_name": raw_cname,
-                "display_name": display_name,
-                "sinif": raw_cname,
-                "gorunen": display_name,
-                "guven": float(t.confidence or 0.0),
-                "box": t.box,
-                "position": t.position,
-                "mesafe_m": mesafe_m,
-                "taraf": taraf,
-                "renk": taraf,
-            })
+            d["mesafe_m"] = max(1.0, min(30.0, mesafe_m))
 
         # 分类统计
         enemy_list = [d for d in analyzed_targets if d["taraf"] == ENEMY]
@@ -707,7 +704,7 @@ class VisionWorker(QThread):
             locked_enemy = enemy_list[0]
             atis_izni = True
 
-        # 4. 画面战术 HUD 绘制
+        # 4. 画面战术 HUD 绘制 (高对比度暗色半透明底衬 + 鲜明军规配色)
         for d in analyzed_targets:
             x1, y1, x2, y2 = d["box"]
             pos = d["position"]
@@ -717,65 +714,77 @@ class VisionWorker(QThread):
 
             if locked_enemy and d == locked_enemy:
                 # ====== 当前主锁定敌方目标 (RED HOSTILE - PRIMARY ENGAGEMENT) ======
-                c_color = (40, 40, 240) # BGR Red
-                # 绘制四角加厚瞄准角框
+                c_color = (30, 30, 255) # 鲜明正红
                 line_len = min(22, (x2 - x1) // 3, (y2 - y1) // 3)
-                cv2.line(frame, (x1, y1), (x1 + line_len, y1), c_color, 2)
-                cv2.line(frame, (x1, y1), (x1, y1 + line_len), c_color, 2)
-                cv2.line(frame, (x2, y1), (x2 - line_len, y1), c_color, 2)
-                cv2.line(frame, (x2, y1), (x2, y1 + line_len), c_color, 2)
-                cv2.line(frame, (x1, y2), (x1 + line_len, y2), c_color, 2)
-                cv2.line(frame, (x1, y2), (x1, y2 - line_len), c_color, 2)
-                cv2.line(frame, (x2, y2), (x2 - line_len, y2), c_color, 2)
-                cv2.line(frame, (x2, y2), (x2, y2 - line_len), c_color, 2)
+                # 四角战术包角
+                cv2.line(frame, (x1, y1), (x1 + line_len, y1), c_color, 3)
+                cv2.line(frame, (x1, y1), (x1, y1 + line_len), c_color, 3)
+                cv2.line(frame, (x2, y1), (x2 - line_len, y1), c_color, 3)
+                cv2.line(frame, (x2, y1), (x2, y1 + line_len), c_color, 3)
+                cv2.line(frame, (x1, y2), (x1 + line_len, y2), c_color, 3)
+                cv2.line(frame, (x1, y2), (x1, y2 - line_len), c_color, 3)
+                cv2.line(frame, (x2, y2), (x2 - line_len, y2), c_color, 3)
+                cv2.line(frame, (x2, y2), (x2, y2 - line_len), c_color, 3)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), c_color, 1)
 
-                # 中心红点与红色追踪引导箭头 (仅指向当前交战的主敌方)
+                # 中心红点与红色追踪引导箭头
                 cv2.circle(frame, pos, 5, c_color, -1)
                 cv2.arrowedLine(frame, (cx, cy), pos, c_color, 2, tipLength=0.15)
 
-                # 顶部标签
+                # 顶部标签与深色背景框（消除与背景光晕混淆）
+                tag_y = max(38, y1 - 8)
+                cv2.rectangle(frame, (x1 - 1, tag_y - 30), (x1 + 260, tag_y), (15, 15, 25), -1)
+                cv2.rectangle(frame, (x1 - 1, tag_y - 30), (x1 + 260, tag_y), c_color, 1)
                 cv2.putText(frame, f"[HOSTILE LOCKED] {disp_name} ({conf_pct}%)",
-                            (x1, max(20, y1 - 22)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.52, c_color, 2)
-                cv2.putText(frame, f"FIRE AUTHORIZED >> ENEMY | {d['mesafe_m']:.1f}m",
-                            (x1, max(36, y1 - 6)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (60, 60, 255), 1)
+                            (x1 + 4, tag_y - 16),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.putText(frame, f"FIRE >> ENEMY (RED) | {d['mesafe_m']:.1f}m",
+                            (x1 + 4, tag_y - 3),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.40, (50, 100, 255), 1, cv2.LINE_AA)
 
             elif taraf == ENEMY:
                 # ====== 次要敌方目标 (RED HOSTILE - QUEUED / STANDBY) ======
-                c_color = (40, 40, 240) # BGR Red（全部敌方标红）
+                c_color = (30, 30, 255)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), c_color, 2)
                 cv2.circle(frame, pos, 3, c_color, -1)
+
+                tag_y = max(38, y1 - 8)
+                cv2.rectangle(frame, (x1 - 1, tag_y - 30), (x1 + 220, tag_y), (15, 15, 25), -1)
+                cv2.rectangle(frame, (x1 - 1, tag_y - 30), (x1 + 220, tag_y), c_color, 1)
                 cv2.putText(frame, f"[HOSTILE] {disp_name} ({conf_pct}%)",
-                            (x1, max(20, y1 - 22)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.50, c_color, 2)
+                            (x1 + 4, tag_y - 16),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1, cv2.LINE_AA)
                 cv2.putText(frame, f"ENEMY QUEUED | {d['mesafe_m']:.1f}m",
-                            (x1, max(36, y1 - 6)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (60, 60, 255), 1)
+                            (x1 + 4, tag_y - 3),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.40, (50, 100, 255), 1, cv2.LINE_AA)
 
             elif taraf == FRIENDLY:
                 # ====== 友军保护目标 (BLUE FRIENDLY - PROTECTED) ======
-                c_color = (240, 180, 40) # BGR Blue / Cyan
+                c_color = (255, 200, 0) # 高对比度鲜明青蓝 (Cyan-Blue)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), c_color, 2)
                 cv2.circle(frame, pos, 3, c_color, -1)
-                
-                # 顶部标签：明确标明 FRIENDLY - DO NOT FIRE
+
+                tag_y = max(38, y1 - 8)
+                cv2.rectangle(frame, (x1 - 1, tag_y - 30), (x1 + 240, tag_y), (15, 25, 20), -1)
+                cv2.rectangle(frame, (x1 - 1, tag_y - 30), (x1 + 240, tag_y), c_color, 1)
                 cv2.putText(frame, f"[FRIENDLY] {disp_name} ({conf_pct}%)",
-                            (x1, max(20, y1 - 22)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.50, c_color, 2)
+                            (x1 + 4, tag_y - 16),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.44, (255, 255, 255), 1, cv2.LINE_AA)
                 cv2.putText(frame, "PROTECTED -- DO NOT FIRE",
-                            (x1, max(36, y1 - 6)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (100, 230, 255), 1)
+                            (x1 + 4, tag_y - 3),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.40, (100, 240, 255), 1, cv2.LINE_AA)
 
             else:
-                # ====== 未定中立目标 (NEUTRAL / UNKNOWN) ======
-                c_color = (170, 170, 170)
+                # ====== 未定中立目标 (NEUTRAL / ANALYZING) ======
+                c_color = (0, 180, 255) # 亮琥珀黄
                 cv2.rectangle(frame, (x1, y1), (x2, y2), c_color, 1)
                 cv2.circle(frame, pos, 3, c_color, -1)
-                cv2.putText(frame, f"{disp_name} ({conf_pct}%)",
-                            (x1, max(20, y1 - 6)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, c_color, 1)
+
+                tag_y = max(24, y1 - 6)
+                cv2.rectangle(frame, (x1 - 1, tag_y - 18), (x1 + 180, tag_y), (20, 20, 20), -1)
+                cv2.putText(frame, f"[IFF?] {disp_name} ({conf_pct}%)",
+                            (x1 + 4, tag_y - 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 210, 255), 1, cv2.LINE_AA)
 
         # 5. 云台驱动控制
         if atis_izni and locked_enemy:
