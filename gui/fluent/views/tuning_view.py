@@ -3,8 +3,7 @@
 PID 参数调优与运动诊断视图 (Tuning & Diagnostics View)
 
 布局设计：
-- 双栏结构：左侧中等尺寸视频监控流（观察实时追踪阻尼与超调）；
-- 右侧两个 Fluent CardWidget：
+- 右侧两个独立的现代 Fluent CardWidget：
   1. PID 闭环控制参数卡片 (Kp, Ki, Kd, Deadzone, 轴反转, 保存/重置)
   2. 手动阶跃与云台校准卡片 (D-Pad 方向微调与键盘直控开关)
 """
@@ -12,11 +11,10 @@ PID 参数调优与运动诊断视图 (Tuning & Diagnostics View)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
-    QScrollArea, QSizePolicy
+    QScrollArea
 )
 from qfluentwidgets import (
-    CardWidget, SimpleCardWidget, HeaderCardWidget,
-    Slider, DoubleSpinBox, SpinBox, SwitchButton,
+    CardWidget, Slider, DoubleSpinBox, SpinBox, SwitchButton,
     PushButton, PrimaryPushButton, FluentIcon,
     StrongBodyLabel, CaptionLabel, BodyLabel, InfoBar, InfoBarPosition
 )
@@ -56,14 +54,11 @@ class TuningView(QWidget):
         apply_wheel_protection(self)
 
     def init_ui(self):
-        main_layout = QHBoxLayout(self)
+        main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(16, 16, 16, 16)
-        main_layout.setSpacing(16)
+        main_layout.setSpacing(12)
 
-        # ==========================
-        # 右侧：可滚动的参数调节与诊断卡片
-        # ==========================
-        scroll = QScrollArea(self)
+        scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -76,11 +71,14 @@ class TuningView(QWidget):
         # ----------------------------------
         # 卡片 1: PID 闭环控制参数 (CardWidget)
         # ----------------------------------
-        pid_card = HeaderCardWidget(self)
-        pid_card.setTitle("⚙️ PID 闭环追踪参数 (Real-Time Control Loop)")
+        pid_card = CardWidget()
         pid_layout = QVBoxLayout(pid_card)
-        pid_layout.setContentsMargins(16, 14, 16, 16)
+        pid_layout.setContentsMargins(20, 18, 20, 20)
         pid_layout.setSpacing(14)
+
+        card_title_1 = StrongBodyLabel("⚙️ PID 闭环追踪参数 (Real-Time Control Loop)")
+        card_title_1.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc;")
+        pid_layout.addWidget(card_title_1)
 
         # 比例增益 Kp
         self.kp_slider, self.kp_spin = self._create_param_row(
@@ -105,8 +103,8 @@ class TuningView(QWidget):
 
         # 死区 Deadzone
         dz_layout = QHBoxLayout()
-        dz_label = BodyLabel("目标死区 (Deadzone px):", self)
-        self.dz_spin = SpinBox(self)
+        dz_label = BodyLabel("目标死区 (Deadzone px):")
+        self.dz_spin = SpinBox()
         self.dz_spin.setRange(0, 50)
         self.dz_spin.setValue(self._deadzone)
         self.dz_spin.valueChanged.connect(self._on_deadzone_changed)
@@ -118,19 +116,19 @@ class TuningView(QWidget):
 
         # 轴向反转 (Invert X / Y)
         invert_layout = QHBoxLayout()
-        inv_x_label = BodyLabel("X 轴反向:", self)
-        self.switch_inv_x = SwitchButton(self)
+        inv_x_label = BodyLabel("X 轴反向:")
+        self.switch_inv_x = SwitchButton()
         self.switch_inv_x.setChecked(self._invert_x)
         self.switch_inv_x.checkedChanged.connect(self._on_invert_changed)
 
-        inv_y_label = BodyLabel("Y 轴反向:", self)
-        self.switch_inv_y = SwitchButton(self)
+        inv_y_label = BodyLabel("Y 轴反向:")
+        self.switch_inv_y = SwitchButton()
         self.switch_inv_y.setChecked(self._invert_y)
         self.switch_inv_y.checkedChanged.connect(self._on_invert_changed)
 
         invert_layout.addWidget(inv_x_label)
         invert_layout.addWidget(self.switch_inv_x)
-        invert_layout.addSpacing(20)
+        invert_layout.addSpacing(24)
         invert_layout.addWidget(inv_y_label)
         invert_layout.addWidget(self.switch_inv_y)
         invert_layout.addStretch()
@@ -138,10 +136,10 @@ class TuningView(QWidget):
 
         # 操作按钮
         btn_layout = QHBoxLayout()
-        self.btn_save = PrimaryPushButton(FluentIcon.SAVE, "保存参数配置", self)
+        self.btn_save = PrimaryPushButton(FluentIcon.SAVE, "保存参数配置")
         self.btn_save.clicked.connect(self._on_save_clicked)
 
-        self.btn_reset = PushButton(FluentIcon.SYNC, "恢复出厂预设", self)
+        self.btn_reset = PushButton(FluentIcon.SYNC, "恢复出厂预设")
         self.btn_reset.clicked.connect(self._on_reset_clicked)
 
         btn_layout.addWidget(self.btn_save)
@@ -153,21 +151,24 @@ class TuningView(QWidget):
         # ----------------------------------
         # 卡片 2: 手动阶跃与运动测试 (CardWidget)
         # ----------------------------------
-        manual_card = HeaderCardWidget(self)
-        manual_card.setTitle("🎮 云台运动诊断与阶跃测试 (Manual Diagnostics)")
+        manual_card = CardWidget()
         manual_layout = QVBoxLayout(manual_card)
-        manual_layout.setContentsMargins(16, 14, 16, 16)
+        manual_layout.setContentsMargins(20, 18, 20, 20)
         manual_layout.setSpacing(14)
+
+        card_title_2 = StrongBodyLabel("🎮 云台运动诊断与方向测试 (Manual Diagnostics)")
+        card_title_2.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc;")
+        manual_layout.addWidget(card_title_2)
 
         # D-Pad 方向键
         dpad_container = QHBoxLayout()
         dpad_grid = QGridLayout()
         dpad_grid.setSpacing(8)
 
-        self.btn_up = PushButton("▲", self)
-        self.btn_down = PushButton("▼", self)
-        self.btn_left = PushButton("◀", self)
-        self.btn_right = PushButton("▶", self)
+        self.btn_up = PushButton("▲")
+        self.btn_down = PushButton("▼")
+        self.btn_left = PushButton("◀")
+        self.btn_right = PushButton("▶")
 
         for btn in (self.btn_up, self.btn_down, self.btn_left, self.btn_right):
             btn.setFixedSize(50, 42)
@@ -197,8 +198,8 @@ class TuningView(QWidget):
 
         # 键盘全局直控说明与开关
         kb_box = QHBoxLayout()
-        kb_label = BodyLabel("全局键盘直控 (WASD / 方向键):", self)
-        self.switch_keyboard = SwitchButton(self)
+        kb_label = BodyLabel("全局键盘直控 (WASD / 方向键):")
+        self.switch_keyboard = SwitchButton()
         self.switch_keyboard.setChecked(True)
         self.switch_keyboard.checkedChanged.connect(self.keyboard_control_toggled.emit)
         kb_box.addWidget(kb_label)
@@ -217,8 +218,8 @@ class TuningView(QWidget):
         vbox.setSpacing(4)
 
         header = QHBoxLayout()
-        label = BodyLabel(title, self)
-        spin = DoubleSpinBox(self)
+        label = BodyLabel(title)
+        spin = DoubleSpinBox()
         spin.setRange(min_val, max_val)
         spin.setSingleStep(step)
         spin.setDecimals(decimals)
@@ -230,7 +231,7 @@ class TuningView(QWidget):
         header.addWidget(spin)
         vbox.addLayout(header)
 
-        slider = Slider(Qt.Orientation.Horizontal, self)
+        slider = Slider(Qt.Orientation.Horizontal)
         slider.setRange(int(min_val * 100), int(max_val * 100))
         slider.setValue(int(init_val * 100))
         slider.setSingleStep(int(step * 100))

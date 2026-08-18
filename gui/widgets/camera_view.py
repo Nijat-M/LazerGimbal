@@ -188,24 +188,29 @@ class CameraView(QWidget):
 
         # 1. 顶部操作工具栏 (Live View 标题 + 全屏/掩码切换按钮)
         header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(4, 2, 4, 2)
+        header_layout.setContentsMargins(4, 2, 4, 4)
 
-        self.lbl_title = QLabel("<h2>📷 Live Camera Feed</h2>")
+        self.lbl_title = QLabel("📷 实时视频监控与作战准星 (Live Vision & HUD)")
+        self.lbl_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #f8fafc;")
         header_layout.addWidget(self.lbl_title)
         header_layout.addStretch()
 
-        # 掩码显示/折叠切换按钮
-        self.btn_toggle_mask = QPushButton("👁 Debug Mask")
+        # 掩码显示/折叠切换按钮 (默认折叠以保持主界面清爽)
+        self.btn_toggle_mask = QPushButton("👁 视觉掩码 (Mask)")
         self.btn_toggle_mask.setCheckable(True)
-        self.btn_toggle_mask.setChecked(True)
+        self.btn_toggle_mask.setChecked(False)
         self.btn_toggle_mask.setStyleSheet("""
             QPushButton {
                 background-color: #1e293b;
                 color: #94a3b8;
                 border: 1px solid #334155;
-                padding: 4px 8px;
+                padding: 4px 10px;
                 border-radius: 4px;
                 font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #334155;
+                color: #f8fafc;
             }
             QPushButton:checked {
                 background-color: #0369a1;
@@ -217,16 +222,17 @@ class CameraView(QWidget):
         header_layout.addWidget(self.btn_toggle_mask)
 
         # 全屏切换按钮
-        self.btn_fullscreen = QPushButton("⛶ Fullscreen (F11)")
-        self.btn_fullscreen.setToolTip("Toggle Fullscreen Live View (Double click feed or press F11)")
+        self.btn_fullscreen = QPushButton("⛶ 全屏显示 (F11)")
+        self.btn_fullscreen.setToolTip("双击画面或按 F11 切换全屏沉浸式监控")
         self.btn_fullscreen.setStyleSheet("""
             QPushButton {
                 background-color: #0284c7;
                 color: #ffffff;
                 font-weight: bold;
-                padding: 4px 10px;
+                padding: 4px 12px;
                 border-radius: 4px;
                 font-size: 11px;
+                border: none;
             }
             QPushButton:hover {
                 background-color: #0369a1;
@@ -239,7 +245,7 @@ class CameraView(QWidget):
 
         # 2. 摄像头主显示标签
         self.lbl_camera = MouseAimLabel("Camera not started")
-        self.lbl_camera.setStyleSheet("background-color: black; border: 2px solid #333; border-radius: 4px;")
+        self.lbl_camera.setStyleSheet("background-color: #020617; border: 1px solid #1e293b; border-radius: 6px;")
         self.lbl_camera.setMinimumSize(480, 360)
         self.lbl_camera.mouse_delta_signal.connect(self.mouse_delta_signal.emit)
         self.lbl_camera.capture_changed_signal.connect(
@@ -248,8 +254,9 @@ class CameraView(QWidget):
         self.lbl_camera.double_clicked_signal.connect(self.fullscreen_requested.emit)
         layout.addWidget(self.lbl_camera, 3)
 
-        # 3. 调试掩码区域
+        # 3. 调试掩码区域 (默认隐藏)
         self.mask_container = QWidget()
+        self.mask_container.setVisible(False)
         mask_layout = QVBoxLayout(self.mask_container)
         mask_layout.setContentsMargins(0, 4, 0, 0)
         mask_layout.setSpacing(2)
@@ -260,7 +267,7 @@ class CameraView(QWidget):
 
         self.lbl_mask = QLabel("Debug Mask")
         self.lbl_mask.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_mask.setStyleSheet("background-color: #18181b; border: 1px dashed #3f3f46; border-radius: 4px;")
+        self.lbl_mask.setStyleSheet("background-color: #090d16; border: 1px dashed #334155; border-radius: 4px;")
         self.lbl_mask.setMinimumSize(320, 160)
         self.lbl_mask.setMaximumHeight(240)
         mask_layout.addWidget(self.lbl_mask)
