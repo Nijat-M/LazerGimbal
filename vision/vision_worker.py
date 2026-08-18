@@ -18,6 +18,9 @@
 import os
 import sys
 import threading
+import math
+import time
+from collections import deque
 
 # 抑制 OpenCV 警告
 os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
@@ -26,11 +29,9 @@ os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
 from vision.yolo_detector import AsyncYOLODetector, YOLODetector
 
 import cv2
-import time
 import numpy as np
 from PyQt6.QtCore import QThread, pyqtSignal, pyqtSlot, Qt
 from PyQt6.QtGui import QImage
-from collections import deque
 
 from config.vision_config import VisionConfig
 from vision.detector import TargetDetector
@@ -416,8 +417,11 @@ class VisionWorker(QThread):
         blue_result, mask_blue = self.detector.detect_blue_object(frame)
 
         # 画面中心十字线
-        cx = self.frame_width // 2
-        cy = self.frame_height // 2
+        # Nisangah = lazerin GERCEK vurus noktasi (boresight kalibrasyonu uygulanmis).
+        # 十字线画在【激光实际落点】上 —— 所见即所打。
+        VisionConfig.CENTER_X = self.frame_width // 2
+        VisionConfig.CENTER_Y = self.frame_height // 2
+        cx, cy = VisionConfig.aim_point(VisionConfig.AKTIF_MESAFE_M)
         cv2.line(frame, (cx - 20, cy), (cx + 20, cy), (0, 255, 255), 1)
         cv2.line(frame, (cx, cy - 20), (cx, cy + 20), (0, 255, 255), 1)
         cv2.circle(frame, (cx, cy), 5, (0, 255, 255), 2)
@@ -462,8 +466,11 @@ class VisionWorker(QThread):
         result = self.yolo_detector.detect_target(frame)
 
         # 画面中心十字准星与战术瞄准环
-        cx = self.frame_width // 2
-        cy = self.frame_height // 2
+        # Nisangah = lazerin GERCEK vurus noktasi (boresight kalibrasyonu uygulanmis).
+        # 十字线画在【激光实际落点】上 —— 所见即所打。
+        VisionConfig.CENTER_X = self.frame_width // 2
+        VisionConfig.CENTER_Y = self.frame_height // 2
+        cx, cy = VisionConfig.aim_point(VisionConfig.AKTIF_MESAFE_M)
         cv2.line(frame, (cx - 25, cy), (cx + 25, cy), (0, 255, 255), 1)
         cv2.line(frame, (cx, cy - 25), (cx, cy + 25), (0, 255, 255), 1)
         cv2.circle(frame, (cx, cy), 6, (0, 255, 255), 1)

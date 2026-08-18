@@ -56,6 +56,106 @@ class VisionConfig:
     # ==========================
     CENTER_X = 320          # 画面中心X（一般是宽度/2）
     CENTER_Y = 240          # 画面中心Y（一般是高度/2）
+
+    # ==========================
+    # Lazer-Kamera Boresight Kalibrasyonu / 激光-相机 光轴校准
+    # ==========================
+    # Kamera lazer cikisinin USTUNDE duruyor -> ikisi es eksenli DEGIL.
+    # Bu yuzden lazerin gercek vurus noktasi ekran merkezine denk gelmez.
+    # 相机装在激光出口【上方】，两者不同轴，所以激光实际落点不在画面正中。
+    #
+    # Toplam kayma iki bilesenden olusur / 总偏移由两部分组成:
+    #   1) SABIT (mekanik egiklik): mesafeden bagimsiz, piksel cinsinden sabit
+    #      固定分量（机械倾斜）：与距离无关，像素值恒定
+    #   2) PARALAKS (baz mesafesi): mesafeyle TERS orantili, uzakta kuculur
+    #      视差分量（基线）：与距离成反比，越远越小
+    #
+    #   kayma(d) = CENTER_OFFSET + PARALLAX_AT_1M / d
+    #
+    # Tek mesafede kalibre ederseniz PARALLAX_AT_1M = 0 birakin;
+    # 5/10/15 m'nin ucunde de vurmak istiyorsaniz iki mesafede olcup doldurun.
+    # 只在一个距离校准就把 PARALLAX 留 0；要在 5/10/15 米都打准就测两个距离。
+    CENTER_OFFSET_X = 0      # sabit bilesen (px) / 固定分量
+    CENTER_OFFSET_Y = 0
+    PARALLAX_X_AT_1M = 0.0   # 1 m'deki paralaks (px) / 1米处的视差量
+    PARALLAX_Y_AT_1M = 0.0
+    CALIB_PATH = "config/crosshair_calibration.json"
+
+    # Aktif atis mesafesi (m). Paralaks duzeltmesi bunu kullanir.
+    # 当前交战距离(米)，视差修正用它。None = 只用固定偏移。
+    # Yarismada mesafe bilindigi icin (5/10/15 m) arayuzden secilir.
+    # 比赛里距离是已知的，界面上直接选。
+    AKTIF_MESAFE_M = None
+
+    @classmethod
+    def aim_point(cls, mesafe_m=None):
+        """Lazerin GERCEKTEN vuracagi ekran noktasi.
+           激光【实际】会打到的屏幕点。云台要把目标驱动到这里，而不是画面正中。"""
+        ox, oy = cls.CENTER_OFFSET_X, cls.CENTER_OFFSET_Y
+        if mesafe_m and mesafe_m > 0.2:
+            ox += cls.PARALLAX_X_AT_1M / mesafe_m
+            oy += cls.PARALLAX_Y_AT_1M / mesafe_m
+        return int(round(cls.CENTER_X + ox)), int(round(cls.CENTER_Y + oy))
+
+    @classmethod
+    def set_center_offset(cls, ox: int, oy: int):
+        cls.CENTER_OFFSET_X, cls.CENTER_OFFSET_Y = int(ox), int(oy)
+        return cls.CENTER_OFFSET_X, cls.CENTER_OFFSET_Y
+
+    @classmethod
+    def adjust_center_offset(cls, dx: int, dy: int):
+        return cls.set_center_offset(cls.CENTER_OFFSET_X + dx,
+                                     cls.CENTER_OFFSET_Y + dy)
+
+    @classmethod
+    def reset_center_offset(cls):
+        cls.PARALLAX_X_AT_1M = cls.PARALLAX_Y_AT_1M = 0.0
+        return cls.set_center_offset(0, 0)
+
+    @classmethod
+    def solve_parallax(cls, d1, off1, d2, off2):
+        """Iki mesafedeki olcumden sabit + paralaks bilesenlerini cozer.
+           由两个距离的实测偏移解出【固定分量】和【视差分量】。
+           off = (dx, dy) piksel. Ornek / 例: solve_parallax(5,(-40,-55), 15,(-18,-25))"""
+        for i, (o1, o2) in enumerate(zip(off1, off2)):
+            # o = C + P/d  ->  P = (o1-o2)/(1/d1 - 1/d2),  C = o1 - P/d1
+            denom = (1.0 / d1) - (1.0 / d2)
+            P = (o1 - o2) / denom if abs(denom) > 1e-9 else 0.0
+            C = o1 - P / d1
+            if i == 0:
+                cls.PARALLAX_X_AT_1M, cls.CENTER_OFFSET_X = P, int(round(C))
+            else:
+                cls.PARALLAX_Y_AT_1M, cls.CENTER_OFFSET_Y = P, int(round(C))
+        return (cls.CENTER_OFFSET_X, cls.CENTER_OFFSET_Y,
+                cls.PARALLAX_X_AT_1M, cls.PARALLAX_Y_AT_1M)
+
+    @classmethod
+    def load_crosshair_calibration(cls):
+        import json, os
+        try:
+            if os.path.exists(cls.CALIB_PATH):
+                d = json.load(open(cls.CALIB_PATH, encoding="utf-8"))
+                cls.CENTER_OFFSET_X = int(d.get("offset_x", 0))
+                cls.CENTER_OFFSET_Y = int(d.get("offset_y", 0))
+                cls.PARALLAX_X_AT_1M = float(d.get("parallax_x_at_1m", 0.0))
+                cls.PARALLAX_Y_AT_1M = float(d.get("parallax_y_at_1m", 0.0))
+                return True
+        except Exception:
+            pass
+        return False
+
+    @classmethod
+    def save_crosshair_calibration(cls):
+        import json, os
+        os.makedirs(os.path.dirname(cls.CALIB_PATH) or ".", exist_ok=True)
+        json.dump({
+            "offset_x": cls.CENTER_OFFSET_X,
+            "offset_y": cls.CENTER_OFFSET_Y,
+            "parallax_x_at_1m": cls.PARALLAX_X_AT_1M,
+            "parallax_y_at_1m": cls.PARALLAX_Y_AT_1M,
+            "description": "Laser-camera boresight. aim = center + offset + parallax/distance_m",
+        }, open(cls.CALIB_PATH, "w", encoding="utf-8"), indent=4, ensure_ascii=False)
+        return cls.CALIB_PATH
     PIXELS_PER_DEGREE = 20  # 像素到角度转换系数（估算值）
     
     # ==========================

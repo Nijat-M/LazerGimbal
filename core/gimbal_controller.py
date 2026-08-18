@@ -267,9 +267,12 @@ class GimbalController(QObject):
             if not self.visual_input_enabled:
                 return
 
-            # 计算相对于画面中心的原始误差
-            raw_error_x = target_x - VisionConfig_center_x()
-            raw_error_y = target_y - VisionConfig_center_y()
+            # Hedefi ekran MERKEZINE degil, lazerin GERCEK vurus noktasina suruyoruz.
+            # 误差要相对【激光实际落点】算，不是画面正中 ——
+            # 相机装在激光上方，两者不同轴；用正中算的话激光永远打偏。
+            aim_x, aim_y = VisionConfig_aim_point()
+            raw_error_x = target_x - aim_x
+            raw_error_y = target_y - aim_y
 
             # 将不同分辨率下的误差统一缩放到 640x480 空间。
             norm_x, norm_y = self._normalize_error(raw_error_x, raw_error_y)
@@ -570,6 +573,13 @@ class GimbalController(QObject):
 # --------------------------------------------------
 # 辅助函数（避免循环导入，延迟读取 VisionConfig）
 # --------------------------------------------------
+
+def VisionConfig_aim_point():
+    """Lazerin gercek vurus noktasi (boresight kalibrasyonu uygulanmis).
+       激光实际落点（已应用光轴校准）。"""
+    from config.vision_config import VisionConfig
+    return VisionConfig.aim_point(VisionConfig.AKTIF_MESAFE_M)
+
 
 def VisionConfig_center_x() -> int:
     """懒加载 VisionConfig.CENTER_X"""
