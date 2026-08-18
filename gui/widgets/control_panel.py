@@ -11,7 +11,7 @@
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, 
     QGroupBox, QSlider, QLabel, QFrame
 )
 from PyQt6.QtCore import pyqtSignal, Qt
