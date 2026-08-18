@@ -5,6 +5,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import (
     QColor,
     QCursor,
+    QFont,
     QImage,
     QKeyEvent,
     QMouseEvent,
@@ -140,11 +141,18 @@ class MouseAimLabel(QLabel):
             painter.drawEllipse(center, 3, 3)
 
         # 战术状态角标
+        hud_font = QFont("Segoe UI", 9, QFont.Weight.Bold)
+        painter.setFont(hud_font)
+
         if self.laser_firing:
-            painter.setPen(QPen(QColor(255, 50, 50, 255)))
+            painter.setPen(QPen(QColor(0, 0, 0, 180)))
+            painter.drawText(center.x() + 16, center.y() - 14, "⚡ LASER FIRE")
+            painter.setPen(QPen(QColor(255, 60, 60, 255)))
             painter.drawText(center.x() + 15, center.y() - 15, "⚡ LASER FIRE")
         elif self.laser_armed:
-            painter.setPen(QPen(QColor(255, 120, 50, 220)))
+            painter.setPen(QPen(QColor(0, 0, 0, 180)))
+            painter.drawText(center.x() + 16, center.y() - 14, "ARMED")
+            painter.setPen(QPen(QColor(255, 130, 50, 240)))
             painter.drawText(center.x() + 15, center.y() - 15, "ARMED")
 
     def _capture_mouse(self) -> None:

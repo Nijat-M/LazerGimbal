@@ -1,22 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-实时监控与主作战操控台 (Console View)
+实时监控与主作战操控台 (Console View) - 极致对齐与现代美化版
 
 布局特点：
 1. 沉浸式大视窗：主视频流 + 准星 HUD + FPS 鼠标操控。
-2. 顶部遥测状态栏 (Telemetry Header)：显示串口、帧率、激光状态、目标坐标等关键指标。
-3. 底部快捷动作条 (Quick Action Bar)：模式切换、激光安全锁、击发、一键回中、急停。
+2. 顶部遥测状态栏 (Telemetry Header)：所有状态胶囊水平绝对居中对齐，杜绝错位。
+3. 底部统一基准动作条 (Standardized Action Bar)：每列均采用统一规格标签 + 统一 36px 高度控件，所有按钮坐落在同一水平基准线。
 """
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSizePolicy
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSizePolicy, QFrame
 )
 from qfluentwidgets import (
     CardWidget, SimpleCardWidget, PushButton, PrimaryPushButton,
     TogglePushButton, SwitchButton, ComboBox, Slider,
     FluentIcon, InfoBar, InfoBarPosition,
-    StrongBodyLabel, CaptionLabel
+    CaptionLabel, StrongBodyLabel
 )
 
 from gui.widgets.camera_view import CameraView
@@ -52,27 +52,30 @@ class ConsoleView(QWidget):
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setContentsMargins(14, 12, 14, 12)
         main_layout.setSpacing(10)
 
-        # ==========================
-        # 1. 顶部遥测与状态药丸条 (Telemetry Bar)
-        # ==========================
+        # ==========================================
+        # 1. 顶部遥测与状态药丸条 (Telemetry Header)
+        # ==========================================
         telemetry_card = SimpleCardWidget()
         telemetry_layout = QHBoxLayout(telemetry_card)
-        telemetry_layout.setContentsMargins(16, 8, 16, 8)
+        telemetry_layout.setContentsMargins(16, 6, 16, 6)
         telemetry_layout.setSpacing(14)
+        telemetry_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         # 串口状态胶囊
         self.serial_badge = QLabel("● 串口: 未连接")
+        self.serial_badge.setFixedHeight(26)
+        self.serial_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.serial_badge.setStyleSheet("""
             QLabel {
                 background-color: #334155;
                 color: #94a3b8;
                 font-weight: bold;
                 font-size: 11px;
-                padding: 4px 10px;
-                border-radius: 12px;
+                padding: 2px 12px;
+                border-radius: 13px;
             }
         """)
         telemetry_layout.addWidget(self.serial_badge)
@@ -80,55 +83,62 @@ class ConsoleView(QWidget):
         telemetry_layout.addSpacing(6)
 
         # 帧率与视觉状态
-        self.fps_label = CaptionLabel("FPS: -- | Res: ---")
-        self.fps_label.setStyleSheet("color: #94a3b8; font-family: monospace; font-size: 12px;")
+        self.fps_label = QLabel("FPS: -- | Res: ---")
+        self.fps_label.setFixedHeight(26)
+        self.fps_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.fps_label.setStyleSheet("color: #94a3b8; font-family: 'Segoe UI', monospace; font-size: 12px; font-weight: 500;")
         telemetry_layout.addWidget(self.fps_label)
 
         telemetry_layout.addSpacing(6)
 
         # 目标相对偏差
-        self.target_label = CaptionLabel("Target Δ: [0.0°, 0.0°]")
-        self.target_label.setStyleSheet("color: #38bdf8; font-family: monospace; font-size: 12px;")
+        self.target_label = QLabel("Target Δ: [0.0°, 0.0°]")
+        self.target_label.setFixedHeight(26)
+        self.target_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.target_label.setStyleSheet("color: #38bdf8; font-family: 'Segoe UI', monospace; font-size: 12px; font-weight: 600;")
         telemetry_layout.addWidget(self.target_label)
 
         telemetry_layout.addStretch()
 
         # 激光安全状态胶囊
         self.laser_badge = QLabel("LASER SAFE")
+        self.laser_badge.setFixedHeight(26)
+        self.laser_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.laser_badge.setStyleSheet("""
             QLabel {
                 background-color: #065f46;
                 color: #34d399;
                 font-weight: bold;
                 font-size: 11px;
-                padding: 4px 12px;
-                border-radius: 12px;
+                padding: 2px 14px;
+                border-radius: 13px;
             }
         """)
         telemetry_layout.addWidget(self.laser_badge)
 
         main_layout.addWidget(telemetry_card)
 
-        # ==========================
+        # ==========================================
         # 2. 核心大视窗：视频流与 HUD (Camera View)
-        # ==========================
+        # ==========================================
         self.camera_view = CameraView()
         self.camera_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         main_layout.addWidget(self.camera_view, 1)
 
-        # ==========================
-        # 3. 底部快捷动作条 (Quick Action Bar)
-        # ==========================
+        # ==========================================
+        # 3. 底部统一基线控制架 (Quick Action Control Rack)
+        # ==========================================
         action_card = CardWidget()
         action_layout = QHBoxLayout(action_card)
-        action_layout.setContentsMargins(14, 10, 14, 10)
-        action_layout.setSpacing(12)
+        action_layout.setContentsMargins(16, 12, 16, 12)
+        action_layout.setSpacing(16)
+        action_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        # --- 模式选择器 ---
-        mode_box = QVBoxLayout()
-        mode_box.setSpacing(2)
-        mode_title = CaptionLabel("工作模式 / Mode")
+        # --- 列 1: 模式选择器 ---
+        col_mode = self._create_control_column("工作模式 / Mode")
         self.mode_combo = ComboBox()
+        self.mode_combo.setFixedHeight(36)
+        self.mode_combo.setMinimumWidth(170)
         self.mode_combo.addItems([
             "待机 (IDLE)",
             "蓝色物体追踪 (Color)",
@@ -138,41 +148,42 @@ class ConsoleView(QWidget):
         ])
         self.mode_combo.setCurrentIndex(0)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_combo_changed)
-        self.mode_combo.setMinimumWidth(180)
-        mode_box.addWidget(mode_title)
-        mode_box.addWidget(self.mode_combo)
-        action_layout.addLayout(mode_box)
+        col_mode.addWidget(self.mode_combo)
+        action_layout.addLayout(col_mode)
 
-        action_layout.addSpacing(6)
-
-        # --- 追踪使能按钮 ---
-        self.btn_track = TogglePushButton(FluentIcon.PLAY, "开始追踪 / Track")
-        self.btn_track.setMinimumHeight(38)
+        # --- 列 2: 追踪使能按钮 ---
+        col_track = self._create_control_column("自动追踪 / Track")
+        self.btn_track = TogglePushButton(FluentIcon.PLAY, "开始追踪")
+        self.btn_track.setFixedHeight(36)
+        self.btn_track.setMinimumWidth(110)
         self.btn_track.toggled.connect(self._on_track_toggled)
-        action_layout.addWidget(self.btn_track)
+        col_track.addWidget(self.btn_track)
+        action_layout.addLayout(col_track)
 
-        # --- 激光保险解锁开关 ---
-        arm_box = QVBoxLayout()
-        arm_box.setSpacing(2)
-        arm_title = CaptionLabel("激光保险 / Arm")
-        arm_h = QHBoxLayout()
+        # --- 分隔线 ---
+        action_layout.addWidget(self._create_v_separator())
+
+        # --- 列 3: 激光保险解锁开关 ---
+        col_arm = self._create_control_column("激光保险 / Arm")
         self.switch_arm = SwitchButton()
+        self.switch_arm.setFixedHeight(36)
         self.switch_arm.setOnText("ARMED")
         self.switch_arm.setOffText("SAFE")
         self.switch_arm.checkedChanged.connect(self._on_arm_toggled)
-        arm_h.addWidget(self.switch_arm)
-        arm_box.addWidget(arm_title)
-        arm_box.addLayout(arm_h)
-        action_layout.addLayout(arm_box)
+        col_arm.addWidget(self.switch_arm)
+        action_layout.addLayout(col_arm)
 
-        # --- 激光点射按钮 ---
+        # --- 列 4: 激光点射按钮 ---
+        col_fire = self._create_control_column("激光击发 / Fire")
         self.btn_fire = PrimaryPushButton(FluentIcon.MESSAGE, "击发 (Space)")
-        self.btn_fire.setMinimumHeight(38)
+        self.btn_fire.setFixedHeight(36)
+        self.btn_fire.setMinimumWidth(115)
         self.btn_fire.setEnabled(False)
         self.btn_fire.setStyleSheet("""
             PrimaryPushButton {
                 background-color: #f43f5e;
                 border: 1px solid #e11d48;
+                font-weight: bold;
             }
             PrimaryPushButton:hover {
                 background-color: #e11d48;
@@ -181,38 +192,45 @@ class ConsoleView(QWidget):
                 background-color: #be123c;
             }
             PrimaryPushButton:disabled {
-                background-color: #475569;
-                border: 1px solid #334155;
+                background-color: #334155;
+                color: #64748b;
+                border: 1px solid #1e293b;
             }
         """)
         self.btn_fire.pressed.connect(lambda: self.laser_fire_changed.emit(True))
         self.btn_fire.released.connect(lambda: self.laser_fire_changed.emit(False))
-        action_layout.addWidget(self.btn_fire)
+        col_fire.addWidget(self.btn_fire)
+        action_layout.addLayout(col_fire)
 
-        # --- 激光功率调节 (PWM 0~100%) ---
-        pwr_box = QVBoxLayout()
-        pwr_box.setSpacing(2)
-        self.pwr_label = CaptionLabel("激光功率: 100%")
+        # --- 列 5: 激光 PWM 功率 ---
+        col_pwr = self._create_control_column("功率 / PWM: 100%")
+        self.pwr_label = col_pwr.itemAt(0).widget()  # 获取刚才生成的标签用于动态更新
         self.pwr_slider = Slider(Qt.Orientation.Horizontal)
+        self.pwr_slider.setFixedHeight(36)
         self.pwr_slider.setRange(0, 100)
         self.pwr_slider.setValue(100)
-        self.pwr_slider.setFixedWidth(110)
+        self.pwr_slider.setFixedWidth(100)
         self.pwr_slider.valueChanged.connect(self._on_power_slider_changed)
-        pwr_box.addWidget(self.pwr_label)
-        pwr_box.addWidget(self.pwr_slider)
-        action_layout.addLayout(pwr_box)
+        col_pwr.addWidget(self.pwr_slider)
+        action_layout.addLayout(col_pwr)
 
-        action_layout.addSpacing(6)
+        # --- 分隔线 ---
+        action_layout.addWidget(self._create_v_separator())
 
-        # --- 一键回中 ---
-        self.btn_center = PushButton(FluentIcon.SYNC, "回中 / Center")
-        self.btn_center.setMinimumHeight(38)
+        # --- 列 6: 一键回中 ---
+        col_center = self._create_control_column("云台动作 / Origin")
+        self.btn_center = PushButton(FluentIcon.SYNC, "坐标回中")
+        self.btn_center.setFixedHeight(36)
+        self.btn_center.setMinimumWidth(100)
         self.btn_center.clicked.connect(self.reset_requested.emit)
-        action_layout.addWidget(self.btn_center)
+        col_center.addWidget(self.btn_center)
+        action_layout.addLayout(col_center)
 
-        # --- 紧急停止 (E-STOP) ---
+        # --- 列 7: 紧急停止 (E-STOP) ---
+        col_estop = self._create_control_column("紧急停机 / Safe")
         self.btn_estop = PrimaryPushButton(FluentIcon.CANCEL, "🛑 急停 (ESC)")
-        self.btn_estop.setMinimumHeight(38)
+        self.btn_estop.setFixedHeight(36)
+        self.btn_estop.setMinimumWidth(125)
         self.btn_estop.setStyleSheet("""
             PrimaryPushButton {
                 background-color: #b91c1c;
@@ -227,9 +245,31 @@ class ConsoleView(QWidget):
             }
         """)
         self.btn_estop.clicked.connect(self.emergency_stop_requested.emit)
-        action_layout.addWidget(self.btn_estop)
+        col_estop.addWidget(self.btn_estop)
+        action_layout.addLayout(col_estop)
 
         main_layout.addWidget(action_card)
+
+    def _create_control_column(self, label_text: str) -> QVBoxLayout:
+        """创建统一高度与对齐方式的标准控制列"""
+        vbox = QVBoxLayout()
+        vbox.setSpacing(4)
+        vbox.setContentsMargins(0, 0, 0, 0)
+        vbox.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        lbl = CaptionLabel(label_text)
+        lbl.setFixedHeight(16)
+        lbl.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 500;")
+        vbox.addWidget(lbl)
+        return vbox
+
+    def _create_v_separator(self) -> QFrame:
+        """创建垂直分隔线"""
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.VLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setStyleSheet("color: #334155; max-height: 40px; margin-top: 10px;")
+        return line
 
     def _on_mode_combo_changed(self, index: int):
         mode_keys = ["IDLE", "BLUE_OBJECT", "YOLO_DEFENSE", "MOUSE_MANUAL", "TEST"]
@@ -249,10 +289,10 @@ class ConsoleView(QWidget):
 
     def _on_track_toggled(self, checked: bool):
         if checked:
-            self.btn_track.setText("停止追踪 / Stop")
+            self.btn_track.setText("停止追踪")
             self.btn_track.setIcon(FluentIcon.PAUSE)
         else:
-            self.btn_track.setText("开始追踪 / Track")
+            self.btn_track.setText("开始追踪")
             self.btn_track.setIcon(FluentIcon.PLAY)
         self.control_toggled.emit(checked)
 
@@ -266,8 +306,8 @@ class ConsoleView(QWidget):
                 color: #fca5a5;
                 font-weight: bold;
                 font-size: 11px;
-                padding: 4px 12px;
-                border-radius: 12px;
+                padding: 2px 14px;
+                border-radius: 13px;
             """)
         else:
             self.laser_badge.setText("LASER SAFE")
@@ -276,13 +316,14 @@ class ConsoleView(QWidget):
                 color: #34d399;
                 font-weight: bold;
                 font-size: 11px;
-                padding: 4px 12px;
-                border-radius: 12px;
+                padding: 2px 14px;
+                border-radius: 13px;
             """)
         self.laser_armed_toggled.emit(checked)
 
     def _on_power_slider_changed(self, value: int):
-        self.pwr_label.setText(f"激光功率: {value}%")
+        if hasattr(self, 'pwr_label') and isinstance(self.pwr_label, QLabel):
+            self.pwr_label.setText(f"功率 / PWM: {value}%")
         self.laser_power_changed.emit(value)
 
     def set_laser_firing_visual(self, firing: bool):
@@ -295,8 +336,8 @@ class ConsoleView(QWidget):
                 color: #ffffff;
                 font-weight: bold;
                 font-size: 11px;
-                padding: 4px 12px;
-                border-radius: 12px;
+                padding: 2px 14px;
+                border-radius: 13px;
             """)
         elif self.laser_armed:
             self.laser_badge.setText("LASER ARMED")
@@ -305,8 +346,8 @@ class ConsoleView(QWidget):
                 color: #fca5a5;
                 font-weight: bold;
                 font-size: 11px;
-                padding: 4px 12px;
-                border-radius: 12px;
+                padding: 2px 14px;
+                border-radius: 13px;
             """)
         else:
             self.laser_badge.setText("LASER SAFE")
@@ -315,8 +356,8 @@ class ConsoleView(QWidget):
                 color: #34d399;
                 font-weight: bold;
                 font-size: 11px;
-                padding: 4px 12px;
-                border-radius: 12px;
+                padding: 2px 14px;
+                border-radius: 13px;
             """)
 
     def update_serial_status(self, connected: bool, message: str):
@@ -327,8 +368,8 @@ class ConsoleView(QWidget):
                 color: #86efac;
                 font-weight: bold;
                 font-size: 11px;
-                padding: 4px 10px;
-                border-radius: 12px;
+                padding: 2px 12px;
+                border-radius: 13px;
             """)
         else:
             self.serial_badge.setText("● 串口: 未连接")
@@ -337,8 +378,8 @@ class ConsoleView(QWidget):
                 color: #94a3b8;
                 font-weight: bold;
                 font-size: 11px;
-                padding: 4px 10px;
-                border-radius: 12px;
+                padding: 2px 12px;
+                border-radius: 13px;
             """)
 
     def update_telemetry(self, fps: float, res_str: str, target_dx: float = 0.0, target_dy: float = 0.0):

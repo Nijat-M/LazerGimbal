@@ -89,3 +89,6 @@ STM32F401/.metadata/
 # WebUI Frontend
 webui/node_modules/
 webui/dist/
+
+*.pdf
+

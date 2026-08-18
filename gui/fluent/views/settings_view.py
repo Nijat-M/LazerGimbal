@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-设备连接与系统设置视图 (Settings View)
+设备连接与系统设置视图 (Settings View) - 像素级对齐版
 
 模块包含：
 1. STM32 原生 USB 串口通信管理卡片
@@ -76,19 +76,22 @@ class SettingsView(QWidget):
         # ==========================================
         serial_card = CardWidget()
         serial_layout = QVBoxLayout(serial_card)
-        serial_layout.setContentsMargins(20, 18, 20, 20)
+        serial_layout.setContentsMargins(22, 20, 22, 22)
         serial_layout.setSpacing(14)
 
         card_title_1 = StrongBodyLabel("🔌 STM32 USB 硬件通信 (Serial & CDC)")
-        card_title_1.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc;")
+        card_title_1.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc; margin-bottom: 4px;")
         serial_layout.addWidget(card_title_1)
 
         # 端口选择
         port_h = QHBoxLayout()
+        port_h.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         port_label = BodyLabel("通信端口 (COM Port):")
         self.combo_port = ComboBox()
+        self.combo_port.setFixedHeight(34)
         self.combo_port.setMinimumWidth(260)
         self.btn_refresh_ports = PushButton(FluentIcon.SYNC, "刷新")
+        self.btn_refresh_ports.setFixedHeight(34)
         self.btn_refresh_ports.clicked.connect(self.refresh_serial_ports)
 
         port_h.addWidget(port_label)
@@ -99,8 +102,10 @@ class SettingsView(QWidget):
 
         # 波特率
         baud_h = QHBoxLayout()
+        baud_h.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         baud_label = BodyLabel("波特率 (Baud Rate):")
         self.combo_baud = ComboBox()
+        self.combo_baud.setFixedHeight(34)
         self.combo_baud.addItems(["115200", "921600", "460800", "230400", "57600"])
         self.combo_baud.setCurrentText(str(cfg.BAUD_RATE))
         self.combo_baud.setMinimumWidth(160)
@@ -111,8 +116,12 @@ class SettingsView(QWidget):
 
         # 串口连接按钮
         conn_h = QHBoxLayout()
+        conn_h.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.serial_status_desc = CaptionLabel("状态: 未连接")
+        self.serial_status_desc.setStyleSheet("color: #94a3b8; font-size: 12px;")
         self.btn_serial_connect = PrimaryPushButton(FluentIcon.CONNECT, "连接串口")
+        self.btn_serial_connect.setFixedHeight(36)
+        self.btn_serial_connect.setMinimumWidth(120)
         self.btn_serial_connect.clicked.connect(self._on_serial_connect_clicked)
         conn_h.addWidget(self.serial_status_desc)
         conn_h.addStretch()
@@ -126,19 +135,22 @@ class SettingsView(QWidget):
         # ==========================================
         cam_card = CardWidget()
         cam_layout = QVBoxLayout(cam_card)
-        cam_layout.setContentsMargins(20, 18, 20, 20)
+        cam_layout.setContentsMargins(22, 20, 22, 22)
         cam_layout.setSpacing(14)
 
         card_title_2 = StrongBodyLabel("📷 工业摄像头与图像采集 (Vision Pipeline)")
-        card_title_2.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc;")
+        card_title_2.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc; margin-bottom: 4px;")
         cam_layout.addWidget(card_title_2)
 
         # 摄像头选择
         cam_sel_h = QHBoxLayout()
+        cam_sel_h.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         cam_sel_label = BodyLabel("视频设备 (Camera ID):")
         self.combo_camera = ComboBox()
+        self.combo_camera.setFixedHeight(34)
         self.combo_camera.setMinimumWidth(220)
         self.btn_detect_cams = PushButton(FluentIcon.SYNC, "检测")
+        self.btn_detect_cams.setFixedHeight(34)
         self.btn_detect_cams.clicked.connect(self.detect_cameras)
         cam_sel_h.addWidget(cam_sel_label)
         cam_sel_h.addStretch()
@@ -148,8 +160,10 @@ class SettingsView(QWidget):
 
         # 分辨率与帧率
         res_h = QHBoxLayout()
+        res_h.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         res_label = BodyLabel("采集分辨率与帧率预设:")
         self.combo_resolution = ComboBox()
+        self.combo_resolution.setFixedHeight(34)
         self.combo_resolution.addItems([
             "640x480 (60 FPS - 极致低延迟)",
             "1280x720 (60 FPS - 高清 HD)",
@@ -164,8 +178,10 @@ class SettingsView(QWidget):
 
         # 画面镜像与翻转
         flip_h = QHBoxLayout()
+        flip_h.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         flip_label = BodyLabel("画面方向 / 镜像反转:")
         self.combo_flip = ComboBox()
+        self.combo_flip.setFixedHeight(34)
         self.combo_flip.addItem("正常 (Normal 0°)", "NONE")
         self.combo_flip.addItem("180° 旋转 (Inverted)", "180")
         self.combo_flip.addItem("垂直翻转 (Vertical)", "V")
@@ -179,13 +195,19 @@ class SettingsView(QWidget):
 
         # 摄像头操作按钮
         cam_btns_h = QHBoxLayout()
+        cam_btns_h.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        cam_btns_h.setSpacing(12)
+
         self.btn_cam_toggle = PushButton(FluentIcon.PLAY, "启动视频流")
+        self.btn_cam_toggle.setFixedHeight(36)
         self.btn_cam_toggle.clicked.connect(self._on_cam_toggle_clicked)
 
         self.btn_cam_apply = PrimaryPushButton(FluentIcon.ACCEPT, "应用分辨率与设置")
+        self.btn_cam_apply.setFixedHeight(36)
         self.btn_cam_apply.clicked.connect(self._on_cam_apply_clicked)
 
-        self.btn_cam_hw_settings = PushButton(FluentIcon.SETTING, "相机曝光/增益驱动面板")
+        self.btn_cam_hw_settings = PushButton(FluentIcon.SETTING, "曝光/增益驱动面板")
+        self.btn_cam_hw_settings.setFixedHeight(36)
         self.btn_cam_hw_settings.clicked.connect(self.open_camera_settings_requested.emit)
 
         cam_btns_h.addWidget(self.btn_cam_toggle)
@@ -200,28 +222,32 @@ class SettingsView(QWidget):
         # ==========================================
         input_card = CardWidget()
         input_layout = QVBoxLayout(input_card)
-        input_layout.setContentsMargins(20, 18, 20, 20)
+        input_layout.setContentsMargins(22, 20, 22, 22)
         input_layout.setSpacing(14)
 
         card_title_3 = StrongBodyLabel("🎯 手控瞄准灵敏度与输入偏好 (Control & Sensitivity)")
-        card_title_3.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc;")
+        card_title_3.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc; margin-bottom: 4px;")
         input_layout.addWidget(card_title_3)
 
         sens_v = QVBoxLayout()
+        sens_v.setSpacing(6)
         sens_header = QHBoxLayout()
+        sens_header.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         sens_label = BodyLabel("FPS 鼠标手控相对灵敏度 (Sensitivity):")
         self.sens_spin = DoubleSpinBox()
+        self.sens_spin.setFixedHeight(32)
         self.sens_spin.setRange(0.01, 1.0)
         self.sens_spin.setSingleStep(0.01)
         self.sens_spin.setDecimals(3)
         self.sens_spin.setValue(ControlConfig.MOUSE_SENSITIVITY)
-        self.sens_spin.setFixedWidth(100)
+        self.sens_spin.setFixedWidth(110)
         sens_header.addWidget(sens_label)
         sens_header.addStretch()
         sens_header.addWidget(self.sens_spin)
         sens_v.addLayout(sens_header)
 
         self.sens_slider = Slider(Qt.Orientation.Horizontal)
+        self.sens_slider.setFixedHeight(26)
         self.sens_slider.setRange(1, 100)
         self.sens_slider.setValue(int(ControlConfig.MOUSE_SENSITIVITY * 100))
         self.sens_slider.valueChanged.connect(self._on_sens_slider_changed)
@@ -236,16 +262,18 @@ class SettingsView(QWidget):
         # ==========================================
         theme_card = CardWidget()
         theme_layout = QVBoxLayout(theme_card)
-        theme_layout.setContentsMargins(20, 18, 20, 20)
+        theme_layout.setContentsMargins(22, 20, 22, 22)
         theme_layout.setSpacing(14)
 
         card_title_4 = StrongBodyLabel("🎨 系统外观与主题 (Appearance & Theme)")
-        card_title_4.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc;")
+        card_title_4.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc; margin-bottom: 4px;")
         theme_layout.addWidget(card_title_4)
 
         theme_h = QHBoxLayout()
+        theme_h.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         theme_label = BodyLabel("界面色彩主题:")
         self.combo_theme = ComboBox()
+        self.combo_theme.setFixedHeight(34)
         self.combo_theme.addItems(["暗黑模式 (Dark Mode)", "明亮模式 (Light Mode)", "跟随系统 (Auto)"])
         self.combo_theme.setCurrentIndex(0)
         self.combo_theme.currentIndexChanged.connect(self._on_theme_changed)
@@ -332,12 +360,12 @@ class SettingsView(QWidget):
             self.btn_serial_connect.setText("断开串口")
             self.btn_serial_connect.setIcon(FluentIcon.CLOSE)
             self.serial_status_desc.setText(f"状态: 已连接 ({message})")
-            self.serial_status_desc.setStyleSheet("color: #4ade80;")
+            self.serial_status_desc.setStyleSheet("color: #4ade80; font-size: 12px;")
         else:
             self.btn_serial_connect.setText("连接串口")
             self.btn_serial_connect.setIcon(FluentIcon.CONNECT)
             self.serial_status_desc.setText(f"状态: 未连接 ({message})")
-            self.serial_status_desc.setStyleSheet("color: #94a3b8;")
+            self.serial_status_desc.setStyleSheet("color: #94a3b8; font-size: 12px;")
 
     def _on_cam_toggle_clicked(self):
         target = not self.is_camera_running
