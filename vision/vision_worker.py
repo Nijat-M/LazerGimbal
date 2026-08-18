@@ -553,7 +553,7 @@ class VisionWorker(QThread):
             taraf = d["taraf"]
 
             if locked_enemy and d == locked_enemy:
-                # ====== 锁定敌方目标 (RED HOSTILE - ENGAGING) ======
+                # ====== 当前主锁定敌方目标 (RED HOSTILE - PRIMARY ENGAGEMENT) ======
                 c_color = (40, 40, 240) # BGR Red
                 # 绘制四角加厚瞄准角框
                 line_len = min(22, (x2 - x1) // 3, (y2 - y1) // 3)
@@ -567,15 +567,27 @@ class VisionWorker(QThread):
                 cv2.line(frame, (x2, y2), (x2, y2 - line_len), c_color, 2)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), c_color, 1)
 
-                # 中心红点与红色追踪引导箭头 (仅指向敌方)
+                # 中心红点与红色追踪引导箭头 (仅指向当前交战的主敌方)
                 cv2.circle(frame, pos, 5, c_color, -1)
                 cv2.arrowedLine(frame, (cx, cy), pos, c_color, 2, tipLength=0.15)
 
                 # 顶部标签
-                cv2.putText(frame, f"[HOSTILE] {disp_name} ({conf_pct}%)",
+                cv2.putText(frame, f"[HOSTILE LOCKED] {disp_name} ({conf_pct}%)",
                             (x1, max(20, y1 - 22)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.52, c_color, 2)
                 cv2.putText(frame, f"FIRE AUTHORIZED >> ENEMY | {d['mesafe_m']:.1f}m",
+                            (x1, max(36, y1 - 6)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (60, 60, 255), 1)
+
+            elif taraf == ENEMY:
+                # ====== 次要敌方目标 (RED HOSTILE - QUEUED / STANDBY) ======
+                c_color = (40, 40, 240) # BGR Red（全部敌方标红）
+                cv2.rectangle(frame, (x1, y1), (x2, y2), c_color, 2)
+                cv2.circle(frame, pos, 3, c_color, -1)
+                cv2.putText(frame, f"[HOSTILE] {disp_name} ({conf_pct}%)",
+                            (x1, max(20, y1 - 22)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.50, c_color, 2)
+                cv2.putText(frame, f"ENEMY QUEUED | {d['mesafe_m']:.1f}m",
                             (x1, max(36, y1 - 6)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.42, (60, 60, 255), 1)
 
@@ -594,7 +606,7 @@ class VisionWorker(QThread):
                             cv2.FONT_HERSHEY_SIMPLEX, 0.42, (100, 230, 255), 1)
 
             else:
-                # ====== 未定中立目标 (NEUTRAL) ======
+                # ====== 未定中立目标 (NEUTRAL / UNKNOWN) ======
                 c_color = (170, 170, 170)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), c_color, 1)
                 cv2.circle(frame, pos, 3, c_color, -1)
