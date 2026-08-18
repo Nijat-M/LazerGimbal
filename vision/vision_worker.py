@@ -87,11 +87,18 @@ class VisionWorker(QThread):
         self.recording_start_time: float = 0.0
         self.recording_paused_time: float = 0.0
         self.recording_total_paused_sec: float = 0.0
-        self.recording_path: str = ""
         self.writer_w: int = 0
         self.writer_h: int = 0
         self._rec_lock = threading.Lock()
         self._last_rec_sec: int = -1
+
+        # 麦克风录音系统 (Microphone Audio Capture)
+        self._audio_stream = None
+        self._audio_wave_file = None
+        self._audio_temp_path: str = ""
+        self._video_temp_path: str = ""
+        self._audio_samplerate: int = 44100
+        self._audio_channels: int = 1
 
         # 电机与激光状态遥测（用于录制视频 HUD 水印叠加，全英文）
         self.telemetry_pan: float = 0.0
@@ -232,22 +239,54 @@ class VisionWorker(QThread):
                 self.writer_h = h
 
                 self.recording_path = os.path.join(output_dir, f"rec_{timestamp}.mp4")
+                self._video_temp_path = os.path.join(output_dir, f"temp_v_{timestamp}.mp4")
+                self._audio_temp_path = os.path.join(output_dir, f"temp_a_{timestamp}.wav")
+
                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                self.video_writer = cv2.VideoWriter(self.recording_path, fourcc, fps, (w, h))
+                self.video_writer = cv2.VideoWriter(self._video_temp_path, fourcc, fps, (w, h))
                 if not self.video_writer.isOpened():
                     fourcc = cv2.VideoWriter_fourcc(*'avc1')
-                    self.video_writer = cv2.VideoWriter(self.recording_path, fourcc, fps, (w, h))
+                    self.video_writer = cv2.VideoWriter(self._video_temp_path, fourcc, fps, (w, h))
                 if not self.video_writer.isOpened():
-                    self.recording_path = os.path.join(output_dir, f"rec_{timestamp}.avi")
+                    self._video_temp_path = os.path.join(output_dir, f"temp_v_{timestamp}.avi")
                     fourcc = cv2.VideoWriter_fourcc(*'XVID')
-                    self.video_writer = cv2.VideoWriter(self.recording_path, fourcc, fps, (w, h))
+                    self.video_writer = cv2.VideoWriter(self._video_temp_path, fourcc, fps, (w, h))
+
+                # 启动麦克风录音 (Microphone Stream)
+                try:
+                    import sounddevice as sd
+                    import wave
+                    self._audio_wave_file = wave.open(self._audio_temp_path, 'wb')
+                    self._audio_wave_file.setnchannels(self._audio_channels)
+                    self._audio_wave_file.setsampwidth(2) # 16-bit PCM
+                    self._audio_wave_file.setframerate(self._audio_samplerate)
+
+                    def _audio_callback(indata, frames, time_info, status):
+                        if self.recording_state == "RECORDING" and self._audio_wave_file is not None:
+                            try:
+                                self._audio_wave_file.writeframes(indata)
+                            except Exception:
+                                pass
+
+                    self._audio_stream = sd.InputStream(
+                        samplerate=self._audio_samplerate,
+                        channels=self._audio_channels,
+                        dtype='int16',
+                        callback=_audio_callback
+                    )
+                    self._audio_stream.start()
+                    logger.info("[VISION] 🎙️ 麦克风环境声音录制已成功启动")
+                except Exception as audio_err:
+                    logger.warning(f"[VISION] 麦克风录音初始化跳过: {audio_err}")
+                    self._audio_stream = None
+                    self._audio_wave_file = None
 
                 self.recording_state = "RECORDING"
                 self.recording_start_time = time.time()
                 self.recording_paused_time = 0.0
                 self.recording_total_paused_sec = 0.0
                 self._last_rec_sec = -1
-                logger.info(f"[VISION] 🔴 开始录制视频: {self.recording_path} ({w}x{h} @ {fps:.1f}fps)")
+                logger.info(f"[VISION] 🔴 开始录制视音频: {self.recording_path} ({w}x{h} @ {fps:.1f}fps)")
                 self.recording_status_signal.emit("RECORDING", self.recording_path, 0)
                 return True
             except Exception as e:
@@ -291,7 +330,63 @@ class VisionWorker(QThread):
             if self.video_writer is not None:
                 self.video_writer.release()
                 self.video_writer = None
+
+            # 停止麦克风音频流并关闭文件
+            has_audio = False
+            if self._audio_stream is not None:
+                try:
+                    self._audio_stream.stop()
+                    self._audio_stream.close()
+                except Exception:
+                    pass
+                self._audio_stream = None
+
+            if self._audio_wave_file is not None:
+                try:
+                    self._audio_wave_file.close()
+                    if os.path.exists(self._audio_temp_path) and os.path.getsize(self._audio_temp_path) > 1024:
+                        has_audio = True
+                except Exception:
+                    pass
+                self._audio_wave_file = None
+
             path = self.recording_path
+            v_tmp = self._video_temp_path
+            a_tmp = self._audio_temp_path
+
+            def _mux_worker(v_file, a_file, out_file, with_audio):
+                try:
+                    if with_audio and os.path.exists(v_file) and os.path.exists(a_file):
+                        import imageio_ffmpeg
+                        import subprocess
+                        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+                        cmd = [
+                            ffmpeg_exe, '-y',
+                            '-i', v_file,
+                            '-i', a_file,
+                            '-c:v', 'copy',
+                            '-c:a', 'aac',
+                            '-b:a', '128k',
+                            '-shortest',
+                            out_file
+                        ]
+                        res = subprocess.run(cmd, capture_output=True, text=True)
+                        if res.returncode == 0 and os.path.exists(out_file) and os.path.getsize(out_file) > 0:
+                            if os.path.exists(v_file): os.remove(v_file)
+                            if os.path.exists(a_file): os.remove(a_file)
+                            logger.info(f"[VISION] 🎬 麦克风环境声音与录像已成功合并输出: {out_file}")
+                            return
+                    if os.path.exists(v_file):
+                        if os.path.exists(out_file):
+                            os.remove(out_file)
+                        os.rename(v_file, out_file)
+                    if os.path.exists(a_file):
+                        os.remove(a_file)
+                except Exception as e:
+                    logger.error(f"[VISION] 混音处理异常: {e}")
+
+            threading.Thread(target=_mux_worker, args=(v_tmp, a_tmp, path, has_audio), daemon=True).start()
+
             logger.info(f"[VISION] ⏹ 录制结束并保存至: {path} (时长: {elapsed}s)")
             self.recording_status_signal.emit("IDLE", path, elapsed)
             return path
