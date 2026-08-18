@@ -168,8 +168,7 @@ class VisionConfig:
     @classmethod
     def save_calibration(cls):
         try:
-            cls.save_crosshair_calibration()
-            return True
+            return cls.save_crosshair_calibration()
         except Exception:
             return False
 
@@ -178,28 +177,39 @@ class VisionConfig:
         import json, os
         try:
             if os.path.exists(cls.CALIB_PATH):
-                d = json.load(open(cls.CALIB_PATH, encoding="utf-8"))
+                with open(cls.CALIB_PATH, "r", encoding="utf-8") as f:
+                    d = json.load(f)
                 cls.CENTER_OFFSET_X = int(d.get("offset_x", 0))
                 cls.CENTER_OFFSET_Y = int(d.get("offset_y", 0))
                 cls.PARALLAX_X_AT_1M = float(d.get("parallax_x_at_1m", 0.0))
                 cls.PARALLAX_Y_AT_1M = float(d.get("parallax_y_at_1m", 0.0))
+                cls.BORESIGHT_MODE = str(d.get("boresight_mode", "offset"))
+                rng = d.get("range_m", None)
+                cls.AKTIF_MESAFE_M = float(rng) if rng is not None else None
                 return True
-        except Exception:
+        except Exception as e:
             pass
         return False
 
     @classmethod
     def save_crosshair_calibration(cls):
         import json, os
-        os.makedirs(os.path.dirname(cls.CALIB_PATH) or ".", exist_ok=True)
-        json.dump({
-            "offset_x": cls.CENTER_OFFSET_X,
-            "offset_y": cls.CENTER_OFFSET_Y,
-            "parallax_x_at_1m": cls.PARALLAX_X_AT_1M,
-            "parallax_y_at_1m": cls.PARALLAX_Y_AT_1M,
-            "description": "Laser-camera boresight. aim = center + offset + parallax/distance_m",
-        }, open(cls.CALIB_PATH, "w", encoding="utf-8"), indent=4, ensure_ascii=False)
-        return cls.CALIB_PATH
+        try:
+            os.makedirs(os.path.dirname(cls.CALIB_PATH) or ".", exist_ok=True)
+            payload = {
+                "offset_x": int(cls.CENTER_OFFSET_X),
+                "offset_y": int(cls.CENTER_OFFSET_Y),
+                "parallax_x_at_1m": float(cls.PARALLAX_X_AT_1M),
+                "parallax_y_at_1m": float(cls.PARALLAX_Y_AT_1M),
+                "boresight_mode": str(cls.BORESIGHT_MODE),
+                "range_m": float(cls.AKTIF_MESAFE_M) if cls.AKTIF_MESAFE_M is not None else None,
+                "description": "Laser-camera boresight calibration configuration",
+            }
+            with open(cls.CALIB_PATH, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=4, ensure_ascii=False)
+            return True
+        except Exception:
+            return False
     PIXELS_PER_DEGREE = 20  # 像素到角度转换系数（估算值）
     
     # ==========================

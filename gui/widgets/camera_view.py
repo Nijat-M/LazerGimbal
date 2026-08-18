@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Camera display with optional FPS-style relative mouse capture."""
 
-from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import Qt, pyqtSignal, pyqtSlot, QPoint
 from PyQt6.QtGui import (
     QColor,
     QCursor,
@@ -13,6 +13,7 @@ from PyQt6.QtGui import (
     QPixmap,
 )
 from PyQt6.QtWidgets import QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QWidget, QSlider, QFrame
+from config.vision_config import VisionConfig
 
 
 class MouseAimLabel(QLabel):
@@ -107,7 +108,28 @@ class MouseAimLabel(QLabel):
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        center = self.rect().center()
+
+        # 真实激光瞄准点（支持 Crop 与 Offset 模式，与画中画完全对齐）
+        raw_cx, raw_cy = VisionConfig.aim_point(VisionConfig.AKTIF_MESAFE_M)
+        fw = getattr(VisionConfig, "FRAME_WIDTH", 640)
+        fh = getattr(VisionConfig, "FRAME_HEIGHT", 480)
+
+        pix = self.pixmap()
+        if pix and not pix.isNull() and fw > 0 and fh > 0:
+            pw = pix.width()
+            ph = pix.height()
+            lw = self.width()
+            lh = self.height()
+            pad_x = (lw - pw) // 2
+            pad_y = (lh - ph) // 2
+
+            norm_x = max(0.0, min(1.0, raw_cx / float(fw)))
+            norm_y = max(0.0, min(1.0, raw_cy / float(fh)))
+            center_x = int(pad_x + norm_x * pw)
+            center_y = int(pad_y + norm_y * ph)
+            center = QPoint(center_x, center_y)
+        else:
+            center = self.rect().center()
 
         # 根据激光发射/保险状态切换准星颜色与光效
         if self.laser_firing:

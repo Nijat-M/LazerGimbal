@@ -745,7 +745,8 @@ class VisionWorker(QThread):
 
     def _render_pip_scope(self, frame: cv2.Mat, cx: int, cy: int) -> cv2.Mat:
         """
-        在主画面左上角绘制第二屏幕：准星超清放大镜视窗 (PiP Reticle Scope)
+        在主画面左上角绘制第二屏幕：纯光学准星区域局部放大镜 (PiP Pure Zoom Scope)
+        不额外绘制假准星，只真实放大准星区域的画面细节与激光落点。
         """
         fh, fw = frame.shape[:2]
         # 根据分辨率自适应画中画尺寸
@@ -769,24 +770,9 @@ class VisionWorker(QThread):
 
         scope_img = cv2.resize(crop, (pip_w, pip_h), interpolation=cv2.INTER_LINEAR)
 
-        # 绘制准星放大镜战术分划板
-        sc_cx, sc_cy = pip_w // 2, pip_h // 2
-        scope_color = (248, 189, 56) # Cyan / Light Blue (BGR: 248, 189, 56)
-        cv2.line(scope_img, (sc_cx - 24, sc_cy), (sc_cx + 24, sc_cy), scope_color, 1)
-        cv2.line(scope_img, (sc_cx, sc_cy - 24), (sc_cx, sc_cy + 24), scope_color, 1)
-        cv2.circle(scope_img, (sc_cx, sc_cy), 4, scope_color, 1)
-        cv2.circle(scope_img, (sc_cx, sc_cy), 12, (100, 200, 255), 1)
-
-        # 刻度密位点
-        for offset in (-16, -8, 8, 16):
-            cv2.circle(scope_img, (sc_cx + offset, sc_cy), 1, (255, 255, 255), -1)
-            cv2.circle(scope_img, (sc_cx, sc_cy + offset), 1, (255, 255, 255), -1)
-
-        # 战术角标
-        cv2.putText(scope_img, f"SCOPE {self.pip_zoom:.1f}X", (8, 18),
+        # 战术放大倍数角标
+        cv2.putText(scope_img, f"ZOOM {self.pip_zoom:.1f}X", (8, 18),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (56, 189, 248), 1)
-        cv2.putText(scope_img, "RETICLE SIGHT", (8, pip_h - 8),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.38, (52, 211, 153), 1)
 
         # 外边框
         cv2.rectangle(scope_img, (0, 0), (pip_w - 1, pip_h - 1), (56, 189, 248), 2)
