@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Asynchronous serial transport with priority stop and latest-wins motion.
-Supports both PyQt6 GUI signals and pure-Python threaded environments (FastAPI/WebUI).
+Supports PyQt6 GUI signals and pure-Python threaded environments.
 """
 
 import queue

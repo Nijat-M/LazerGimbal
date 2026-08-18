@@ -98,12 +98,12 @@ class YOLOAdaptationTests(unittest.TestCase):
         model_paths = [panel.combo_model.itemData(i) for i in range(panel.combo_model.count())]
         self.assertTrue(any("savunma" in str(p).lower() for p in model_paths))
         
-        # 验证类别下拉框已加载国防目标
+        # 验证类别下拉框已加载国防目标 (支持英文标签及原始类别映射)
         classes_in_combo = [panel.combo_class.itemText(i) for i in range(panel.combo_class.count())]
-        self.assertTrue(any("BALISTIK_FUZE" in c for c in classes_in_combo))
-        self.assertTrue(any("F16" in c for c in classes_in_combo))
-        self.assertTrue(any("HELIKOPTER" in c for c in classes_in_combo))
-        self.assertTrue(any("MINI_IHA" in c for c in classes_in_combo))
+        self.assertTrue(any("Ballistic" in c or "BALISTIK_FUZE" in c for c in classes_in_combo))
+        self.assertTrue(any("F-16" in c or "F16" in c for c in classes_in_combo))
+        self.assertTrue(any("Helicopter" in c or "HELIKOPTER" in c for c in classes_in_combo))
+        self.assertTrue(any("UAV" in c or "Drone" in c or "MINI_IHA" in c for c in classes_in_combo))
         
         # 验证信号触发
         received_models = []
