@@ -161,7 +161,7 @@ class ModePanel(QGroupBox):
         # 尝试读取该模型的 class names
         resolved = YOLODetector.resolve_model_path(model_path)
         class_dict = {}
-        if resolved and "savunma" in resolved.lower():
+        if resolved and ("savunma" in resolved.lower() or "yetenek" in resolved.lower()):
             class_dict = {
                 0: "BALISTIK_FUZE",
                 1: "F16",

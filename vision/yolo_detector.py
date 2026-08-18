@@ -78,10 +78,12 @@ class YOLODetector:
         # 默认备选模型（防空模型优先，通用模型次之）
         candidates.extend([
             models_dir / "savunma_yolo26.pt",
+            models_dir / "yetenek6_best.pt",
             models_dir / "yolo26n.pt",
             models_dir / "yolov8n.pt",
             models_dir / "yolo11n.pt",
             project_root / "savunma_yolo26.pt",
+            project_root / "yetenek6_best.pt",
             project_root / "yolo26n.pt",
             project_root / "yolov8n.pt"
         ])
@@ -111,13 +113,15 @@ class YOLODetector:
                         
                         # 友好描述
                         if "savunma" in pt_file.name.lower():
-                            display_name = f"{pt_file.name} (国防防空模型 / 4类)"
+                            display_name = f"{pt_file.name} (Air Defense Model / 4 Classes)"
+                        elif "yetenek" in pt_file.name.lower():
+                            display_name = f"{pt_file.name} (Air Defense Target / 4 Classes)"
                         elif "yolo26n" in pt_file.name.lower():
-                            display_name = f"{pt_file.name} (通用COCO模型 / 80类)"
+                            display_name = f"{pt_file.name} (COCO General / 80 Classes)"
                         elif "yolov8" in pt_file.name.lower():
-                            display_name = f"{pt_file.name} (YOLOv8通用模型)"
+                            display_name = f"{pt_file.name} (YOLOv8 General)"
                         else:
-                            display_name = f"{pt_file.name} (自定义模型)"
+                            display_name = f"{pt_file.name} (Custom Model)"
 
                         found_models.append({
                             "filename": pt_file.name,
@@ -126,8 +130,11 @@ class YOLODetector:
                             "display_name": display_name
                         })
 
-        # 确保 savunma_yolo26.pt 排在最前面
-        found_models.sort(key=lambda m: (0 if "savunma" in m["filename"].lower() else 1, m["filename"]))
+        # 确保 savunma / yetenek 防空模型排在最前面
+        found_models.sort(key=lambda m: (
+            0 if "savunma" in m["filename"].lower() else (1 if "yetenek" in m["filename"].lower() else 2),
+            m["filename"]
+        ))
         return found_models
 
     def __init__(self, model_path: str = "vision/models/savunma_yolo26.pt", conf_threshold: float = 0.50):
@@ -181,7 +188,7 @@ class YOLODetector:
             model_name = os.path.basename(resolved_path)
             
             # 国防防空模型在 GPU 上优先使用训练尺寸 (960)，通用模型使用 640
-            if "savunma" in resolved_path.lower() and self.device.startswith("cuda"):
+            if ("savunma" in resolved_path.lower() or "yetenek" in resolved_path.lower()) and self.device.startswith("cuda"):
                 self.imgsz = 960
             else:
                 self.imgsz = 640
