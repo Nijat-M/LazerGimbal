@@ -12,7 +12,7 @@ from PyQt6.QtGui import (
     QPen,
     QPixmap,
 )
-from PyQt6.QtWidgets import QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QWidget
+from PyQt6.QtWidgets import QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QWidget, QSlider, QFrame
 
 
 class MouseAimLabel(QLabel):
@@ -164,17 +164,21 @@ class MouseAimLabel(QLabel):
 
 
 class CameraView(QWidget):
-    """Display live video and expose safe relative mouse-control signals with Fullscreen capability."""
+    """Display live video, PiP Reticle Scope, and Video Recording with Fullscreen capability."""
 
     mouse_delta_signal = pyqtSignal(int, int)
     mouse_capture_changed_signal = pyqtSignal(bool)
     fullscreen_requested = pyqtSignal()
+    pip_zoom_changed = pyqtSignal(float)
+    record_toggle_requested = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.is_camera_active = False
         self._mouse_mode_enabled = False
         self.is_fullscreen = False
+        self.is_recording = False
+        self.current_zoom = 3.0
         self.init_ui()
 
     def set_laser_status(self, armed: bool, firing: bool) -> None:
@@ -186,13 +190,79 @@ class CameraView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        # 1. 顶部操作工具栏 (Live View 标题 + 全屏/掩码切换按钮)
+        # 1. 顶部操作工具栏 (Live View 标题 + 画中画放大 + 录屏 + 掩码 + 全屏)
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(4, 2, 4, 2)
+        header_layout.setSpacing(6)
 
         self.lbl_title = QLabel("<h2>📷 Live Camera Feed</h2>")
         header_layout.addWidget(self.lbl_title)
         header_layout.addStretch()
+
+        # 1.1 准星画中画局部放大倍数调节 (PiP Reticle Scope Zoom)
+        zoom_box = QWidget()
+        zoom_layout = QHBoxLayout(zoom_box)
+        zoom_layout.setContentsMargins(0, 0, 0, 0)
+        zoom_layout.setSpacing(3)
+
+        self.btn_zoom_out = QPushButton("➖")
+        self.btn_zoom_out.setToolTip("Zoom Out Reticle Scope (Shortcut: [ or -)")
+        self.btn_zoom_out.setFixedSize(26, 26)
+        self.btn_zoom_out.setStyleSheet("""
+            QPushButton { background-color: #1e293b; color: #38bdf8; font-weight: bold; border: 1px solid #334155; border-radius: 3px; font-size: 11px; }
+            QPushButton:hover { background-color: #0284c7; color: white; }
+        """)
+        self.btn_zoom_out.clicked.connect(self.zoom_out)
+        zoom_layout.addWidget(self.btn_zoom_out)
+
+        self.lbl_zoom = QLabel("🔍 3.0x")
+        self.lbl_zoom.setStyleSheet("color: #38bdf8; font-weight: bold; font-family: Consolas, monospace; font-size: 11px; min-width: 44px;")
+        self.lbl_zoom.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        zoom_layout.addWidget(self.lbl_zoom)
+
+        self.slider_zoom = QSlider(Qt.Orientation.Horizontal)
+        self.slider_zoom.setRange(15, 60) # 1.5x ~ 6.0x
+        self.slider_zoom.setValue(30)     # 3.0x
+        self.slider_zoom.setFixedWidth(75)
+        self.slider_zoom.setStyleSheet("""
+            QSlider::groove:horizontal { height: 4px; background: #334155; border-radius: 2px; }
+            QSlider::handle:horizontal { background: #38bdf8; width: 10px; margin: -3px 0; border-radius: 5px; }
+        """)
+        self.slider_zoom.valueChanged.connect(self._on_slider_zoom_changed)
+        zoom_layout.addWidget(self.slider_zoom)
+
+        self.btn_zoom_in = QPushButton("➕")
+        self.btn_zoom_in.setToolTip("Zoom In Reticle Scope (Shortcut: ] or +)")
+        self.btn_zoom_in.setFixedSize(26, 26)
+        self.btn_zoom_in.setStyleSheet("""
+            QPushButton { background-color: #1e293b; color: #38bdf8; font-weight: bold; border: 1px solid #334155; border-radius: 3px; font-size: 11px; }
+            QPushButton:hover { background-color: #0284c7; color: white; }
+        """)
+        self.btn_zoom_in.clicked.connect(self.zoom_in)
+        zoom_layout.addWidget(self.btn_zoom_in)
+
+        header_layout.addWidget(zoom_box)
+
+        # 1.2 屏幕录像按键 (Screen Video Recording)
+        self.btn_record = QPushButton("⏺ Record")
+        self.btn_record.setToolTip("Start / Stop Video Recording to recordings/ (Shortcut: R)")
+        self.btn_record.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b;
+                color: #f87171;
+                border: 1px solid #dc2626;
+                font-weight: bold;
+                padding: 4px 10px;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #991b1b;
+                color: #ffffff;
+            }
+        """)
+        self.btn_record.clicked.connect(self.record_toggle_requested.emit)
+        header_layout.addWidget(self.btn_record)
 
         # 掩码显示/折叠切换按钮
         self.btn_toggle_mask = QPushButton("👁 Debug Mask")
@@ -307,6 +377,60 @@ class CameraView(QWidget):
                 }
             """)
             self.mask_container.setVisible(self.btn_toggle_mask.isChecked())
+
+    def _on_slider_zoom_changed(self, val: int):
+        factor = val / 10.0
+        self.current_zoom = factor
+        self.lbl_zoom.setText(f"🔍 {factor:.1f}x")
+        self.pip_zoom_changed.emit(factor)
+
+    def zoom_in(self):
+        """Zoom In 0.5x (Shortcut: ] or +)"""
+        new_val = min(60, self.slider_zoom.value() + 5)
+        self.slider_zoom.setValue(new_val)
+
+    def zoom_out(self):
+        """Zoom Out 0.5x (Shortcut: [ or -)"""
+        new_val = max(15, self.slider_zoom.value() - 5)
+        self.slider_zoom.setValue(new_val)
+
+    def set_recording_status(self, is_recording: bool, path: str, elapsed_seconds: int):
+        """更新录像按键状态"""
+        self.is_recording = is_recording
+        if is_recording:
+            m, s = divmod(elapsed_seconds, 60)
+            self.btn_record.setText(f"⏹ Stop [{m:02d}:{s:02d}]")
+            self.btn_record.setStyleSheet("""
+                QPushButton {
+                    background-color: #dc2626;
+                    color: #ffffff;
+                    border: 1px solid #ef4444;
+                    font-weight: bold;
+                    padding: 4px 10px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                }
+                QPushButton:hover {
+                    background-color: #b91c1c;
+                }
+            """)
+        else:
+            self.btn_record.setText("⏺ Record")
+            self.btn_record.setStyleSheet("""
+                QPushButton {
+                    background-color: #1e293b;
+                    color: #f87171;
+                    border: 1px solid #dc2626;
+                    font-weight: bold;
+                    padding: 4px 10px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                }
+                QPushButton:hover {
+                    background-color: #991b1b;
+                    color: #ffffff;
+                }
+            """)
 
     def set_camera_active(self, active: bool) -> None:
         self.is_camera_active = active

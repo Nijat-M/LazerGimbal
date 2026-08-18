@@ -306,9 +306,6 @@ class MainWindow(QMainWindow):
         self.control_panel.control_toggled.connect(self.on_control_toggled)
         self.control_panel.reset_requested.connect(self.on_reset_position)
         self.control_panel.emergency_stop_requested.connect(self.on_emergency_stop)
-        self.control_panel.manual_move_requested.connect(self.on_manual_move)
-        self.control_panel.manual_start_continuous.connect(self.controller.start_manual_continuous)
-        self.control_panel.manual_stop_continuous.connect(self.controller.stop_manual_continuous)
         self.control_panel.laser_armed_toggled.connect(self.controller.set_laser_armed)
         self.control_panel.laser_fire_changed.connect(self.controller.set_laser_firing)
         self.control_panel.laser_power_changed.connect(self.controller.set_laser_power)
@@ -321,8 +318,11 @@ class MainWindow(QMainWindow):
             lambda armed, firing, pwr: self.control_panel.set_laser_firing_visual(firing)
         )
         
-        # 摄像头全屏切换
+        # 摄像头全屏、准星画中画缩放与录屏信号
         self.camera_view.fullscreen_requested.connect(self.toggle_fullscreen_mode)
+        self.camera_view.pip_zoom_changed.connect(self.vision_thread.set_pip_zoom)
+        self.camera_view.record_toggle_requested.connect(self.on_toggle_recording)
+        self.vision_thread.recording_status_signal.connect(self.camera_view.set_recording_status)
 
         # 手动测试面板（支持单步微调、长按连续移动、独立键盘开关）
         self.test_panel.request_move_signal.connect(self.on_manual_move)
@@ -527,6 +527,18 @@ class MainWindow(QMainWindow):
             "Motors stopped. Current position has been set as software relative origin."
         )
     
+    def on_toggle_recording(self):
+        """处理录屏开启/停止请求"""
+        if self.vision_thread.is_recording:
+            saved_file = self.vision_thread.stop_recording()
+            self.status_label.setText(f"✓ 视频已保存至: {saved_file}")
+            self.status_label.setStyleSheet("color: #38bdf8; font-weight: bold; padding: 5px;")
+        else:
+            success = self.vision_thread.start_recording()
+            if success:
+                self.status_label.setText("🔴 正在录制全屏超清视频流...")
+                self.status_label.setStyleSheet("color: #ef4444; font-weight: bold; padding: 5px;")
+
     def on_manual_move(self, axis, direction):
         """手动移动（测试模式）"""
         print(f"[GUI] Received manual move request: axis={axis}, dir={direction}")
@@ -563,7 +575,7 @@ class MainWindow(QMainWindow):
         self.detection_panel.set_emergency_stop_visual()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        """全局快捷键：F11 全屏切换、空格键发射激光、Esc 退出全屏/急停、方向键/WASD 手动点动"""
+        """全局快捷键：F11 全屏切换、空格键发射激光、Esc 退出全屏/急停、[ ] / + - 准星画中画缩放、R 录屏、方向键/WASD 手动点动"""
         if event.isAutoRepeat():
             return
 
@@ -596,6 +608,22 @@ class MainWindow(QMainWindow):
                 self.controller.set_laser_firing(True)
                 event.accept()
                 return
+
+        # 准星放大镜快捷键：] 或 + 或 = 放大 / [ 或 - 缩小
+        if key in (Qt.Key.Key_BracketRight, Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+            self.camera_view.zoom_in()
+            event.accept()
+            return
+        elif key in (Qt.Key.Key_BracketLeft, Qt.Key.Key_Minus):
+            self.camera_view.zoom_out()
+            event.accept()
+            return
+
+        # R 键：快捷录制屏幕视频
+        if key == Qt.Key.Key_R:
+            self.on_toggle_recording()
+            event.accept()
+            return
 
         # 键盘方向键 (↑/↓/←/→) 与 (W/S/A/D) 快捷操控云台（仅在勾选开启时生效）
         if getattr(self, "keyboard_control_enabled", False):
