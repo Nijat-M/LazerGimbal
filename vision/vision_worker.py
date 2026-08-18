@@ -476,11 +476,12 @@ class VisionWorker(QThread):
         cv2.circle(frame, (cx, cy), 6, (0, 255, 255), 1)
         cv2.circle(frame, (cx, cy), 40, (0, 180, 255), 1)
 
-        # 1. 收集所有检测到的目标
+        # 1. 收集所有检测到的目标（双重严格校验置信度门限）
+        conf_gate = self.yolo_conf_threshold if self.yolo_conf_threshold is not None else 0.30
         raw_targets = []
         if hasattr(result, 'all_targets') and result.all_targets:
-            raw_targets = result.all_targets
-        elif result.detected:
+            raw_targets = [t for t in result.all_targets if (t.confidence or 0.0) >= conf_gate]
+        elif result.detected and (result.confidence or 0.0) >= conf_gate:
             from vision.yolo_detector import YOLOSingleResult
             raw_targets = [YOLOSingleResult(
                 position=result.position,

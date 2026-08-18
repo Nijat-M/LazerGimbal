@@ -62,7 +62,7 @@ class TemporalBoxTracker:
         union = area1 + area2 - inter
         return inter / max(1, union)
 
-    def update(self, raw_targets: List[YOLOSingleResult]) -> List[YOLOSingleResult]:
+    def update(self, raw_targets: List[YOLOSingleResult], min_confidence: float = 0.30) -> List[YOLOSingleResult]:
         matched_track_ids = set()
         matched_raw_indices = set()
 
@@ -132,7 +132,7 @@ class TemporalBoxTracker:
                     "class_name": t.class_name,
                     "hits": 1,
                     "lost": 0,
-                    "confirmed": (t.confidence >= 0.25),
+                    "confirmed": (t.confidence >= min_confidence),
                 }
 
         # 丢帧衰减与保活
@@ -147,10 +147,10 @@ class TemporalBoxTracker:
         for tid in dead_ids:
             del self.tracks[tid]
 
-        # 输出确认的目标列表
+        # 输出确认且达到用户设定置信度的目标列表 (严格门控)
         result_targets: List[YOLOSingleResult] = []
         for track in self.tracks.values():
-            if track["confirmed"] or track["hits"] >= 2:
+            if track["confidence"] >= min_confidence and (track["confirmed"] or track["hits"] >= 2):
                 result_targets.append(YOLOSingleResult(
                     position=track["position"],
                     box=track["box"],
@@ -424,8 +424,8 @@ class YOLODetector:
                     )
                     raw_targets.append(target)
 
-        # ====== 时域 EMA 平滑滤波 (彻底消除 F-16 抖动并保活导弹) ======
-        all_targets = self.tracker.update(raw_targets)
+        # ====== 时域 EMA 平滑滤波 (彻底消除 F-16 抖动并严格按用户置信度门限输出) ======
+        all_targets = self.tracker.update(raw_targets, min_confidence=user_conf)
 
         # --- 目标锁定逻辑：同类别优先 + 距离加权连续追踪 ---
         best_target = None
