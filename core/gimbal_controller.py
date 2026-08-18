@@ -42,6 +42,7 @@ class GimbalController(QObject):
     position_update_signal = pyqtSignal(float, float)  # X, Y 位置（度）
     manual_target_update_signal = pyqtSignal(float, float)  # 相对中心的 yaw/pitch
     laser_state_signal = pyqtSignal(bool, bool, int)  # 激光状态 (armed, firing, power)
+    speed_gear_changed_signal = pyqtSignal(int, float)  # (gear: 1/2/3, multiplier: 0.3/1.0/2.2)
 
     def __init__(self, serial_thread):
         """
@@ -54,9 +55,17 @@ class GimbalController(QObject):
 
         self.serial_thread = serial_thread
 
-        # 当前硬件没有绝对位置反馈；仅记录软件相对原点。
+        # 3 级速度档位系统 (1: 微调/远距离防震 0.3x, 2: 标准 1.0x, 3: 高速 2.2x)
+        self.speed_gear: int = 2
+        self.speed_multiplier: float = 1.0
+
+        # 当前硬件软件相对原点与动态角度估算 (单位: 度)
         self.servo_x: float = 0.0
         self.servo_y: float = 0.0
+
+        # 接收 STM32 硬件遥测反馈
+        if hasattr(self.serial_thread, "data_received_signal"):
+            self.serial_thread.data_received_signal.connect(self._handle_serial_rx)
 
         # [激光武器控制状态]
         self.laser_armed: bool = False
@@ -102,6 +111,39 @@ class GimbalController(QObject):
         self.is_running = True
         self.control_thread = threading.Thread(target=self._run_control_loop, daemon=True)
         self.control_thread.start()
+
+    def set_speed_gear(self, gear: int) -> None:
+        """设置电机速度档位 (1: 微调/远距离防震 0.3x, 2: 标准 1.0x, 3: 高速 2.2x)"""
+        gear = max(1, min(3, int(gear)))
+        self.speed_gear = gear
+        if gear == 1:
+            self.speed_multiplier = 0.30
+            gear_name = "GEAR 1 (SLOW / PRECISION 0.3x)"
+        elif gear == 2:
+            self.speed_multiplier = 1.00
+            gear_name = "GEAR 2 (NORMAL 1.0x)"
+        else:
+            self.speed_multiplier = 2.20
+            gear_name = "GEAR 3 (FAST / TURBO 2.2x)"
+
+        self.speed_gear_changed_signal.emit(self.speed_gear, self.speed_multiplier)
+        self.status_update_signal.emit(f"⚡ 电机速度已切换为: {gear_name}")
+        logger.info(f"[CONTROLLER] 电机速度档位更新: {gear_name}")
+
+    def _handle_serial_rx(self, line: str) -> None:
+        """解析 STM32 上报的遥测角度或状态 (e.g. 'P: 12.3, -4.5' or 'POS: <12.3, -4.5>')"""
+        try:
+            clean = line.strip()
+            if ("P:" in clean or "POS:" in clean) and "," in clean:
+                parts = clean.replace("POS:", "").replace("P:", "").replace("<", "").replace(">", "").split(",")
+                if len(parts) >= 2:
+                    px = float(parts[0].strip())
+                    py = float(parts[1].strip())
+                    self.servo_x = px
+                    self.servo_y = py
+                    self.position_update_signal.emit(self.servo_x, self.servo_y)
+        except Exception:
+            pass
 
     def set_laser_armed(self, armed: bool) -> None:
         """设置激光保险状态 (ARM / SAFE)"""
@@ -329,12 +371,20 @@ class GimbalController(QObject):
                 return
             axis = self._manual_jog_axis
             direction = self._manual_jog_dir
-            # X 轴连续速度 260，Y 轴连续速度 180 (克服俯仰机构重力与摩擦)
-            speed_error = 260 if axis == "x" else 180
-            simulated_error = speed_error * direction
+            # 根据速度档位缩放连续运动速度
+            base_speed = 260 if axis == "x" else 180
+            simulated_error = int(round(base_speed * direction * self.speed_multiplier))
 
             command = f"<{simulated_error},0,0>\n" if axis == "x" else f"<0,{simulated_error},0>\n"
             self.serial_thread.send_realtime_command(command)
+
+            # 动态积分估算当前电机相对角度
+            d_ang = (18.0 * self.speed_multiplier * 0.025) * direction
+            if axis == "x":
+                self.servo_x = max(-180.0, min(180.0, self.servo_x + d_ang))
+            else:
+                self.servo_y = max(-45.0, min(45.0, self.servo_y + d_ang))
+            self.position_update_signal.emit(self.servo_x, self.servo_y)
             return
 
         if self.manual_mouse_enabled:
@@ -387,16 +437,13 @@ class GimbalController(QObject):
         edge_thresh_x = getattr(ControlConfig, "EDGE_COMPRESS_THRESHOLD_X", 100)
 
         if 0 < abs_x < settle_zone_x:
-            # 准星过渡区：渐进平滑过渡 (0.50 ~ 1.00)，起步即刻响应，中心柔和刹车
             factor_x = 0.50 + 0.50 * (abs_x / float(settle_zone_x))
             err_x_computed = abs_x * scale_x * factor_x
         elif abs_x > edge_thresh_x:
-            # 屏幕最边缘区：平滑亚线性压缩，防止以极限转速飞车甩脱目标
             excess_x = abs_x - edge_thresh_x
             compressed_x = edge_thresh_x + (excess_x ** 0.55) * 1.2
             err_x_computed = compressed_x * scale_x
         else:
-            # 正常线性区
             err_x_computed = abs_x * scale_x
 
         abs_y = abs(err_y)
@@ -404,7 +451,6 @@ class GimbalController(QObject):
         edge_thresh_y = getattr(ControlConfig, "EDGE_COMPRESS_THRESHOLD_Y", 100)
 
         if 0 < abs_y < settle_zone_y:
-            # Y 轴小范围柔和过渡，消除高频微震与果冻效应
             factor_y = 0.50 + 0.50 * (abs_y / float(settle_zone_y))
             err_y_computed = abs_y * scale_y * factor_y
         elif abs_y > edge_thresh_y:
@@ -414,13 +460,21 @@ class GimbalController(QObject):
         else:
             err_y_computed = abs_y * scale_y
 
-        # 恢复符号并取整
-        err_x = round(math.copysign(err_x_computed, err_x)) if err_x != 0 else 0
-        err_y = round(math.copysign(err_y_computed, err_y)) if err_y != 0 else 0
+        # 恢复符号并取整，同时叠加当前速度档位倍率
+        err_x = round(math.copysign(err_x_computed * self.speed_multiplier, err_x)) if err_x != 0 else 0
+        err_y = round(math.copysign(err_y_computed * self.speed_multiplier, err_y)) if err_y != 0 else 0
 
-        # 幅值安全截断保护 (防止电机速度超限与Y轴打到机械限位)
+        # 幅值安全截断保护
         err_x = max(-max_err_x, min(max_err_x, err_x))
         err_y = max(-max_err_y, min(max_err_y, err_y))
+
+        # 动态估算电机角度
+        if err_x != 0 or err_y != 0:
+            d_pan = -(err_x / 640.0) * (30.0 * self.speed_multiplier) * 0.025
+            d_tilt = -(err_y / 480.0) * (20.0 * self.speed_multiplier) * 0.025
+            self.servo_x = max(-180.0, min(180.0, self.servo_x + d_pan))
+            self.servo_y = max(-45.0, min(45.0, self.servo_y + d_tilt))
+            self.position_update_signal.emit(self.servo_x, self.servo_y)
 
         fire_val = 1 if (self.laser_armed and self.laser_firing) else 0
         self.serial_thread.send_realtime_command(f"<{err_x},{err_y},{fire_val}>\n")
@@ -480,8 +534,8 @@ class GimbalController(QObject):
     # --------------------------------------------------
 
     def manual_move(self, axis: str, direction: int) -> None:
-        """Send one single distinct jog step."""
-        logger.info(f"[MANUAL] 手动点动微调: 轴={axis}, 方向={direction}")
+        """Send one single distinct jog step scaled by speed gear."""
+        logger.info(f"[MANUAL] 手动点动微调: 轴={axis}, 方向={direction}, 档位=G{self.speed_gear} ({self.speed_multiplier:.1f}x)")
         if not self._is_serial_connected():
             self.status_update_signal.emit("⚠️ 警告: 串口未连接，无法控制电机")
             return
@@ -489,8 +543,8 @@ class GimbalController(QObject):
             logger.warning("[MANUAL] 忽略无效的手动移动参数")
             return
 
-        # X 轴调至 240，Y 轴调至 160 (克服减速比与静摩擦力)
-        step_error = 240 if axis == "x" else 160
+        base_error = 240 if axis == "x" else 160
+        step_error = max(35, int(round(base_error * self.speed_multiplier)))
         simulated_error = step_error * direction
 
         command = (
@@ -499,10 +553,16 @@ class GimbalController(QObject):
             else f"<0,{simulated_error},0>\n"
         )
         self.serial_thread.send_realtime_command(command)
-        # 单次点动平稳刹车 (0.12s 脉冲宽度，确保单步位移清晰可见)
         stop_delay = 0.12 if axis == "x" else 0.10
         threading.Timer(stop_delay, self.serial_thread.send_stop_command).start()
-        self.status_update_signal.emit(f"手动点动 {axis.upper()} (方向 {direction:+d})")
+
+        d_ang = (1.5 * self.speed_multiplier) * direction
+        if axis == "x":
+            self.servo_x = max(-180.0, min(180.0, self.servo_x + d_ang))
+        else:
+            self.servo_y = max(-45.0, min(45.0, self.servo_y + d_ang))
+        self.position_update_signal.emit(self.servo_x, self.servo_y)
+        self.status_update_signal.emit(f"手动点动 {axis.upper()} (方向 {direction:+d}, 档位 G{self.speed_gear})")
 
     def start_manual_continuous(self, axis: str, direction: int) -> None:
         """按住按钮或按下键盘方向键时：启动连续平滑运动"""

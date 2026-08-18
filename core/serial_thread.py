@@ -53,6 +53,7 @@ class SerialThread(threading.Thread):
         super().__init__(daemon=True)
         self.connection_state_signal = Signal()
         self.data_received_signal = Signal()
+        self.data_sent_signal = Signal()
 
         self.serial_port: Optional[serial.Serial] = None
         self.is_running = True
@@ -204,6 +205,9 @@ class SerialThread(threading.Thread):
         if port is None or not port.is_open:
             raise serial.SerialException("Serial port is not connected")
         port.write(command.encode("utf-8"))
+        stripped = command.strip()
+        if stripped:
+            self.data_sent_signal.emit(stripped)
 
     def _handle_received_chunk(self, chunk: str) -> None:
         self._read_buffer += chunk.replace("\r", "\n")

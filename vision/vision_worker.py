@@ -93,6 +93,7 @@ class VisionWorker(QThread):
         self.telemetry_laser_armed: bool = False
         self.telemetry_laser_firing: bool = False
         self.telemetry_laser_pwr: int = 100
+        self.speed_gear: int = 2
 
         # 检测器（纯视觉，无控制逻辑）
         self.detector = TargetDetector()
@@ -136,6 +137,10 @@ class VisionWorker(QThread):
         self.telemetry_laser_armed = bool(armed)
         self.telemetry_laser_firing = bool(firing)
         self.telemetry_laser_pwr = int(pwr)
+
+    def set_speed_gear(self, gear: int) -> None:
+        """设置电机速度档位 (1: 0.3x, 2: 1.0x, 3: 2.2x)"""
+        self.speed_gear = max(1, min(3, int(gear)))
 
     def is_recording(self) -> bool:
         """是否正在录像或暂停中"""
@@ -866,6 +871,18 @@ class VisionWorker(QThread):
             if self.pip_enabled:
                 self._render_pip_scope(frame, aim_x, aim_y)
 
+            # 2.1 绘制电机速度档位实时战术角标 (Speed Gear Badge)
+            gear_label = "G1 (SLOW 0.3x)" if self.speed_gear == 1 else ("G2 (NORM 1.0x)" if self.speed_gear == 2 else "G3 (FAST 2.2x)")
+            gear_color = (52, 211, 153) if self.speed_gear == 1 else ((56, 189, 248) if self.speed_gear == 2 else (0, 165, 255))
+            pip_w = 260 if fw >= 1280 else 200
+            pip_h = 195 if fw >= 1280 else 150
+            pad_x, pad_y = 14, 14
+            badge_y = (pad_y + pip_h + 18) if self.pip_enabled else 28
+            cv2.putText(frame, f"⚡ SPEED: {gear_label}", (pad_x, badge_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 3, cv2.LINE_AA)
+            cv2.putText(frame, f"⚡ SPEED: {gear_label}", (pad_x, badge_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, gear_color, 1, cv2.LINE_AA)
+
             # 3. 录屏视频流写入与 REC / PAUSE 状态角标及全英文遥测 OSD 叠加
             if self.recording_state != "IDLE" and self.video_writer is not None:
                 now = time.time()
@@ -877,7 +894,7 @@ class VisionWorker(QThread):
                 range_val = getattr(VisionConfig, "AKTIF_MESAFE_M", None)
                 range_str = f"{range_val:.0f}m" if range_val else "FIX"
                 laser_str = "FIRE ⚡" if self.telemetry_laser_firing else ("ARMED" if self.telemetry_laser_armed else "SAFE")
-                sys_info_str = f"SYS: {self.mode} | TGT: {tgt_name} | RNG: {range_str} | LASER: {laser_str}"
+                sys_info_str = f"SYS: {self.mode} | TGT: {tgt_name} | RNG: {range_str} | SPD: {gear_label} | LASER: {laser_str}"
 
                 hud_h = 68
                 hud_y = fh - hud_h

@@ -285,6 +285,10 @@ class MainWindow(QMainWindow):
         
         # ===== 串口线程 =====
         self.serial_thread.connection_state_signal.connect(self.on_connection_status_changed)
+        if hasattr(self.serial_thread, "data_sent_signal"):
+            self.serial_thread.data_sent_signal.connect(self.serial_panel.log_tx)
+        if hasattr(self.serial_thread, "data_received_signal"):
+            self.serial_thread.data_received_signal.connect(self.serial_panel.log_rx)
         
         # ===== 摄像头面板 =====
         self.camera_panel.camera_changed.connect(self.on_camera_changed)
@@ -297,6 +301,12 @@ class MainWindow(QMainWindow):
         self.controller.position_update_signal.connect(self.update_status)
         self.controller.position_update_signal.connect(self.vision_thread.update_telemetry_pos)
         self.controller.laser_state_signal.connect(self.vision_thread.update_telemetry_laser)
+        self.controller.speed_gear_changed_signal.connect(
+            lambda gear, mult: self.camera_view.set_speed_gear_visual(gear)
+        )
+        self.controller.speed_gear_changed_signal.connect(
+            lambda gear, mult: self.vision_thread.set_speed_gear(gear)
+        )
         
         # ===== GUI 组件 =====
         # 串口面板
@@ -332,9 +342,11 @@ class MainWindow(QMainWindow):
             lambda armed, firing, pwr: self.control_panel.set_laser_firing_visual(firing)
         )
         
-        # 摄像头全屏、准星画中画缩放与 3 键录屏信号
+        # 摄像头全屏、准星画中画缩放、3 档速度与 3 键录屏信号
         self.camera_view.fullscreen_requested.connect(self.toggle_fullscreen_mode)
         self.camera_view.pip_zoom_changed.connect(self.vision_thread.set_pip_zoom)
+        self.camera_view.speed_gear_changed.connect(self.controller.set_speed_gear)
+        self.camera_view.speed_gear_changed.connect(self.vision_thread.set_speed_gear)
         self.camera_view.record_start_requested.connect(self.on_start_recording)
         self.camera_view.record_pause_requested.connect(self.on_pause_recording)
         self.camera_view.record_stop_requested.connect(self.on_stop_recording)
@@ -638,6 +650,20 @@ class MainWindow(QMainWindow):
             return
         elif key in (Qt.Key.Key_BracketLeft, Qt.Key.Key_Minus):
             self.camera_view.zoom_out()
+            event.accept()
+            return
+
+        # 数字键 1, 2, 3: 快速切换电机速度档位 (Gear 1: 0.3x, Gear 2: 1.0x, Gear 3: 2.2x)
+        if key in (Qt.Key.Key_1, Qt.Key.Key_Keypad_1):
+            self.controller.set_speed_gear(1)
+            event.accept()
+            return
+        elif key in (Qt.Key.Key_2, Qt.Key.Key_Keypad_2):
+            self.controller.set_speed_gear(2)
+            event.accept()
+            return
+        elif key in (Qt.Key.Key_3, Qt.Key.Key_Keypad_3):
+            self.controller.set_speed_gear(3)
             event.accept()
             return
 

@@ -8,8 +8,9 @@
 - 紧凑美观的响应式 UI 布局，无任何文字截断
 """
 
+from datetime import datetime
 from PyQt6.QtWidgets import (
-    QGroupBox, QVBoxLayout, QHBoxLayout, QComboBox, QPushButton, QLabel, QFrame
+    QGroupBox, QVBoxLayout, QHBoxLayout, QComboBox, QPushButton, QLabel, QFrame, QPlainTextEdit
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 import serial.tools.list_ports
@@ -159,7 +160,57 @@ class SerialPanel(QGroupBox):
         """)
         self.btn_connect.clicked.connect(self._on_connect_clicked)
         main_layout.addWidget(self.btn_connect)
+
+        # 4. STM32 实时通信监视器 (TX / RX Serial Console)
+        monitor_header = QHBoxLayout()
+        lbl_mon = QLabel("<b>📡 Live Port Monitor (TX / RX)</b>")
+        lbl_mon.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        monitor_header.addWidget(lbl_mon)
+        monitor_header.addStretch()
+
+        self.btn_clear_log = QPushButton("Clear")
+        self.btn_clear_log.setFixedSize(45, 20)
+        self.btn_clear_log.setStyleSheet("""
+            QPushButton { background-color: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 3px; font-size: 10px; }
+            QPushButton:hover { background-color: #334155; color: #f1f5f9; }
+        """)
+        self.btn_clear_log.clicked.connect(self._clear_monitor)
+        monitor_header.addWidget(self.btn_clear_log)
+        main_layout.addLayout(monitor_header)
+
+        self.txt_monitor = QPlainTextEdit()
+        self.txt_monitor.setReadOnly(True)
+        self.txt_monitor.setMaximumBlockCount(150)
+        self.txt_monitor.setMinimumHeight(100)
+        self.txt_monitor.setMaximumHeight(140)
+        self.txt_monitor.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #090d16;
+                color: #38bdf8;
+                font-family: Consolas, 'Courier New', monospace;
+                font-size: 10px;
+                border: 1px solid #1e293b;
+                border-radius: 4px;
+                padding: 4px;
+            }
+        """)
+        main_layout.addWidget(self.txt_monitor)
     
+    def _clear_monitor(self):
+        self.txt_monitor.clear()
+
+    def log_tx(self, msg: str):
+        """记录发送给 STM32 的数据 (TX ➜)"""
+        now = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        self.txt_monitor.appendPlainText(f"[{now}] ⬆ TX ➜ {msg}")
+        self.txt_monitor.ensureCursorVisible()
+
+    def log_rx(self, msg: str):
+        """记录从 STM32 接收到的数据 (RX ⬅)"""
+        now = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        self.txt_monitor.appendPlainText(f"[{now}] ⬇ RX ⬅ {msg}")
+        self.txt_monitor.ensureCursorVisible()
+
     def _update_channel_badge(self):
         """更新当前选中端口的通道类型徽章"""
         if self.is_connected:

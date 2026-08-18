@@ -197,6 +197,7 @@ class CameraView(QWidget):
     record_start_requested = pyqtSignal()
     record_pause_requested = pyqtSignal()
     record_stop_requested = pyqtSignal()
+    speed_gear_changed = pyqtSignal(int)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -205,6 +206,7 @@ class CameraView(QWidget):
         self.is_fullscreen = False
         self.recording_state = "IDLE"
         self.current_zoom = 3.0
+        self.current_gear = 2
         self.init_ui()
 
     def set_laser_status(self, armed: bool, firing: bool) -> None:
@@ -216,7 +218,7 @@ class CameraView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        # 1. 顶部操作工具栏 (Live View 标题 + 画中画放大 + 3键录像 + 掩码 + 全屏)
+        # 1. 顶部操作工具栏 (Live View 标题 + 速度档位 + 画中画放大 + 3键录像 + 掩码 + 全屏)
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(4, 2, 4, 2)
         header_layout.setSpacing(6)
@@ -224,6 +226,38 @@ class CameraView(QWidget):
         self.lbl_title = QLabel("<h2>📷 Live Camera Feed</h2>")
         header_layout.addWidget(self.lbl_title)
         header_layout.addStretch()
+
+        # 1.0 电机三档速度选择 (Speed Gear 1 / 2 / 3, Shortcut: 1, 2, 3)
+        gear_box = QWidget()
+        gear_layout = QHBoxLayout(gear_box)
+        gear_layout.setContentsMargins(0, 0, 0, 0)
+        gear_layout.setSpacing(2)
+
+        lbl_spd = QLabel("⚡")
+        lbl_spd.setStyleSheet("color: #38bdf8; font-size: 12px;")
+        gear_layout.addWidget(lbl_spd)
+
+        self.btn_gear1 = QPushButton("1: 0.3x")
+        self.btn_gear1.setToolTip("Gear 1: Precision Slow 0.3x (防远距离震动, 快捷键: 1)")
+        self.btn_gear1.setCheckable(True)
+        self.btn_gear1.clicked.connect(lambda: self.speed_gear_changed.emit(1))
+        gear_layout.addWidget(self.btn_gear1)
+
+        self.btn_gear2 = QPushButton("2: 1.0x")
+        self.btn_gear2.setToolTip("Gear 2: Normal Cruise 1.0x (标准速度, 快捷键: 2)")
+        self.btn_gear2.setCheckable(True)
+        self.btn_gear2.setChecked(True)
+        self.btn_gear2.clicked.connect(lambda: self.speed_gear_changed.emit(2))
+        gear_layout.addWidget(self.btn_gear2)
+
+        self.btn_gear3 = QPushButton("3: 2.2x")
+        self.btn_gear3.setToolTip("Gear 3: Fast Turbo 2.2x (高速追击, 快捷键: 3)")
+        self.btn_gear3.setCheckable(True)
+        self.btn_gear3.clicked.connect(lambda: self.speed_gear_changed.emit(3))
+        gear_layout.addWidget(self.btn_gear3)
+
+        self._update_gear_button_styles()
+        header_layout.addWidget(gear_box)
 
         # 1.1 准星画中画局部放大倍数调节 (PiP Reticle Scope Zoom)
         zoom_box = QWidget()
@@ -478,6 +512,68 @@ class CameraView(QWidget):
         self.current_zoom = factor
         self.lbl_zoom.setText(f"🔍 {factor:.1f}x")
         self.pip_zoom_changed.emit(factor)
+
+    def _update_gear_button_styles(self):
+        """更新速度档位按钮高亮样式"""
+        style_inactive = """
+            QPushButton {
+                background-color: #1e293b;
+                color: #94a3b8;
+                border: 1px solid #334155;
+                border-radius: 3px;
+                padding: 3px 6px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #334155;
+                color: #f1f5f9;
+            }
+        """
+        style_g1 = """
+            QPushButton {
+                background-color: #065f46;
+                color: #34d399;
+                border: 1px solid #059669;
+                border-radius: 3px;
+                padding: 3px 6px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+        """
+        style_g2 = """
+            QPushButton {
+                background-color: #0369a1;
+                color: #38bdf8;
+                border: 1px solid #0284c7;
+                border-radius: 3px;
+                padding: 3px 6px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+        """
+        style_g3 = """
+            QPushButton {
+                background-color: #9a3412;
+                color: #fb923c;
+                border: 1px solid #ea580c;
+                border-radius: 3px;
+                padding: 3px 6px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+        """
+        self.btn_gear1.setStyleSheet(style_g1 if self.current_gear == 1 else style_inactive)
+        self.btn_gear2.setStyleSheet(style_g2 if self.current_gear == 2 else style_inactive)
+        self.btn_gear3.setStyleSheet(style_g3 if self.current_gear == 3 else style_inactive)
+
+    def set_speed_gear_visual(self, gear: int):
+        """外部（如快捷键/控制器）更新档位时同步按钮视觉"""
+        self.current_gear = max(1, min(3, int(gear)))
+        self.btn_gear1.setChecked(self.current_gear == 1)
+        self.btn_gear2.setChecked(self.current_gear == 2)
+        self.btn_gear3.setChecked(self.current_gear == 3)
+        self._update_gear_button_styles()
 
     def zoom_in(self):
         """Zoom In 0.5x (Shortcut: ] or +)"""

@@ -3,11 +3,11 @@
     "camera_id": 1,
     "resolution_width": 1920,
     "resolution_height": 1080,
-    "flip_mode": "NONE",
+    "flip_mode": "180",
     "auto_open": true
   },
   "serial": {
-    "port": "COM5",
+    "port": "COM6",
     "baudrate": 115200,
     "auto_connect": true
   }
