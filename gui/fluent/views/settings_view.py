@@ -65,8 +65,10 @@ class SettingsView(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
 
         content = QWidget()
+        content.setStyleSheet("background: transparent;")
         cards_layout = QVBoxLayout(content)
         cards_layout.setContentsMargins(0, 0, 10, 0)
         cards_layout.setSpacing(16)
@@ -80,7 +82,7 @@ class SettingsView(QWidget):
         serial_layout.setSpacing(14)
 
         card_title_1 = StrongBodyLabel("🔌 STM32 USB 硬件通信 (Serial & CDC)")
-        card_title_1.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc; margin-bottom: 4px;")
+        card_title_1.setStyleSheet("font-size: 15px; font-weight: bold; margin-bottom: 4px;")
         serial_layout.addWidget(card_title_1)
 
         # 端口选择
@@ -118,7 +120,7 @@ class SettingsView(QWidget):
         conn_h = QHBoxLayout()
         conn_h.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.serial_status_desc = CaptionLabel("状态: 未连接")
-        self.serial_status_desc.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        self.serial_status_desc.setStyleSheet("font-size: 12px;")
         self.btn_serial_connect = PrimaryPushButton(FluentIcon.CONNECT, "连接串口")
         self.btn_serial_connect.setFixedHeight(36)
         self.btn_serial_connect.setMinimumWidth(120)
@@ -139,7 +141,7 @@ class SettingsView(QWidget):
         cam_layout.setSpacing(14)
 
         card_title_2 = StrongBodyLabel("📷 工业摄像头与图像采集 (Vision Pipeline)")
-        card_title_2.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc; margin-bottom: 4px;")
+        card_title_2.setStyleSheet("font-size: 15px; font-weight: bold; margin-bottom: 4px;")
         cam_layout.addWidget(card_title_2)
 
         # 摄像头选择
@@ -226,7 +228,7 @@ class SettingsView(QWidget):
         input_layout.setSpacing(14)
 
         card_title_3 = StrongBodyLabel("🎯 手控瞄准灵敏度与输入偏好 (Control & Sensitivity)")
-        card_title_3.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc; margin-bottom: 4px;")
+        card_title_3.setStyleSheet("font-size: 15px; font-weight: bold; margin-bottom: 4px;")
         input_layout.addWidget(card_title_3)
 
         sens_v = QVBoxLayout()
@@ -266,7 +268,7 @@ class SettingsView(QWidget):
         theme_layout.setSpacing(14)
 
         card_title_4 = StrongBodyLabel("🎨 系统外观与主题 (Appearance & Theme)")
-        card_title_4.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc; margin-bottom: 4px;")
+        card_title_4.setStyleSheet("font-size: 15px; font-weight: bold; margin-bottom: 4px;")
         theme_layout.addWidget(card_title_4)
 
         theme_h = QHBoxLayout()

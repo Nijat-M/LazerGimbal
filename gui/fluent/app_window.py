@@ -40,8 +40,19 @@ class FluentAppWindow(FluentWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("LaserGimbal Pro - Fluent Ground Station")
-        self.resize(1280, 840)
-        self.setMinimumSize(1000, 680)
+        self.setMinimumSize(920, 580)
+
+        # 智能适应屏幕尺寸 (默认 1200x720 黄金比例，防止在笔记本或小屏幕上超屏)
+        screen = QApplication.primaryScreen()
+        if screen:
+            geo = screen.availableGeometry()
+            w = min(1200, max(920, geo.width() - 80))
+            h = min(720, max(580, geo.height() - 80))
+            self.resize(w, h)
+            self.move((geo.width() - w) // 2, (geo.height() - h) // 2)
+        else:
+            self.resize(1180, 700)
+
         self.camera_request_generation = -1
 
         # 默认暗黑主题
@@ -144,6 +155,7 @@ class FluentAppWindow(FluentWindow):
         self.console_view.mode_changed.connect(self._on_mode_changed)
         self.console_view.reset_requested.connect(self.controller.sync_position)
         self.console_view.emergency_stop_requested.connect(self.trigger_emergency_stop)
+        self.console_view.camera_toggled.connect(self._on_camera_toggled)
 
         self.console_view.laser_armed_toggled.connect(self.controller.set_laser_armed)
         self.console_view.laser_fire_changed.connect(self.controller.set_laser_firing)
@@ -296,13 +308,27 @@ class FluentAppWindow(FluentWindow):
     def _on_camera_device_changed(self, cam_id: int, w: int, h: int):
         self.vision_thread.switch_camera(cam_id, w, h)
 
+    def _on_camera_state_changed(self, generation: int, ready: bool, message: str):
+        self.camera_request_generation = generation
+        self.controller.set_visual_input_enabled(ready)
+        self.settings_view.set_camera_running_status(ready)
+        self.console_view.set_camera_running_status(ready)
+        if not ready and self.controller.control_enabled:
+            self.console_view.btn_track.setChecked(False)
+
     def _on_camera_toggled(self, running: bool):
         if running:
-            if not self.vision_thread.isRunning():
-                self.vision_thread.start()
+            cam_id = self.settings_view.combo_camera.currentData()
+            if cam_id is None:
+                cam_id = cfg.CAMERA_ID
+            res_idx = self.settings_view.combo_resolution.currentIndex()
+            resolutions = [(640, 480), (1280, 720), (1920, 1080)]
+            w, h = resolutions[res_idx] if 0 <= res_idx < len(resolutions) else (640, 480)
+            self.vision_thread.switch_camera(cam_id, w, h)
         else:
-            self.vision_thread.stop()
+            self.vision_thread.close_camera()
         self.settings_view.set_camera_running_status(running)
+        self.console_view.set_camera_running_status(running)
 
     def _on_save_config(self):
         cfg.PID_KP = self.tuning_view._kp

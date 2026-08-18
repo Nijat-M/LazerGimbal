@@ -62,8 +62,10 @@ class TuningView(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
 
         content_widget = QWidget()
+        content_widget.setStyleSheet("background: transparent;")
         cards_layout = QVBoxLayout(content_widget)
         cards_layout.setContentsMargins(0, 0, 10, 0)
         cards_layout.setSpacing(16)
@@ -77,7 +79,7 @@ class TuningView(QWidget):
         pid_layout.setSpacing(16)
 
         card_title_1 = StrongBodyLabel("⚙️ PID 闭环追踪参数 (Real-Time Control Loop)")
-        card_title_1.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc; margin-bottom: 4px;")
+        card_title_1.setStyleSheet("font-size: 15px; font-weight: bold; margin-bottom: 4px;")
         pid_layout.addWidget(card_title_1)
 
         # 比例增益 Kp
@@ -167,7 +169,7 @@ class TuningView(QWidget):
         manual_layout.setSpacing(16)
 
         card_title_2 = StrongBodyLabel("🎮 云台运动诊断与方向测试 (Manual Diagnostics)")
-        card_title_2.setStyleSheet("font-size: 15px; font-weight: bold; color: #f8fafc; margin-bottom: 4px;")
+        card_title_2.setStyleSheet("font-size: 15px; font-weight: bold; margin-bottom: 4px;")
         manual_layout.addWidget(card_title_2)
 
         # D-Pad 方向键

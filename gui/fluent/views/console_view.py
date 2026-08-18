@@ -37,6 +37,9 @@ class ConsoleView(QWidget):
     laser_fire_changed = pyqtSignal(bool)
     laser_power_changed = pyqtSignal(int)
     
+    # 摄像头信号
+    camera_toggled = pyqtSignal(bool)
+    
     # YOLO 扩展信号
     yolo_model_changed = pyqtSignal(str)
     yolo_class_changed = pyqtSignal(object)
@@ -123,6 +126,7 @@ class ConsoleView(QWidget):
         # ==========================================
         self.camera_view = CameraView()
         self.camera_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.camera_view.camera_toggled.connect(self.camera_toggled.emit)
         main_layout.addWidget(self.camera_view, 1)
 
         # ==========================================
@@ -259,7 +263,7 @@ class ConsoleView(QWidget):
 
         lbl = CaptionLabel(label_text)
         lbl.setFixedHeight(16)
-        lbl.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 500;")
+        lbl.setStyleSheet("font-size: 11px; font-weight: 500;")
         vbox.addWidget(lbl)
         return vbox
 
@@ -268,7 +272,7 @@ class ConsoleView(QWidget):
         line = QFrame()
         line.setFrameShape(QFrame.Shape.VLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
-        line.setStyleSheet("color: #334155; max-height: 40px; margin-top: 10px;")
+        line.setStyleSheet("color: rgba(128, 128, 128, 0.25); max-height: 40px; margin-top: 10px;")
         return line
 
     def _on_mode_combo_changed(self, index: int):
@@ -385,6 +389,10 @@ class ConsoleView(QWidget):
     def update_telemetry(self, fps: float, res_str: str, target_dx: float = 0.0, target_dy: float = 0.0):
         self.fps_label.setText(f"FPS: {fps:.1f} | Res: {res_str}")
         self.target_label.setText(f"Target Δ: [{target_dx:+.1f}°, {target_dy:+.1f}°]")
+
+    def set_camera_running_status(self, running: bool):
+        """同步摄像头运行状态至视频视窗"""
+        self.camera_view.set_camera_running_status(running)
 
     def handle_emergency_reset(self):
         """急停复位本视图各开关"""

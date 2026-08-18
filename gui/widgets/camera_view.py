@@ -178,6 +178,9 @@ class CameraView(QWidget):
     mouse_capture_changed_signal = pyqtSignal(bool)
     fullscreen_requested = pyqtSignal()
 
+    # 摄像头启停信号
+    camera_toggled = pyqtSignal(bool)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.is_camera_active = False
@@ -189,19 +192,79 @@ class CameraView(QWidget):
         """同步激光武器状态至画面准星 HUD"""
         self.lbl_camera.set_laser_status(armed, firing)
 
+    def set_camera_running_status(self, running: bool) -> None:
+        """同步摄像头启停按钮视觉状态"""
+        self.is_camera_active = running
+        self.btn_cam_toggle.blockSignals(True)
+        self.btn_cam_toggle.setChecked(running)
+        if running:
+            self.btn_cam_toggle.setText("⏹ 关闭摄像头")
+            self.btn_cam_toggle.setStyleSheet("""
+                QPushButton {
+                    background-color: #0284c7;
+                    color: #ffffff;
+                    border: 1px solid #0369a1;
+                    padding: 4px 10px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    font-weight: 600;
+                }
+                QPushButton:hover {
+                    background-color: #0369a1;
+                }
+            """)
+        else:
+            self.btn_cam_toggle.setText("▶ 启动摄像头")
+            self.btn_cam_toggle.setStyleSheet("""
+                QPushButton {
+                    background-color: #10b981;
+                    color: #ffffff;
+                    border: 1px solid #059669;
+                    padding: 4px 10px;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    font-weight: 600;
+                }
+                QPushButton:hover {
+                    background-color: #059669;
+                }
+            """)
+        self.btn_cam_toggle.blockSignals(False)
+
     def init_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        # 1. 顶部操作工具栏 (Live View 标题 + 全屏/掩码切换按钮)
+        # 1. 顶部操作工具栏 (Live View 标题 + 摄像头开关 + 全屏/掩码切换按钮)
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(4, 2, 4, 4)
 
         self.lbl_title = QLabel("📷 实时视频监控与作战准星 (Live Vision & HUD)")
-        self.lbl_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #f8fafc;")
+        self.lbl_title.setStyleSheet("font-size: 13px; font-weight: bold;")
         header_layout.addWidget(self.lbl_title)
         header_layout.addStretch()
+
+        # 摄像头独立启停按钮
+        self.btn_cam_toggle = QPushButton("▶ 启动摄像头")
+        self.btn_cam_toggle.setCheckable(True)
+        self.btn_cam_toggle.setChecked(True)
+        self.btn_cam_toggle.setStyleSheet("""
+            QPushButton {
+                background-color: #0284c7;
+                color: #ffffff;
+                border: 1px solid #0369a1;
+                padding: 4px 10px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #0369a1;
+            }
+        """)
+        self.btn_cam_toggle.toggled.connect(self.camera_toggled.emit)
+        header_layout.addWidget(self.btn_cam_toggle)
 
         # 掩码显示/折叠切换按钮 (默认折叠以保持主界面清爽)
         self.btn_toggle_mask = QPushButton("👁 视觉掩码 (Mask)")
@@ -209,16 +272,14 @@ class CameraView(QWidget):
         self.btn_toggle_mask.setChecked(False)
         self.btn_toggle_mask.setStyleSheet("""
             QPushButton {
-                background-color: #1e293b;
-                color: #94a3b8;
-                border: 1px solid #334155;
+                background-color: rgba(100, 116, 139, 0.2);
+                border: 1px solid rgba(100, 116, 139, 0.4);
                 padding: 4px 10px;
                 border-radius: 4px;
                 font-size: 11px;
             }
             QPushButton:hover {
-                background-color: #334155;
-                color: #f8fafc;
+                background-color: rgba(100, 116, 139, 0.35);
             }
             QPushButton:checked {
                 background-color: #0369a1;
@@ -234,16 +295,17 @@ class CameraView(QWidget):
         self.btn_fullscreen.setToolTip("双击画面或按 F11 切换全屏沉浸式监控")
         self.btn_fullscreen.setStyleSheet("""
             QPushButton {
-                background-color: #0284c7;
-                color: #ffffff;
+                background-color: rgba(14, 165, 233, 0.15);
+                color: #0284c7;
+                border: 1px solid rgba(14, 165, 233, 0.4);
                 font-weight: bold;
                 padding: 4px 12px;
                 border-radius: 4px;
                 font-size: 11px;
-                border: none;
             }
             QPushButton:hover {
-                background-color: #0369a1;
+                background-color: #0284c7;
+                color: #ffffff;
             }
         """)
         self.btn_fullscreen.clicked.connect(self.fullscreen_requested.emit)
@@ -253,8 +315,8 @@ class CameraView(QWidget):
 
         # 2. 摄像头主显示标签
         self.lbl_camera = MouseAimLabel("Camera not started")
-        self.lbl_camera.setStyleSheet("background-color: #020617; border: 1px solid #1e293b; border-radius: 6px;")
-        self.lbl_camera.setMinimumSize(480, 360)
+        self.lbl_camera.setStyleSheet("background-color: #020617; border: 1px solid #334155; border-radius: 6px;")
+        self.lbl_camera.setMinimumSize(480, 320)
         self.lbl_camera.mouse_delta_signal.connect(self.mouse_delta_signal.emit)
         self.lbl_camera.capture_changed_signal.connect(
             self.mouse_capture_changed_signal.emit
