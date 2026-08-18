@@ -18,7 +18,7 @@ class ControlConfig:
     KP: float = 0.60   # 比例系数 (敏捷跟手，平稳无过冲)
     KI: float = 0.16   # 积分系数 (消除稳态静差)
     KD: float = 0.50   # 微分系数 (高速阻尼，抑制摆动)
-    DEADZONE: int = 5  # 拦截死区（像素），在此死区内强制认定为误差0
+    DEADZONE: int = 3  # 拦截死区（像素），极窄死区确保准星直接打进目标中心红心
 
     # FPS 风格鼠标手动瞄准
     MOUSE_SENSITIVITY: float = 0.08      # 每个鼠标计数对应的虚拟角度（度）
@@ -41,13 +41,13 @@ class ControlConfig:
     INVERT_Y: bool = True
 
     # 追踪误差缩放与准星防过冲阻尼参数
-    TRACKING_SCALE_X: float = 1.20       # X 轴基准追踪误差缩放系数（配合下位机直接速度闭环）
-    TRACKING_SCALE_Y: float = 0.45       # Y 轴基准追踪误差缩放系数
-    TRACKING_MAX_ERROR_X: int = 120      # X 轴单周期最大追踪误差（软饱和限幅，防止远距离超速过冲回摆）
-    TRACKING_MAX_ERROR_Y: int = 50       # Y 轴单周期最大追踪误差
+    TRACKING_SCALE_X: float = 1.25       # X 轴基准追踪误差缩放系数
+    TRACKING_SCALE_Y: float = 0.90       # Y 轴基准追踪误差缩放系数 (提高 Y 轴克服云台重力，直推目标中心)
+    TRACKING_MAX_ERROR_X: int = 130      # X 轴单周期最大追踪误差
+    TRACKING_MAX_ERROR_Y: int = 90       # Y 轴单周期最大追踪误差
     
-    SETTLE_ZONE_X: int = 45              # X 轴准星中心平滑减速过渡区（像素）
-    SETTLE_ZONE_Y: int = 25              # Y 轴准星中心平滑减速过渡区（像素）
+    SETTLE_ZONE_X: int = 35              # X 轴准星中心平滑减速过渡区（像素）
+    SETTLE_ZONE_Y: int = 18              # Y 轴准星中心平滑减速过渡区（像素）
     EDGE_COMPRESS_THRESHOLD_X: int = 100 # X 轴屏幕边缘软饱和压缩起点（像素）
     EDGE_COMPRESS_THRESHOLD_Y: int = 100 # Y 轴屏幕边缘软饱和压缩起点（像素）
 

@@ -451,14 +451,19 @@ class GimbalController(QObject):
         edge_thresh_y = getattr(ControlConfig, "EDGE_COMPRESS_THRESHOLD_Y", 100)
 
         if 0 < abs_y < settle_zone_y:
-            factor_y = 0.50 + 0.50 * (abs_y / float(settle_zone_y))
-            err_y_computed = abs_y * scale_y * factor_y
+            factor_y = 0.65 + 0.35 * (abs_y / float(settle_zone_y))
+            err_y_computed = max(7.0, abs_y * scale_y * factor_y)
         elif abs_y > edge_thresh_y:
             excess_y = abs_y - edge_thresh_y
             compressed_y = edge_thresh_y + (excess_y ** 0.55) * 1.2
             err_y_computed = compressed_y * scale_y
         else:
             err_y_computed = abs_y * scale_y
+
+        if abs_x >= ControlConfig.DEADZONE:
+            err_x_computed = max(6.0, err_x_computed)
+        if abs_y >= ControlConfig.DEADZONE:
+            err_y_computed = max(7.0, err_y_computed)
 
         # 恢复符号并取整，同时叠加当前速度档位倍率
         err_x = round(math.copysign(err_x_computed * self.speed_multiplier, err_x)) if err_x != 0 else 0

@@ -74,23 +74,28 @@ def iff_analiz(frame_bgr, box):
         V = hsv[:, :, 2].astype(np.float32)
 
         # 红色敌军特征：
-        # 1) H位于纯红区间 (0~10 或 165~180)
-        # 2) 排除低饱和度的黄色/木桌/纸箱 (S >= 45, V >= 35)
-        # 3) R 通道明显优于 B 和 G 通道
-        hsv_red = ((H <= 10) | (H >= 165)) & (S >= 45) & (V >= 35) & (r - b >= 20) & (r - g >= 15)
+        # 1) H位于纯红区间 (0~7 或 170~180)
+        # 2) 强饱和度排除黄色墙壁/射灯/木头 (S >= 45, V >= 35)
+        # 3) R 通道必须大幅压倒 G 通道与 B 通道 (黄光下 R~=G，纯红 R>>G)
+        hsv_red = (
+            ((H <= 7) | (H >= 170)) & (S >= 45) & (V >= 35)
+            & (r - g >= 25) & (r - b >= 30) & (r / (g + b + 1.0) >= 1.25)
+        )
         
-        # 蓝色友军特征：
-        # 1) H位于纯蓝/天蓝区间 (85~145)
-        # 2) 排除反光或灰白色 (S >= 38, V >= 35)
-        # 3) B 通道明显优于 R 通道
-        hsv_blue = (H >= 85) & (H <= 145) & (S >= 38) & (V >= 35) & (b - r >= 15)
+        # 蓝色友军特征 (全面适应走廊黄光/低曝光/深蓝/灰蓝 3D 打印靶标)：
+        # 1) H位于蓝色广谱区间 (75~155)
+        # 2) 宽容饱和度与亮度门限 (S >= 15, V >= 20)
+        # 3) 即使在黄光漫反射下，蓝色靶标的 B 通道仍明显高于 R 通道
+        hsv_blue = (
+            (H >= 75) & (H <= 155) & (S >= 15) & (V >= 20) & (b >= r + 2)
+        )
     except Exception:
         hsv_red = np.zeros_like(b, dtype=bool)
         hsv_blue = np.zeros_like(b, dtype=bool)
 
-    # --- 3. BGR 强色度差分特征 (应对超强光或暗光特异点) ---
-    bgr_red = (r >= 65) & (r - b >= 35) & (r - g >= 25) & (r / (g + b + 1.0) >= 1.25)
-    bgr_blue = (b >= 55) & (b - r >= 25) & (b / (r + g + 1.0) >= 0.85)
+    # --- 3. BGR 强色度差分特征 ---
+    bgr_red = (r >= 65) & (r - g >= 25) & (r - b >= 35) & (r / (g + b + 1.0) >= 1.25)
+    bgr_blue = (b >= 40) & (b >= r + 4) & (b / (r + 1.0) >= 1.04)
 
     is_red = hsv_red | bgr_red
     is_blue = hsv_blue | bgr_blue
@@ -101,14 +106,14 @@ def iff_analiz(frame_bgr, box):
     max_color = max(kirmizi_sayisi, mavi_sayisi)
     oran = max_color / float(max(total_px, 1))
 
-    # 动态像素门限 (避免杂散孤立噪点)
-    min_px = 3 if total_px < 300 else 6
-    min_ratio = 0.010 if total_px < 300 else 0.020
+    # 动态像素门限 (微小目标 3 像素，标准目标 5 像素)
+    min_px = 3 if total_px < 300 else 5
+    min_ratio = 0.008 if total_px < 300 else 0.015
 
     if max_color < min_px or oran < min_ratio:
         return NEUTRAL, kirmizi_sayisi, mavi_sayisi, oran
 
-    # 主导色彩裁决：友军优先安全原则 (遇到蓝色且占优必判友军)
+    # 主导色彩裁决：友军保护绝对优先 (发现蓝色且占优必判友军，杜绝误击友军)
     if mavi_sayisi >= min_px and (mavi_sayisi >= kirmizi_sayisi or kirmizi_sayisi < min_px):
         return FRIENDLY, kirmizi_sayisi, mavi_sayisi, oran
     elif kirmizi_sayisi >= min_px and (kirmizi_sayisi > mavi_sayisi * 1.2 or mavi_sayisi < min_px):
