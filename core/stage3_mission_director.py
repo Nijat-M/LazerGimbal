@@ -68,6 +68,8 @@ class Stage3MissionDirector(QObject):
         self.enemy_count = 0
         self.hostile_destroyed = False
         self.mission_start_time = 0.0
+        self.engaging_start_time = 0.0
+        self.hostile_disappeared_since = 0.0
 
     @property
     def is_running(self) -> bool:
@@ -82,6 +84,8 @@ class Stage3MissionDirector(QObject):
         self.friendly_fired_count = 0
         self.hostile_destroyed = False
         self.mission_start_time = time.time()
+        self.engaging_start_time = 0.0
+        self.hostile_disappeared_since = 0.0
 
         # 1. 确保系统处于自动追踪模式与激光使能
         if self.main_window:
@@ -109,6 +113,29 @@ class Stage3MissionDirector(QObject):
         self._enter_state(Stage3MissionState.ABORTED, f"Mission Aborted: {reason}")
         logger.warning(f"[MISSION] ⏹ 任务中止: {reason}")
 
+    def confirm_destruction(self) -> bool:
+        """
+        确认目标已摧毁（由操作员/裁判点击或视觉自动识别靶标消失后调用）
+        """
+        if self.state != Stage3MissionState.ENGAGING:
+            logger.warning("[MISSION] 目标未处于交战状态，无法确认摧毁")
+            return False
+
+        logger.info("[MISSION] 💥 确认敌方目标已摧毁 (Hostile Destruction Confirmed)!")
+        self.hostile_destroyed = True
+        
+        # 立即切断激光
+        if self.main_window:
+            try:
+                self.main_window.controller.set_laser_firing(False)
+            except Exception:
+                pass
+
+        # 推进至第 3 阶段：等待 10 秒
+        self._enter_state(Stage3MissionState.WAIT_POST_FIRE, "Step 3/6: Hostile Destroyed! Cease Fire >> Waiting 10s...")
+        self.step_progress.emit(3, "Post-Fire Wait 10s")
+        return True
+
     def on_detections_update(self, dets: list) -> None:
         """从视觉检测流水线接收最新态势"""
         if not self.is_running:
@@ -123,18 +150,35 @@ class Stage3MissionDirector(QObject):
 
         # 状态机推进：在锁定阶段，若发现敌方则立即进入自主开火摧毁阶段
         if self.state == Stage3MissionState.ACQUIRING and red_c > 0:
-            self._enter_state(Stage3MissionState.ENGAGING, "Step 2/6: Hostile Locked >> Engaging & Destroying...")
+            self.engaging_start_time = time.time()
+            self.hostile_disappeared_since = 0.0
+            self._enter_state(Stage3MissionState.ENGAGING, "Step 2/6: Hostile Locked >> Engaging & Destroying (Awaiting Destruction)...")
             self.step_progress.emit(2, "Autonomous Engagement")
             if self.main_window:
                 self.main_window.controller.set_laser_firing(True)
+
+        # 在交战阶段：如果敌方目标已从画面中消失（例如气球爆破/靶标倒下/被取下）连续超过 1.0 秒，视觉自动确认摧毁
+        elif self.state == Stage3MissionState.ENGAGING:
+            now = time.time()
+            # 必须开火交战至少 1.5 秒后，才允许触发自动视觉消失判定，防止误判
+            if (now - self.engaging_start_time) > 1.5:
+                if red_c == 0:
+                    if self.hostile_disappeared_since == 0.0:
+                        self.hostile_disappeared_since = now
+                    elif (now - self.hostile_disappeared_since) >= 1.0:
+                        logger.info("[MISSION] 🎯 视觉感知：红色敌方已完全脱离/被消灭，自动判定摧毁！")
+                        self.confirm_destruction()
+                else:
+                    self.hostile_disappeared_since = 0.0
 
     def _enter_state(self, new_state: str, message: str) -> None:
         self.state = new_state
         self.phase_start_time = time.time()
         
         if new_state == Stage3MissionState.ENGAGING:
-            self.phase_target_duration = self.engagement_duration
-            self.timer.start()
+            # 交战阶段不再使用固定时间倒计时自动跳过，必须等待摧毁确认！
+            self.phase_target_duration = 0.0
+            self.timer.stop()
         elif new_state == Stage3MissionState.WAIT_POST_FIRE:
             self.phase_target_duration = self.post_fire_wait
             self.timer.start()
@@ -149,6 +193,9 @@ class Stage3MissionDirector(QObject):
 
     def _on_tick(self) -> None:
         """高精度倒计时调度"""
+        if self.phase_target_duration <= 0.0:
+            return
+            
         elapsed = time.time() - self.phase_start_time
         remaining = max(0.0, self.phase_target_duration - elapsed)
         self.countdown_updated.emit(remaining, self.phase_target_duration)
@@ -160,15 +207,7 @@ class Stage3MissionDirector(QObject):
         """当前阶段完成，自动推进下一步"""
         self.timer.stop()
 
-        if self.state == Stage3MissionState.ENGAGING:
-            # 摧毁完成 -> 停火 -> 阶段 3: 等待 10 秒
-            self.hostile_destroyed = True
-            if self.main_window:
-                self.main_window.controller.set_laser_firing(False)
-            self._enter_state(Stage3MissionState.WAIT_POST_FIRE, "Step 3/6: Hostile Destroyed! Cease Fire >> Waiting 10s...")
-            self.step_progress.emit(3, "Post-Fire Wait 10s")
-
-        elif self.state == Stage3MissionState.WAIT_POST_FIRE:
+        if self.state == Stage3MissionState.WAIT_POST_FIRE:
             # 等待 10 秒结束 -> 阶段 4: 按急停
             self._enter_state(Stage3MissionState.EMERGENCY_STOP, "Step 4/6: 10s Elapsed >> Triggering Emergency Stop (E-STOP)...")
             self.step_progress.emit(4, "Emergency Stop")

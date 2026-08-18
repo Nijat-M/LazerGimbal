@@ -154,6 +154,25 @@ class Stage3MissionPanel(QGroupBox):
 
         layout.addLayout(btn_layout)
 
+        # 5.1 目标摧毁确认按钮（交战阶段高亮显示，点击立即确认推进）
+        self.btn_confirm_destroyed = QPushButton("💥 确认目标已摧毁 (Confirm Destroyed)")
+        self.btn_confirm_destroyed.setFixedHeight(36)
+        self.btn_confirm_destroyed.setVisible(False)
+        self.btn_confirm_destroyed.setStyleSheet("""
+            QPushButton {
+                background-color: #b45309;
+                color: #ffffff;
+                font-weight: bold;
+                font-size: 12px;
+                border-radius: 4px;
+                border: 2px solid #f59e0b;
+            }
+            QPushButton:hover {
+                background-color: #d97706;
+            }
+        """)
+        layout.addWidget(self.btn_confirm_destroyed)
+
         # 6. 安全关机按钮 (完成阶段点亮)
         self.btn_shutdown = QPushButton("🛑 安全关机 (Clean Shutdown)")
         self.btn_shutdown.setFixedHeight(34)
@@ -175,6 +194,7 @@ class Stage3MissionPanel(QGroupBox):
     def init_signals(self):
         self.btn_start.clicked.connect(self._on_start_clicked)
         self.btn_abort.clicked.connect(self._on_abort_clicked)
+        self.btn_confirm_destroyed.clicked.connect(self._on_confirm_destroyed_clicked)
         self.btn_shutdown.clicked.connect(self._on_shutdown_clicked)
 
         self.director.state_changed.connect(self._on_state_changed)
@@ -185,6 +205,7 @@ class Stage3MissionPanel(QGroupBox):
     def _on_start_clicked(self):
         self.btn_start.setEnabled(False)
         self.btn_abort.setEnabled(True)
+        self.btn_confirm_destroyed.setVisible(False)
         self.btn_shutdown.setVisible(False)
         self.director.start_mission()
 
@@ -192,6 +213,11 @@ class Stage3MissionPanel(QGroupBox):
         self.director.abort_mission("User Aborted")
         self.btn_start.setEnabled(True)
         self.btn_abort.setEnabled(False)
+        self.btn_confirm_destroyed.setVisible(False)
+
+    def _on_confirm_destroyed_clicked(self):
+        self.director.confirm_destruction()
+        self.btn_confirm_destroyed.setVisible(False)
 
     def _on_shutdown_clicked(self):
         self.director.execute_shutdown()
@@ -201,12 +227,14 @@ class Stage3MissionPanel(QGroupBox):
         self.lbl_mission_status.setText(message)
 
         if state == Stage3MissionState.ENGAGING:
+            self.btn_confirm_destroyed.setVisible(True)
             self.lbl_mission_status.setStyleSheet("""
                 background-color: #3f1010; color: #ef4444; font-weight: bold;
                 font-family: Consolas, monospace; font-size: 11px;
                 padding: 4px; border-radius: 4px; border: 2px solid #ef4444;
             """)
         elif state in (Stage3MissionState.WAIT_POST_FIRE, Stage3MissionState.WAIT_POST_ESTOP):
+            self.btn_confirm_destroyed.setVisible(False)
             self.lbl_mission_status.setStyleSheet("""
                 background-color: #1e1b4b; color: #a855f7; font-weight: bold;
                 font-family: Consolas, monospace; font-size: 11px;
