@@ -231,11 +231,15 @@ class VisionWorker(QThread):
                 self.writer_w = w
                 self.writer_h = h
 
-                self.recording_path = os.path.join(output_dir, f"rec_{timestamp}.avi")
-                fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                self.recording_path = os.path.join(output_dir, f"rec_{timestamp}.mp4")
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                 self.video_writer = cv2.VideoWriter(self.recording_path, fourcc, fps, (w, h))
                 if not self.video_writer.isOpened():
-                    fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+                    fourcc = cv2.VideoWriter_fourcc(*'avc1')
+                    self.video_writer = cv2.VideoWriter(self.recording_path, fourcc, fps, (w, h))
+                if not self.video_writer.isOpened():
+                    self.recording_path = os.path.join(output_dir, f"rec_{timestamp}.avi")
+                    fourcc = cv2.VideoWriter_fourcc(*'XVID')
                     self.video_writer = cv2.VideoWriter(self.recording_path, fourcc, fps, (w, h))
 
                 self.recording_state = "RECORDING"
