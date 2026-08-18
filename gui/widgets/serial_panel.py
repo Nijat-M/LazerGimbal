@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 import serial.tools.list_ports
+from config.device_config import DeviceConfig
 
 
 class SerialPanel(QGroupBox):
@@ -24,7 +25,7 @@ class SerialPanel(QGroupBox):
     def __init__(self, default_port=None, parent=None):
         super().__init__("USB Communication", parent)
         self.is_connected = False
-        self.init_ui(default_port)
+        self.init_ui(default_port or DeviceConfig.SERIAL_PORT)
     
     def init_ui(self, default_port):
         """初始化UI"""
@@ -44,7 +45,7 @@ class SerialPanel(QGroupBox):
                 super().showPopup()
 
             def refresh_ports(sub_self):
-                current_selected = sub_self.currentData()
+                current_selected = sub_self.currentData() or DeviceConfig.SERIAL_PORT
                 sub_self.clear()
                 all_ports = list(serial.tools.list_ports.comports())
                 
@@ -60,6 +61,7 @@ class SerialPanel(QGroupBox):
                     return
 
                 usb_found_index = -1
+                saved_port_index = -1
                 for idx, p in enumerate(valid_ports):
                     is_stm32_usb = (p.vid == 0x0483 and p.pid == 0x5740) or ("STMicroelectronics" in str(p.description)) or ("0483:5740" in str(p.hwid))
                     
@@ -72,8 +74,12 @@ class SerialPanel(QGroupBox):
                         label = f"{p.device} ({clean_desc[:16]})"
                     
                     sub_self.addItem(label, p.device)
+                    if p.device == DeviceConfig.SERIAL_PORT:
+                        saved_port_index = idx
                 
-                if current_selected is not None:
+                if saved_port_index >= 0:
+                    sub_self.setCurrentIndex(saved_port_index)
+                elif current_selected is not None:
                     found_idx = sub_self.findData(current_selected)
                     if found_idx >= 0:
                         sub_self.setCurrentIndex(found_idx)
@@ -188,7 +194,7 @@ class SerialPanel(QGroupBox):
         self.connection_toggled.emit(checked, port)
     
     def set_connection_status(self, success, message):
-        """设置连接状态回调"""
+        """设置连接状态回调并持久化端口"""
         self.is_connected = success
         if success:
             self.btn_connect.setChecked(True)
@@ -196,6 +202,9 @@ class SerialPanel(QGroupBox):
             port_name = self.combo_port.currentData() or ""
             self.lbl_channel_type.setText(f"✓ Connected {port_name} (12 Mbps Full Speed)")
             self.lbl_channel_type.setStyleSheet("color: #22c55e; font-weight: bold; font-size: 12px;")
+            if port_name:
+                DeviceConfig.SERIAL_PORT = port_name
+                DeviceConfig.save()
         else:
             self.btn_connect.setChecked(False)
             self.btn_connect.setText("⚡ Connect")

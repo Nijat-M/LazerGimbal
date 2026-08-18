@@ -20,6 +20,7 @@ import sys
 import threading
 import math
 import time
+from datetime import datetime
 from collections import deque
 
 # 抑制 OpenCV 警告
@@ -86,6 +87,13 @@ class VisionWorker(QThread):
         self.writer_h: int = 0
         self._rec_lock = threading.Lock()
 
+        # 电机与激光状态遥测（用于录制视频 HUD 水印叠加，全英文）
+        self.telemetry_pan: float = 0.0
+        self.telemetry_tilt: float = 0.0
+        self.telemetry_laser_armed: bool = False
+        self.telemetry_laser_firing: bool = False
+        self.telemetry_laser_pwr: int = 100
+
         # 检测器（纯视觉，无控制逻辑）
         self.detector = TargetDetector()
         
@@ -117,6 +125,17 @@ class VisionWorker(QThread):
         self._pending_id = -1
         self._pending_w = 640
         self._pending_h = 480
+
+    def update_telemetry_pos(self, pan: float, tilt: float) -> None:
+        """更新云台当前角度数据 (Pan, Tilt in degrees)"""
+        self.telemetry_pan = float(pan)
+        self.telemetry_tilt = float(tilt)
+
+    def update_telemetry_laser(self, armed: bool, firing: bool, pwr: int = 100) -> None:
+        """更新激光武器状态 (Armed, Firing, Power %)"""
+        self.telemetry_laser_armed = bool(armed)
+        self.telemetry_laser_firing = bool(firing)
+        self.telemetry_laser_pwr = int(pwr)
 
     def is_recording(self) -> bool:
         """是否正在录像或暂停中"""
@@ -788,6 +807,7 @@ class VisionWorker(QThread):
         """
         在主画面左上角绘制第二屏幕：纯光学准星区域局部放大镜 (PiP Pure Zoom Scope)
         放大中心绝对锚定在大准星实际所指的像素位置 (aim_x, aim_y)！
+        包含中心微型准头。
         """
         fh, fw = frame.shape[:2]
         pip_w = 260 if fw >= 1280 else 200
@@ -809,6 +829,15 @@ class VisionWorker(QThread):
             return frame
 
         scope_img = cv2.resize(crop, (pip_w, pip_h), interpolation=cv2.INTER_LINEAR)
+
+        # 小屏幕中心微型战术准头 (PiP Micro Center Reticle)
+        sc_cx, sc_cy = pip_w // 2, pip_h // 2
+        reticle_color = (56, 189, 248) # Neon Cyan
+        cv2.circle(scope_img, (sc_cx, sc_cy), 2, reticle_color, -1)
+        cv2.line(scope_img, (sc_cx - 8, sc_cy), (sc_cx - 3, sc_cy), reticle_color, 1)
+        cv2.line(scope_img, (sc_cx + 3, sc_cy), (sc_cx + 8, sc_cy), reticle_color, 1)
+        cv2.line(scope_img, (sc_cx, sc_cy - 8), (sc_cx, sc_cy - 3), reticle_color, 1)
+        cv2.line(scope_img, (sc_cx, sc_cy + 3), (sc_cx, sc_cy + 8), reticle_color, 1)
 
         # 战术放大倍数角标 (左上角小文字)
         cv2.putText(scope_img, f"ZOOM {self.pip_zoom:.1f}X", (8, 18),
@@ -837,9 +866,34 @@ class VisionWorker(QThread):
             if self.pip_enabled:
                 self._render_pip_scope(frame, aim_x, aim_y)
 
-            # 3. 录屏视频流写入与 REC / PAUSE 状态角标绘制
+            # 3. 录屏视频流写入与 REC / PAUSE 状态角标及全英文遥测 OSD 叠加
             if self.recording_state != "IDLE" and self.video_writer is not None:
                 now = time.time()
+                # 录制画面 OSD 战术水印与数据叠加 (全英文 HUD)
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                pan_tilt_str = f"PAN: {self.telemetry_pan:+.2f} deg   TILT: {self.telemetry_tilt:+.2f} deg"
+                
+                tgt_name = str(self.yolo_target_class) if self.yolo_target_class is not None else "ALL"
+                range_val = getattr(VisionConfig, "AKTIF_MESAFE_M", None)
+                range_str = f"{range_val:.0f}m" if range_val else "FIX"
+                laser_str = "FIRE ⚡" if self.telemetry_laser_firing else ("ARMED" if self.telemetry_laser_armed else "SAFE")
+                sys_info_str = f"SYS: {self.mode} | TGT: {tgt_name} | RNG: {range_str} | LASER: {laser_str}"
+
+                hud_h = 68
+                hud_y = fh - hud_h
+                if hud_y > 0:
+                    sub_img = frame[hud_y:fh, 0:fw]
+                    black_rect = np.zeros_like(sub_img)
+                    cv2.addWeighted(sub_img, 0.45, black_rect, 0.55, 0, sub_img)
+                    frame[hud_y:fh, 0:fw] = sub_img
+
+                    cv2.putText(frame, f"TIME: {now_str}", (14, hud_y + 18),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (255, 255, 255), 1, cv2.LINE_AA)
+                    cv2.putText(frame, f"GIMBAL: {pan_tilt_str}", (14, hud_y + 38),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (56, 189, 248), 1, cv2.LINE_AA)
+                    cv2.putText(frame, sys_info_str, (14, hud_y + 58),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.48, (52, 211, 153), 1, cv2.LINE_AA)
+
                 if self.recording_state == "RECORDING":
                     if fw != self.writer_w or fh != self.writer_h:
                         frame_to_write = cv2.resize(frame, (self.writer_w, self.writer_h))

@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 import cv2
 from config.vision_config import VisionConfig
+from config.device_config import DeviceConfig
 
 
 class CameraPanel(QGroupBox):
@@ -31,13 +32,13 @@ class CameraPanel(QGroupBox):
     flip_changed = pyqtSignal(str)              # 画面翻转信号 ("NONE", "180", "V", "H")
     open_settings_requested = pyqtSignal()      # 请求打开 DirectShow 相机硬件属性面板
 
-    def __init__(self, default_id=0, parent=None):
+    def __init__(self, default_id=None, parent=None):
         super().__init__("Camera Settings", parent)
         self.available_cameras = []
         self.is_camera_open = False
-        self.init_ui(default_id)
+        self.init_ui(default_id if default_id is not None else DeviceConfig.CAMERA_ID)
         # 延迟检测，不阻塞 UI 启动
-        QTimer.singleShot(500, self.detect_cameras)
+        QTimer.singleShot(400, self.detect_cameras)
     
     def init_ui(self, default_id):
         """初始化UI"""
@@ -56,7 +57,11 @@ class CameraPanel(QGroupBox):
             "1280x720 (60 FPS - HD)",
             "1920x1080 (60 FPS - Full HD)"
         ])
-        self.combo_resolution.setCurrentIndex(0)  # 默认 640x480
+        saved_res_prefix = f"{DeviceConfig.RESOLUTION_WIDTH}x{DeviceConfig.RESOLUTION_HEIGHT}"
+        for i in range(self.combo_resolution.count()):
+            if self.combo_resolution.itemText(i).startswith(saved_res_prefix):
+                self.combo_resolution.setCurrentIndex(i)
+                break
         self.combo_resolution.setToolTip("Select resolution (640x480 lowest latency)")
         
         # 3. 画面方向/翻转选择 (即时热切换)
@@ -65,7 +70,7 @@ class CameraPanel(QGroupBox):
         self.combo_flip.addItem("180° Flip (Inverted)", "180")
         self.combo_flip.addItem("Vertical Flip", "V")
         self.combo_flip.addItem("Horizontal Mirror", "H")
-        initial_flip_idx = self.combo_flip.findData(getattr(VisionConfig, "FLIP_MODE", "NONE"))
+        initial_flip_idx = self.combo_flip.findData(getattr(DeviceConfig, "FLIP_MODE", "NONE"))
         if initial_flip_idx >= 0:
             self.combo_flip.setCurrentIndex(initial_flip_idx)
         self.combo_flip.currentIndexChanged.connect(self._on_flip_changed)
@@ -157,8 +162,16 @@ class CameraPanel(QGroupBox):
         # 更新状态并智能应用
         if self.available_cameras:
             num_cameras = len(self.available_cameras)
-            if num_cameras == 1:
-                # 只有一cameras，自动选择
+            saved_idx = -1
+            for idx, cid in enumerate(self.available_cameras):
+                if cid == DeviceConfig.CAMERA_ID:
+                    saved_idx = idx
+                    break
+
+            if saved_idx >= 0:
+                self.combo_camera.setCurrentIndex(saved_idx)
+                msg = f"✓ Detected Camera {DeviceConfig.CAMERA_ID} (Default)"
+            elif num_cameras == 1:
                 self.combo_camera.setCurrentIndex(0)
                 msg = f"✓ Detected Camera {self.available_cameras[0]}"
             else:
@@ -166,6 +179,9 @@ class CameraPanel(QGroupBox):
             
             self.lbl_status.setText(msg)
             self.lbl_status.setStyleSheet("color: green; font-size: 10px;")
+
+            if DeviceConfig.AUTO_OPEN_CAMERA and not self.is_camera_open:
+                QTimer.singleShot(150, self._on_toggle_clicked)
         else:
             msg = "No cameras detected! Check connection"
             self.lbl_status.setText(msg)
@@ -196,6 +212,8 @@ class CameraPanel(QGroupBox):
         """画面翻转下拉框选择改变"""
         mode = self.combo_flip.currentData()
         if mode:
+            DeviceConfig.FLIP_MODE = mode
+            DeviceConfig.save()
             self.flip_changed.emit(mode)
 
     def _on_settings_clicked(self):
@@ -267,6 +285,13 @@ class CameraPanel(QGroupBox):
         fps_part = f"@{old_text.split('@')[1]}" if "@" in old_text else ")"
         self.combo_camera.setItemText(camera_index, f"Camera {camera_id} ({width}x{height}{fps_part}")
         
+        # 持久化保存设备配置
+        DeviceConfig.CAMERA_ID = camera_id
+        DeviceConfig.RESOLUTION_WIDTH = width
+        DeviceConfig.RESOLUTION_HEIGHT = height
+        DeviceConfig.FLIP_MODE = self.combo_flip.currentData() or "NONE"
+        DeviceConfig.save()
+
         self.lbl_status.setText(f"✓ Switched to Camera {camera_id} ({width}x{height})")
         self.lbl_status.setStyleSheet("color: green; font-size: 10px;")
     

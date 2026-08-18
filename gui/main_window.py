@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QLabel, QMessageBox, QScrollArea, QSplitter
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QCloseEvent, QKeyEvent
 
 from utils.logger import Logger
@@ -94,7 +94,18 @@ class MainWindow(QMainWindow):
         # 启动视觉线程
         self.vision_thread.start()
         
-        # 摄像头会通过 camera_panel 自动检测并应用，无需手动初始化
+        # 启动时自动尝试连接保存的 STM32 端口
+        QTimer.singleShot(700, self._auto_connect_serial)
+
+    def _auto_connect_serial(self):
+        """自动连接保存的 STM32 串口"""
+        from config.device_config import DeviceConfig
+        if getattr(DeviceConfig, "AUTO_CONNECT_SERIAL", True):
+            port = self.serial_panel.combo_port.currentData()
+            if port and not self.serial_panel.is_connected:
+                logger.info(f"[GUI] Auto-connecting to saved serial port: {port}...")
+                self.serial_panel.btn_connect.setChecked(True)
+                self.serial_panel._on_connect_clicked()
 
     def init_ui(self):
         """初始化界面 - 使用响应式水平分割布局 (QSplitter)"""
@@ -284,6 +295,8 @@ class MainWindow(QMainWindow):
         # ===== 控制器 =====
         self.controller.status_update_signal.connect(self.update_status)
         self.controller.position_update_signal.connect(self.update_status)
+        self.controller.position_update_signal.connect(self.vision_thread.update_telemetry_pos)
+        self.controller.laser_state_signal.connect(self.vision_thread.update_telemetry_laser)
         
         # ===== GUI 组件 =====
         # 串口面板
@@ -291,6 +304,7 @@ class MainWindow(QMainWindow):
         
         # 模式面板
         self.mode_panel.mode_changed.connect(self.on_mode_changed)
+        self.mode_panel.mode_changed.connect(self.vision_thread.set_mode)
         self.mode_panel.yolo_model_changed.connect(self.vision_thread.set_yolo_model)
         self.mode_panel.yolo_class_changed.connect(self.vision_thread.set_yolo_target_class)
         self.mode_panel.yolo_conf_changed.connect(self.vision_thread.set_yolo_conf_threshold)
