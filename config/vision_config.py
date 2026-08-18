@@ -99,12 +99,22 @@ class VisionConfig:
     BORESIGHT_MODE = "offset"
 
     @classmethod
+    def get_calibrated_aim_coords(cls, frame_w: int, frame_h: int):
+        """
+        返回在当前分辨率 (frame_w, frame_h) 下激光瞄准点的绝对像素坐标 (aim_x, aim_y)。
+        无论是 Crop 模式还是 Offset 模式，保证大准星与小屏幕裁切中心 100% 绝对对齐。
+        """
+        if cls.BORESIGHT_MODE == "crop":
+            return int(frame_w // 2), int(frame_h // 2)
+        ox, oy = cls.raw_offset(cls.AKTIF_MESAFE_M)
+        aim_x = max(0, min(frame_w - 1, frame_w // 2 + ox))
+        aim_y = max(0, min(frame_h - 1, frame_h // 2 + oy))
+        return int(aim_x), int(aim_y)
+
+    @classmethod
     def aim_point(cls, mesafe_m=None):
         """Lazerin GERCEKTEN vuracagi ekran noktasi.
            激光【实际】会打到的屏幕点。云台要把目标驱动到这里，而不是画面正中。"""
-        # crop modunda kayma zaten goruntu kirpilirken uygulandi;
-        # burada tekrar uygularsak iki kez saparız.
-        # crop 模式下偏移已在裁剪时生效，这里再加一次就会偏两倍。
         if cls.BORESIGHT_MODE == "crop":
             return int(cls.CENTER_X), int(cls.CENTER_Y)
         ox, oy = cls.CENTER_OFFSET_X, cls.CENTER_OFFSET_Y

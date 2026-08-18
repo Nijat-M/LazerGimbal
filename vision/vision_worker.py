@@ -59,7 +59,7 @@ class VisionWorker(QThread):
     camera_state_signal = pyqtSignal(int, bool, str) # (request generation, ready, message)
     iff_signal = pyqtSignal(dict)   # Yetenek 7: dost/dusman durumu / 敌我态势
     detections_signal = pyqtSignal(list) # Yetenek 6/7: 完整检测目标列表 (给裁判UI表格展示)
-    recording_status_signal = pyqtSignal(bool, str, int) # (is_recording, file_path, elapsed_seconds)
+    recording_status_signal = pyqtSignal(str, str, int) # (state: 'IDLE'/'RECORDING'/'PAUSED', file_path, elapsed_seconds)
 
     def __init__(self):
         super().__init__()
@@ -75,11 +75,15 @@ class VisionWorker(QThread):
         self.pip_enabled: bool = True
         self.pip_zoom: float = 3.0          # 默认放大倍数 3.0x (可调 1.5x ~ 6.0x)
 
-        # 屏幕/视频录制系统 (Video Recording System)
-        self.is_recording: bool = False
+        # 屏幕/视频录制系统 (Record / Pause / Stop System)
+        self.recording_state: str = "IDLE"  # "IDLE", "RECORDING", "PAUSED"
         self.video_writer = None
         self.recording_start_time: float = 0.0
+        self.recording_paused_time: float = 0.0
+        self.recording_total_paused_sec: float = 0.0
         self.recording_path: str = ""
+        self.writer_w: int = 0
+        self.writer_h: int = 0
         self._rec_lock = threading.Lock()
 
         # 检测器（纯视觉，无控制逻辑）
@@ -113,6 +117,10 @@ class VisionWorker(QThread):
         self._pending_id = -1
         self._pending_w = 640
         self._pending_h = 480
+
+    def is_recording(self) -> bool:
+        """是否正在录像或暂停中"""
+        return self.recording_state in ("RECORDING", "PAUSED")
 
     # --------------------------------------------------
     # 公共接口
@@ -172,45 +180,78 @@ class VisionWorker(QThread):
     def start_recording(self, output_dir: str = "recordings") -> bool:
         """开始录制屏幕视频"""
         with self._rec_lock:
-            if self.is_recording:
+            if self.recording_state != "IDLE":
                 return True
             try:
                 os.makedirs(output_dir, exist_ok=True)
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
-                self.recording_path = os.path.join(output_dir, f"rec_{timestamp}.mp4")
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                 fps = max(15.0, min(60.0, float(self.current_fps or 30.0)))
                 w = self.frame_width if self.frame_width > 0 else 640
                 h = self.frame_height if self.frame_height > 0 else 480
+                w = w if (w % 2 == 0) else w - 1
+                h = h if (h % 2 == 0) else h - 1
+                self.writer_w = w
+                self.writer_h = h
+
+                self.recording_path = os.path.join(output_dir, f"rec_{timestamp}.mp4")
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                 self.video_writer = cv2.VideoWriter(self.recording_path, fourcc, fps, (w, h))
                 if not self.video_writer.isOpened():
                     self.recording_path = os.path.join(output_dir, f"rec_{timestamp}.avi")
                     fourcc = cv2.VideoWriter_fourcc(*'XVID')
                     self.video_writer = cv2.VideoWriter(self.recording_path, fourcc, fps, (w, h))
 
-                self.is_recording = True
+                self.recording_state = "RECORDING"
                 self.recording_start_time = time.time()
-                logger.info(f"[VISION] 🔴 开始录制视频: {self.recording_path}")
-                self.recording_status_signal.emit(True, self.recording_path, 0)
+                self.recording_paused_time = 0.0
+                self.recording_total_paused_sec = 0.0
+                logger.info(f"[VISION] 🔴 开始录制视频: {self.recording_path} ({w}x{h} @ {fps:.1f}fps)")
+                self.recording_status_signal.emit("RECORDING", self.recording_path, 0)
                 return True
             except Exception as e:
                 logger.error(f"[VISION ERROR] 启动录像失败: {e}")
                 self.is_recording = False
                 return False
 
+    def pause_recording(self) -> bool:
+        """暂停 / 继续录制屏幕视频"""
+        with self._rec_lock:
+            now = time.time()
+            if self.recording_state == "RECORDING":
+                self.recording_state = "PAUSED"
+                self.recording_paused_time = now
+                elapsed = max(0, int(now - self.recording_start_time - self.recording_total_paused_sec))
+                logger.info(f"[VISION] ⏸ 视频录制已暂停 (时长: {elapsed}s)")
+                self.recording_status_signal.emit("PAUSED", self.recording_path, elapsed)
+                return True
+            elif self.recording_state == "PAUSED":
+                self.recording_state = "RECORDING"
+                if self.recording_paused_time > 0:
+                    self.recording_total_paused_sec += (now - self.recording_paused_time)
+                self.recording_paused_time = 0.0
+                elapsed = max(0, int(now - self.recording_start_time - self.recording_total_paused_sec))
+                logger.info(f"[VISION] ▶ 视频录制已继续...")
+                self.recording_status_signal.emit("RECORDING", self.recording_path, elapsed)
+                return True
+            return False
+
     def stop_recording(self) -> str:
         """停止录制屏幕视频并保存"""
         with self._rec_lock:
-            if not self.is_recording:
+            if self.recording_state == "IDLE":
                 return ""
-            self.is_recording = False
+            now = time.time()
+            if self.recording_state == "PAUSED" and self.recording_paused_time > 0:
+                self.recording_total_paused_sec += (now - self.recording_paused_time)
+
+            elapsed = max(0, int(now - self.recording_start_time - self.recording_total_paused_sec))
+            self.recording_state = "IDLE"
             if self.video_writer is not None:
                 self.video_writer.release()
                 self.video_writer = None
             path = self.recording_path
-            elapsed = int(time.time() - self.recording_start_time)
-            logger.info(f"[VISION] ⏹ 录制结束，视频已保存至: {path} (时长: {elapsed}s)")
-            self.recording_status_signal.emit(False, path, elapsed)
+            logger.info(f"[VISION] ⏹ 录制结束并保存至: {path} (时长: {elapsed}s)")
+            self.recording_status_signal.emit("IDLE", path, elapsed)
             return path
 
 
@@ -743,13 +784,12 @@ class VisionWorker(QThread):
     # 渲染与发送工具 (PiP Scope 画中画 & 录像)
     # --------------------------------------------------
 
-    def _render_pip_scope(self, frame: cv2.Mat, cx: int, cy: int) -> cv2.Mat:
+    def _render_pip_scope(self, frame: cv2.Mat, aim_x: int, aim_y: int) -> cv2.Mat:
         """
         在主画面左上角绘制第二屏幕：纯光学准星区域局部放大镜 (PiP Pure Zoom Scope)
-        不额外绘制假准星，只真实放大准星区域的画面细节与激光落点。
+        放大中心绝对锚定在大准星实际所指的像素位置 (aim_x, aim_y)！
         """
         fh, fw = frame.shape[:2]
-        # 根据分辨率自适应画中画尺寸
         pip_w = 260 if fw >= 1280 else 200
         pip_h = 195 if fw >= 1280 else 150
         pad_x, pad_y = 14, 14
@@ -758,9 +798,9 @@ class VisionWorker(QThread):
         crop_w = max(16, int(pip_w / self.pip_zoom))
         crop_h = max(12, int(pip_h / self.pip_zoom))
 
-        # 确保以瞄准点 (cx, cy) 为中心进行裁切
-        x1 = max(0, min(cx - crop_w // 2, fw - crop_w))
-        y1 = max(0, min(cy - crop_h // 2, fh - crop_h))
+        # 确保以大准星实际落点 (aim_x, aim_y) 为中心进行裁切
+        x1 = max(0, min(aim_x - crop_w // 2, fw - crop_w))
+        y1 = max(0, min(aim_y - crop_h // 2, fh - crop_h))
         x2 = x1 + crop_w
         y2 = y1 + crop_h
 
@@ -770,7 +810,7 @@ class VisionWorker(QThread):
 
         scope_img = cv2.resize(crop, (pip_w, pip_h), interpolation=cv2.INTER_LINEAR)
 
-        # 战术放大倍数角标
+        # 战术放大倍数角标 (左上角小文字)
         cv2.putText(scope_img, f"ZOOM {self.pip_zoom:.1f}X", (8, 18),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (56, 189, 248), 1)
 
@@ -788,27 +828,39 @@ class VisionWorker(QThread):
     def _send_image(self, frame: cv2.Mat) -> None:
         """渲染画中画与录像，并将 BGR 帧转为 QImage 发送给 UI"""
         try:
-            # 1. 绘制主画面左上角第二屏幕：准星局部放大镜视窗
-            if self.pip_enabled:
-                _h, _w = frame.shape[:2]
-                cx, cy = VisionConfig.aim_point(VisionConfig.AKTIF_MESAFE_M)
-                self._render_pip_scope(frame, cx, cy)
+            fh, fw = frame.shape[:2]
 
-            # 2. 录屏视频流写入与 REC 状态角标闪烁
-            if self.is_recording and self.video_writer is not None:
-                try:
-                    self.video_writer.write(frame)
-                    elapsed_s = int(time.time() - self.recording_start_time)
+            # 1. 计算大准星在当前帧上的实际像素坐标 (对齐 Crop 与 Offset 模式)
+            aim_x, aim_y = VisionConfig.get_calibrated_aim_coords(fw, fh)
+
+            # 2. 绘制主画面左上角第二屏幕：大准星区域局部放大镜
+            if self.pip_enabled:
+                self._render_pip_scope(frame, aim_x, aim_y)
+
+            # 3. 录屏视频流写入与 REC / PAUSE 状态角标绘制
+            if self.recording_state != "IDLE" and self.video_writer is not None:
+                now = time.time()
+                if self.recording_state == "RECORDING":
+                    if fw != self.writer_w or fh != self.writer_h:
+                        frame_to_write = cv2.resize(frame, (self.writer_w, self.writer_h))
+                    else:
+                        frame_to_write = frame
+                    self.video_writer.write(frame_to_write)
+
+                    elapsed_s = max(0, int(now - self.recording_start_time - self.recording_total_paused_sec))
                     m, s = divmod(elapsed_s, 60)
-                    blink = int(time.time() * 2) % 2 == 0
+                    blink = int(now * 2) % 2 == 0
                     rec_color = (40, 40, 240) if blink else (100, 100, 255)
-                    fw = frame.shape[1]
-                    cv2.circle(frame, (fw - 140, 26), 7, rec_color, -1)
-                    cv2.putText(frame, f"REC {m:02d}:{s:02d}", (fw - 125, 32),
+                    cv2.circle(frame, (fw - 145, 26), 7, rec_color, -1)
+                    cv2.putText(frame, f"REC {m:02d}:{s:02d}", (fw - 130, 32),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 2)
-                    self.recording_status_signal.emit(True, self.recording_path, elapsed_s)
-                except Exception as ex:
-                    logger.error(f"[VISION ERROR] 录像写入异常: {ex}")
+                    self.recording_status_signal.emit("RECORDING", self.recording_path, elapsed_s)
+                elif self.recording_state == "PAUSED":
+                    elapsed_s = max(0, int(self.recording_paused_time - self.recording_start_time - self.recording_total_paused_sec))
+                    m, s = divmod(elapsed_s, 60)
+                    cv2.putText(frame, f"PAUSED {m:02d}:{s:02d}", (fw - 165, 32),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 215, 255), 2)
+                    self.recording_status_signal.emit("PAUSED", self.recording_path, elapsed_s)
 
             h, w, ch = frame.shape
             q_image = QImage(frame.data, w, h, ch * w,

@@ -318,10 +318,12 @@ class MainWindow(QMainWindow):
             lambda armed, firing, pwr: self.control_panel.set_laser_firing_visual(firing)
         )
         
-        # 摄像头全屏、准星画中画缩放与录屏信号
+        # 摄像头全屏、准星画中画缩放与 3 键录屏信号
         self.camera_view.fullscreen_requested.connect(self.toggle_fullscreen_mode)
         self.camera_view.pip_zoom_changed.connect(self.vision_thread.set_pip_zoom)
-        self.camera_view.record_toggle_requested.connect(self.on_toggle_recording)
+        self.camera_view.record_start_requested.connect(self.on_start_recording)
+        self.camera_view.record_pause_requested.connect(self.on_pause_recording)
+        self.camera_view.record_stop_requested.connect(self.on_stop_recording)
         self.vision_thread.recording_status_signal.connect(self.camera_view.set_recording_status)
 
         # 手动测试面板（支持单步微调、长按连续移动、独立键盘开关）
@@ -527,17 +529,23 @@ class MainWindow(QMainWindow):
             "Motors stopped. Current position has been set as software relative origin."
         )
     
-    def on_toggle_recording(self):
-        """处理录屏开启/停止请求"""
-        if self.vision_thread.is_recording:
-            saved_file = self.vision_thread.stop_recording()
-            self.status_label.setText(f"✓ 视频已保存至: {saved_file}")
+    def on_start_recording(self):
+        """开始录屏"""
+        success = self.vision_thread.start_recording()
+        if success:
+            self.status_label.setText("🔴 正在录制全屏超清视频流...")
+            self.status_label.setStyleSheet("color: #ef4444; font-weight: bold; padding: 5px;")
+
+    def on_pause_recording(self):
+        """暂停/继续录屏"""
+        self.vision_thread.pause_recording()
+
+    def on_stop_recording(self):
+        """停止并保存录屏"""
+        saved_file = self.vision_thread.stop_recording()
+        if saved_file:
+            self.status_label.setText(f"✓ 录屏已完成并保存至: {saved_file}")
             self.status_label.setStyleSheet("color: #38bdf8; font-weight: bold; padding: 5px;")
-        else:
-            success = self.vision_thread.start_recording()
-            if success:
-                self.status_label.setText("🔴 正在录制全屏超清视频流...")
-                self.status_label.setStyleSheet("color: #ef4444; font-weight: bold; padding: 5px;")
 
     def on_manual_move(self, axis, direction):
         """手动移动（测试模式）"""
@@ -619,9 +627,12 @@ class MainWindow(QMainWindow):
             event.accept()
             return
 
-        # R 键：快捷录制屏幕视频
+        # R 键：快捷录屏 (若空闲则开始录制，若正在录制则暂停/继续)
         if key == Qt.Key.Key_R:
-            self.on_toggle_recording()
+            if self.vision_thread.recording_state == "IDLE":
+                self.on_start_recording()
+            else:
+                self.on_pause_recording()
             event.accept()
             return
 

@@ -97,9 +97,11 @@ class MouseAimLabel(QLabel):
         self.release_capture()
         super().focusOutEvent(ev)
 
-    def hideEvent(self, a0) -> None:
-        self.release_capture()
-        super().hideEvent(a0)
+    def set_current_frame_size(self, w: int, h: int) -> None:
+        """更新底层视频帧分辨率，用于精准无偏坐标映射"""
+        self.frame_w = w
+        self.frame_h = h
+        self.update()
 
     def paintEvent(self, a0) -> None:
         super().paintEvent(a0)
@@ -109,10 +111,12 @@ class MouseAimLabel(QLabel):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # 真实激光瞄准点（支持 Crop 与 Offset 模式，与画中画完全对齐）
-        raw_cx, raw_cy = VisionConfig.aim_point(VisionConfig.AKTIF_MESAFE_M)
-        fw = getattr(VisionConfig, "FRAME_WIDTH", 640)
-        fh = getattr(VisionConfig, "FRAME_HEIGHT", 480)
+        # 获取当前实际帧分辨率
+        fw = getattr(self, "frame_w", getattr(VisionConfig, "FRAME_WIDTH", 640))
+        fh = getattr(self, "frame_h", getattr(VisionConfig, "FRAME_HEIGHT", 480))
+
+        # 真实激光瞄准点（支持 Crop 与 Offset 模式，与画中画 100% 绝对对齐）
+        aim_x, aim_y = VisionConfig.get_calibrated_aim_coords(fw, fh)
 
         pix = self.pixmap()
         if pix and not pix.isNull() and fw > 0 and fh > 0:
@@ -123,10 +127,8 @@ class MouseAimLabel(QLabel):
             pad_x = (lw - pw) // 2
             pad_y = (lh - ph) // 2
 
-            norm_x = max(0.0, min(1.0, raw_cx / float(fw)))
-            norm_y = max(0.0, min(1.0, raw_cy / float(fh)))
-            center_x = int(pad_x + norm_x * pw)
-            center_y = int(pad_y + norm_y * ph)
+            center_x = int(pad_x + (aim_x / float(fw)) * pw)
+            center_y = int(pad_y + (aim_y / float(fh)) * ph)
             center = QPoint(center_x, center_y)
         else:
             center = self.rect().center()
@@ -192,14 +194,16 @@ class CameraView(QWidget):
     mouse_capture_changed_signal = pyqtSignal(bool)
     fullscreen_requested = pyqtSignal()
     pip_zoom_changed = pyqtSignal(float)
-    record_toggle_requested = pyqtSignal()
+    record_start_requested = pyqtSignal()
+    record_pause_requested = pyqtSignal()
+    record_stop_requested = pyqtSignal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.is_camera_active = False
         self._mouse_mode_enabled = False
         self.is_fullscreen = False
-        self.is_recording = False
+        self.recording_state = "IDLE"
         self.current_zoom = 3.0
         self.init_ui()
 
@@ -212,7 +216,7 @@ class CameraView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
-        # 1. 顶部操作工具栏 (Live View 标题 + 画中画放大 + 录屏 + 掩码 + 全屏)
+        # 1. 顶部操作工具栏 (Live View 标题 + 画中画放大 + 3键录像 + 掩码 + 全屏)
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(4, 2, 4, 2)
         header_layout.setSpacing(6)
@@ -265,16 +269,21 @@ class CameraView(QWidget):
 
         header_layout.addWidget(zoom_box)
 
-        # 1.2 屏幕录像按键 (Screen Video Recording)
-        self.btn_record = QPushButton("⏺ Record")
-        self.btn_record.setToolTip("Start / Stop Video Recording to recordings/ (Shortcut: R)")
-        self.btn_record.setStyleSheet("""
+        # 1.2 屏幕录像三按键组 (Record / Pause / Stop)
+        rec_box = QWidget()
+        rec_layout = QHBoxLayout(rec_box)
+        rec_layout.setContentsMargins(0, 0, 0, 0)
+        rec_layout.setSpacing(3)
+
+        self.btn_rec_start = QPushButton("⏺ Record")
+        self.btn_rec_start.setToolTip("Start video recording to recordings/ (开始录屏)")
+        self.btn_rec_start.setStyleSheet("""
             QPushButton {
                 background-color: #1e293b;
                 color: #f87171;
                 border: 1px solid #dc2626;
                 font-weight: bold;
-                padding: 4px 10px;
+                padding: 4px 8px;
                 border-radius: 4px;
                 font-size: 11px;
             }
@@ -282,9 +291,73 @@ class CameraView(QWidget):
                 background-color: #991b1b;
                 color: #ffffff;
             }
+            QPushButton:disabled {
+                background-color: #0f172a;
+                color: #475569;
+                border: 1px solid #1e293b;
+            }
         """)
-        self.btn_record.clicked.connect(self.record_toggle_requested.emit)
-        header_layout.addWidget(self.btn_record)
+        self.btn_rec_start.clicked.connect(self.record_start_requested.emit)
+        rec_layout.addWidget(self.btn_rec_start)
+
+        self.btn_rec_pause = QPushButton("⏸ Pause")
+        self.btn_rec_pause.setToolTip("Pause / Resume recording (暂停/继续)")
+        self.btn_rec_pause.setEnabled(False)
+        self.btn_rec_pause.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b;
+                color: #fbbf24;
+                border: 1px solid #d97706;
+                font-weight: bold;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #b45309;
+                color: #ffffff;
+            }
+            QPushButton:disabled {
+                background-color: #0f172a;
+                color: #475569;
+                border: 1px solid #1e293b;
+            }
+        """)
+        self.btn_rec_pause.clicked.connect(self.record_pause_requested.emit)
+        rec_layout.addWidget(self.btn_rec_pause)
+
+        self.btn_rec_stop = QPushButton("⏹ Stop")
+        self.btn_rec_stop.setToolTip("Stop and save video to recordings/ (停止并保存)")
+        self.btn_rec_stop.setEnabled(False)
+        self.btn_rec_stop.setStyleSheet("""
+            QPushButton {
+                background-color: #1e293b;
+                color: #e2e8f0;
+                border: 1px solid #475569;
+                font-weight: bold;
+                padding: 4px 8px;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #dc2626;
+                color: #ffffff;
+                border-color: #ef4444;
+            }
+            QPushButton:disabled {
+                background-color: #0f172a;
+                color: #475569;
+                border: 1px solid #1e293b;
+            }
+        """)
+        self.btn_rec_stop.clicked.connect(self.record_stop_requested.emit)
+        rec_layout.addWidget(self.btn_rec_stop)
+
+        self.lbl_rec_status = QLabel("")
+        self.lbl_rec_status.setVisible(False)
+        rec_layout.addWidget(self.lbl_rec_status)
+
+        header_layout.addWidget(rec_box)
 
         # 掩码显示/折叠切换按钮
         self.btn_toggle_mask = QPushButton("👁 Debug Mask")
@@ -416,43 +489,32 @@ class CameraView(QWidget):
         new_val = max(15, self.slider_zoom.value() - 5)
         self.slider_zoom.setValue(new_val)
 
-    def set_recording_status(self, is_recording: bool, path: str, elapsed_seconds: int):
-        """更新录像按键状态"""
-        self.is_recording = is_recording
-        if is_recording:
-            m, s = divmod(elapsed_seconds, 60)
-            self.btn_record.setText(f"⏹ Stop [{m:02d}:{s:02d}]")
-            self.btn_record.setStyleSheet("""
-                QPushButton {
-                    background-color: #dc2626;
-                    color: #ffffff;
-                    border: 1px solid #ef4444;
-                    font-weight: bold;
-                    padding: 4px 10px;
-                    border-radius: 4px;
-                    font-size: 11px;
-                }
-                QPushButton:hover {
-                    background-color: #b91c1c;
-                }
-            """)
-        else:
-            self.btn_record.setText("⏺ Record")
-            self.btn_record.setStyleSheet("""
-                QPushButton {
-                    background-color: #1e293b;
-                    color: #f87171;
-                    border: 1px solid #dc2626;
-                    font-weight: bold;
-                    padding: 4px 10px;
-                    border-radius: 4px;
-                    font-size: 11px;
-                }
-                QPushButton:hover {
-                    background-color: #991b1b;
-                    color: #ffffff;
-                }
-            """)
+    def set_recording_status(self, state: str, path: str, elapsed_seconds: int):
+        """更新录像三按键状态 (IDLE / RECORDING / PAUSED)"""
+        self.recording_state = state
+        m, s = divmod(elapsed_seconds, 60)
+        if state == "IDLE":
+            self.btn_rec_start.setEnabled(True)
+            self.btn_rec_pause.setEnabled(False)
+            self.btn_rec_pause.setText("⏸ Pause")
+            self.btn_rec_stop.setEnabled(False)
+            self.lbl_rec_status.setVisible(False)
+        elif state == "RECORDING":
+            self.btn_rec_start.setEnabled(False)
+            self.btn_rec_pause.setEnabled(True)
+            self.btn_rec_pause.setText("⏸ Pause")
+            self.btn_rec_stop.setEnabled(True)
+            self.lbl_rec_status.setVisible(True)
+            self.lbl_rec_status.setText(f"🔴 {m:02d}:{s:02d}")
+            self.lbl_rec_status.setStyleSheet("color: #ef4444; font-weight: bold; font-family: Consolas, monospace; font-size: 11px;")
+        elif state == "PAUSED":
+            self.btn_rec_start.setEnabled(False)
+            self.btn_rec_pause.setEnabled(True)
+            self.btn_rec_pause.setText("▶ Resume")
+            self.btn_rec_stop.setEnabled(True)
+            self.lbl_rec_status.setVisible(True)
+            self.lbl_rec_status.setText(f"⏸ {m:02d}:{s:02d}")
+            self.lbl_rec_status.setStyleSheet("color: #f59e0b; font-weight: bold; font-family: Consolas, monospace; font-size: 11px;")
 
     def set_camera_active(self, active: bool) -> None:
         self.is_camera_active = active
@@ -474,6 +536,7 @@ class CameraView(QWidget):
     def update_camera_feed(self, qt_img: QImage) -> None:
         if not self.is_camera_active:
             return
+        self.lbl_camera.set_current_frame_size(qt_img.width(), qt_img.height())
         pixmap = QPixmap.fromImage(qt_img)
         scaled = pixmap.scaled(
             self.lbl_camera.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
