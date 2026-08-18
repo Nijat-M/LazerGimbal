@@ -460,23 +460,23 @@ class GimbalController(QObject):
         else:
             err_y_computed = abs_y * scale_y
 
-        if abs_x >= ControlConfig.DEADZONE:
-            err_x_computed = max(6.0, err_x_computed)
-        if abs_y >= ControlConfig.DEADZONE:
-            err_y_computed = max(7.0, err_y_computed)
+        # 恢复符号并取整：自动闭环追踪保证克服机械静摩擦与重力，不失速、不卡顿、直打红心
+        if err_x != 0:
+            cmd_mag_x = max(10.0, err_x_computed)
+            err_x = int(math.copysign(min(max_err_x, round(cmd_mag_x)), err_x))
+        else:
+            err_x = 0
 
-        # 恢复符号并取整，同时叠加当前速度档位倍率
-        err_x = round(math.copysign(err_x_computed * self.speed_multiplier, err_x)) if err_x != 0 else 0
-        err_y = round(math.copysign(err_y_computed * self.speed_multiplier, err_y)) if err_y != 0 else 0
-
-        # 幅值安全截断保护
-        err_x = max(-max_err_x, min(max_err_x, err_x))
-        err_y = max(-max_err_y, min(max_err_y, err_y))
+        if err_y != 0:
+            cmd_mag_y = max(14.0, err_y_computed)
+            err_y = int(math.copysign(min(max_err_y, round(cmd_mag_y)), err_y))
+        else:
+            err_y = 0
 
         # 动态估算电机角度
         if err_x != 0 or err_y != 0:
-            d_pan = -(err_x / 640.0) * (30.0 * self.speed_multiplier) * 0.025
-            d_tilt = -(err_y / 480.0) * (20.0 * self.speed_multiplier) * 0.025
+            d_pan = -(err_x / 640.0) * 30.0 * 0.025
+            d_tilt = -(err_y / 480.0) * 20.0 * 0.025
             self.servo_x = max(-180.0, min(180.0, self.servo_x + d_pan))
             self.servo_y = max(-45.0, min(45.0, self.servo_y + d_tilt))
             self.position_update_signal.emit(self.servo_x, self.servo_y)
