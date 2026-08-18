@@ -9,10 +9,11 @@
 """
 
 from datetime import datetime
+from collections import deque
 from PyQt6.QtWidgets import (
     QGroupBox, QVBoxLayout, QHBoxLayout, QComboBox, QPushButton, QLabel, QFrame, QPlainTextEdit
 )
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 import serial.tools.list_ports
 from config.device_config import DeviceConfig
 
@@ -195,21 +196,37 @@ class SerialPanel(QGroupBox):
             }
         """)
         main_layout.addWidget(self.txt_monitor)
+        
+        # 批量日志刷新定时器 (10Hz)，避免高频运动时 QTextDocument 跨线程崩溃
+        self._log_queue = deque(maxlen=200)
+        self._flush_timer = QTimer(self)
+        self._flush_timer.timeout.connect(self._flush_logs)
+        self._flush_timer.start(100)
     
     def _clear_monitor(self):
+        self._log_queue.clear()
         self.txt_monitor.clear()
 
     def log_tx(self, msg: str):
         """记录发送给 STM32 的数据 (TX ➜)"""
         now = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        self.txt_monitor.appendPlainText(f"[{now}] ⬆ TX ➜ {msg}")
-        self.txt_monitor.ensureCursorVisible()
+        self._log_queue.append(f"[{now}] ⬆ TX ➜ {msg}")
 
     def log_rx(self, msg: str):
         """记录从 STM32 接收到的数据 (RX ⬅)"""
         now = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        self.txt_monitor.appendPlainText(f"[{now}] ⬇ RX ⬅ {msg}")
-        self.txt_monitor.ensureCursorVisible()
+        self._log_queue.append(f"[{now}] ⬇ RX ⬅ {msg}")
+
+    def _flush_logs(self):
+        if not self._log_queue:
+            return
+        lines = []
+        while self._log_queue:
+            lines.append(self._log_queue.popleft())
+        if lines:
+            text = "\n".join(lines)
+            self.txt_monitor.appendPlainText(text)
+            self.txt_monitor.ensureCursorVisible()
 
     def _update_channel_badge(self):
         """更新当前选中端口的通道类型徽章"""

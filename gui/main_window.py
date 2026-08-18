@@ -86,6 +86,7 @@ class MainWindow(QMainWindow):
         self.vision_thread = VisionWorker()
         self.controller = GimbalController(self.serial_thread)
         self.camera_request_generation = -1
+        self.keyboard_control_enabled = True
 
         # [初始化]
         self.init_ui()
@@ -220,10 +221,10 @@ class MainWindow(QMainWindow):
         self.control_panel = ControlPanel()
         right_layout.addWidget(self.control_panel)
 
-        # 6. 测试模式面板（默认隐藏）
+        # 6. 手动电机与键盘控制面板 (常驻主界面，随时可直接操控)
         self.test_panel = TestModePanel()
-        self.test_panel.setVisible(False)
-        self.test_panel.setMaximumHeight(150)  # 限制最大高度
+        self.test_panel.setVisible(True)
+        self.test_panel.setMaximumHeight(160)
         right_layout.addWidget(self.test_panel)
 
         # 7. 鼠标手动瞄准面板（默认隐藏）
@@ -457,9 +458,8 @@ class MainWindow(QMainWindow):
             self.detection_panel.clear_detections()
             if hasattr(self, "stage3_director") and self.stage3_director.is_running:
                 self.stage3_director.abort_mission("Mode Switched Away")
-        is_test = mode == "TEST"
         is_mouse = mode == "MANUAL_MOUSE"
-        self.test_panel.setVisible(is_test)
+        self.test_panel.setVisible(True) # 手动控制面板始终常驻显示
         self.mouse_control_panel.setVisible(is_mouse)
 
         # Every mode transition first disarms the previous motion source.
@@ -675,22 +675,26 @@ class MainWindow(QMainWindow):
             event.accept()
             return
 
-        # 键盘方向键 (↑/↓/←/→) 与 (W/S/A/D) 快捷操控云台（仅在勾选开启时生效）
-        if getattr(self, "keyboard_control_enabled", False):
+        # 键盘方向键 (↑/↓/←/→) 与 (W/S/A/D) 快捷操控云台（长按连续旋转，松开即停）
+        if getattr(self, "keyboard_control_enabled", True):
             if key in (Qt.Key.Key_Up, Qt.Key.Key_W):
-                self.controller.start_manual_continuous('y', 1)
+                if not event.isAutoRepeat():
+                    self.controller.start_manual_continuous('y', 1)
                 event.accept()
                 return
             elif key in (Qt.Key.Key_Down, Qt.Key.Key_S):
-                self.controller.start_manual_continuous('y', -1)
+                if not event.isAutoRepeat():
+                    self.controller.start_manual_continuous('y', -1)
                 event.accept()
                 return
             elif key in (Qt.Key.Key_Left, Qt.Key.Key_A):
-                self.controller.start_manual_continuous('x', -1)
+                if not event.isAutoRepeat():
+                    self.controller.start_manual_continuous('x', -1)
                 event.accept()
                 return
             elif key in (Qt.Key.Key_Right, Qt.Key.Key_D):
-                self.controller.start_manual_continuous('x', 1)
+                if not event.isAutoRepeat():
+                    self.controller.start_manual_continuous('x', 1)
                 event.accept()
                 return
 
