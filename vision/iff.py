@@ -61,55 +61,57 @@ def iff_analiz(frame_bgr, box):
 
     total_px = roi.shape[0] * roi.shape[1]
 
-    # --- 1. RGB / BGR 基础物理真值 ---
-    b = roi[:, :, 0].astype(np.int32)
-    g = roi[:, :, 1].astype(np.int32)
-    r = roi[:, :, 2].astype(np.int32)
+    # --- 1. RGB / BGR 物理通道 ---
+    b = roi[:, :, 0].astype(np.float32)
+    g = roi[:, :, 1].astype(np.float32)
+    r = roi[:, :, 2].astype(np.float32)
 
     # --- 2. HSV 色度空间 ---
     try:
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        H = hsv[:, :, 0].astype(np.int32)
-        S = hsv[:, :, 1].astype(np.int32)
-        V = hsv[:, :, 2].astype(np.int32)
+        H = hsv[:, :, 0].astype(np.float32)
+        S = hsv[:, :, 1].astype(np.float32)
+        V = hsv[:, :, 2].astype(np.float32)
 
-        # 红色特征：H位于红色区间 且 S/V足够 且 R通道必须优于 B通道
-        hsv_red = (S >= 22) & (V >= 22) & ((H <= 20) | (H >= 155)) & (r > b)
-        # 蓝色特征：H位于蓝色区间 且 S/V足够 且 B通道必须优于 R通道
-        hsv_blue = (S >= 22) & (V >= 22) & (H >= 78) & (H <= 152) & (b > r)
+        # 红色敌军特征：
+        # 1) H位于纯红区间 (0~10 或 165~180)
+        # 2) 排除低饱和度的黄色/木桌/纸箱 (S >= 45, V >= 35)
+        # 3) R 通道明显优于 B 和 G 通道
+        hsv_red = ((H <= 10) | (H >= 165)) & (S >= 45) & (V >= 35) & (r - b >= 20) & (r - g >= 15)
+        
+        # 蓝色友军特征：
+        # 1) H位于纯蓝/天蓝区间 (85~145)
+        # 2) 排除反光或灰白色 (S >= 38, V >= 35)
+        # 3) B 通道明显优于 R 通道
+        hsv_blue = (H >= 85) & (H <= 145) & (S >= 38) & (V >= 35) & (b - r >= 15)
     except Exception:
         hsv_red = np.zeros_like(b, dtype=bool)
         hsv_blue = np.zeros_like(b, dtype=bool)
 
-    # --- 3. BGR 差分通道特征 ---
-    bgr_red = (r >= 35) & ((r - b) >= 10) & ((r - g) >= 4)
-    bgr_blue = (b >= 35) & ((b - r) >= 10) & ((b - g) >= -15)
+    # --- 3. BGR 强色度差分特征 (应对超强光或暗光特异点) ---
+    bgr_red = (r >= 65) & (r - b >= 35) & (r - g >= 25) & (r / (g + b + 1.0) >= 1.25)
+    bgr_blue = (b >= 55) & (b - r >= 25) & (b / (r + g + 1.0) >= 0.85)
 
-    # 综合多空间逻辑或（抗弱光与反光）
-    combined_red = hsv_red | bgr_red
-    combined_blue = hsv_blue | bgr_blue
+    is_red = hsv_red | bgr_red
+    is_blue = hsv_blue | bgr_blue
 
-    kirmizi_sayisi = int(np.count_nonzero(combined_red))
-    mavi_sayisi = int(np.count_nonzero(combined_blue))
+    kirmizi_sayisi = int(np.count_nonzero(is_red))
+    mavi_sayisi = int(np.count_nonzero(is_blue))
 
     max_color = max(kirmizi_sayisi, mavi_sayisi)
     oran = max_color / float(max(total_px, 1))
 
-    # 动态门限：根据尺寸自适应
-    min_px = 3 if total_px < 400 else 6
-    min_ratio = 0.015 if total_px < 400 else 0.025
+    # 动态像素门限 (避免杂散孤立噪点)
+    min_px = 3 if total_px < 300 else 6
+    min_ratio = 0.010 if total_px < 300 else 0.020
 
     if max_color < min_px or oran < min_ratio:
         return NEUTRAL, kirmizi_sayisi, mavi_sayisi, oran
 
-    # 主导色彩裁决
-    if mavi_sayisi >= min_px and (mavi_sayisi >= kirmizi_sayisi * 1.15 or kirmizi_sayisi < min_px):
+    # 主导色彩裁决：友军优先安全原则 (遇到蓝色且占优必判友军)
+    if mavi_sayisi >= min_px and (mavi_sayisi >= kirmizi_sayisi or kirmizi_sayisi < min_px):
         return FRIENDLY, kirmizi_sayisi, mavi_sayisi, oran
-    elif kirmizi_sayisi >= min_px and (kirmizi_sayisi >= mavi_sayisi * 1.15 or mavi_sayisi < min_px):
-        return ENEMY, kirmizi_sayisi, mavi_sayisi, oran
-    elif mavi_sayisi > kirmizi_sayisi:
-        return FRIENDLY, kirmizi_sayisi, mavi_sayisi, oran
-    elif kirmizi_sayisi > mavi_sayisi:
+    elif kirmizi_sayisi >= min_px and (kirmizi_sayisi > mavi_sayisi * 1.2 or mavi_sayisi < min_px):
         return ENEMY, kirmizi_sayisi, mavi_sayisi, oran
 
     return NEUTRAL, kirmizi_sayisi, mavi_sayisi, oran
@@ -122,7 +124,7 @@ class TrackedIFFObject:
         self.box = [float(v) for v in box]
         self.class_name = class_name
         self.confidence = float(confidence)
-        self.history = deque(maxlen=7)
+        self.history = deque(maxlen=5)
         self.history.append(initial_side)
         self.current_side = initial_side
         self.missing_frames = 0
@@ -141,19 +143,18 @@ class TrackedIFFObject:
         self.missing_frames = 0
         self.history.append(raw_side)
 
-        # 滞后分类决断 (Hysteresis Decision)
-        if self.current_side == NEUTRAL:
-            if self.history.count(ENEMY) >= 2:
-                self.current_side = ENEMY
-            elif self.history.count(FRIENDLY) >= 2:
-                self.current_side = FRIENDLY
-        elif self.current_side == ENEMY:
-            # 必须连续出现 4 次 FRIENDLY 才能跳到友军，防抖动
-            if self.history.count(FRIENDLY) >= 4:
-                self.current_side = FRIENDLY
-        elif self.current_side == FRIENDLY:
-            if self.history.count(ENEMY) >= 4:
-                self.current_side = ENEMY
+        # 稳态多数表决 (友军保护优先)
+        f_votes = self.history.count(FRIENDLY)
+        e_votes = self.history.count(ENEMY)
+        
+        if f_votes >= 2 and f_votes >= e_votes:
+            self.current_side = FRIENDLY
+        elif e_votes >= 2 and e_votes > f_votes:
+            self.current_side = ENEMY
+        elif f_votes > 0 and e_votes == 0:
+            self.current_side = FRIENDLY
+        elif e_votes > 0 and f_votes == 0:
+            self.current_side = ENEMY
 
 
 class IFFKarari:
