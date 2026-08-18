@@ -85,10 +85,17 @@ class Stage3MissionDirector(QObject):
 
         # 1. 确保系统处于自动追踪模式与激光使能
         if self.main_window:
-            self.main_window.mode_panel.btn_group.button(2).setChecked(True)
-            self.main_window.on_mode_changed("YOLO_TRACKING")
-            self.main_window.control_panel.set_control_enabled(True)
-            self.main_window.controller.set_laser_armed(True)
+            try:
+                if hasattr(self.main_window.mode_panel, "mode_group"):
+                    btn = self.main_window.mode_panel.mode_group.button(2)
+                    if btn:
+                        btn.setChecked(True)
+                self.main_window.on_mode_changed("YOLO_TRACKING")
+                self.main_window.control_panel.set_control_enabled(True)
+                self.main_window.control_panel.btn_arm.setChecked(True)
+                self.main_window.controller.set_laser_armed(True)
+            except Exception as e:
+                logger.error(f"[MISSION ERROR] 初始化任务状态异常: {e}")
 
         self._enter_state(Stage3MissionState.ACQUIRING, "Step 1/6: Scanning Sector (~10m) & Acquiring Hostile...")
         self.step_progress.emit(1, "Acquiring & Safe Lock")

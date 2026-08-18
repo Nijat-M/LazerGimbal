@@ -58,15 +58,16 @@ class Stage3MissionPanel(QGroupBox):
         layout.addWidget(steps_widget)
 
         # 2. 核心状态与倒计时显示横幅
-        self.lbl_mission_status = QLabel("READY TO START STAGE 3 MISSION")
+        self._base_message = "READY TO START STAGE 3 MISSION"
+        self.lbl_mission_status = QLabel(self._base_message)
         self.lbl_mission_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_mission_status.setFixedHeight(44)
+        self.lbl_mission_status.setFixedHeight(50)
         self.lbl_mission_status.setStyleSheet("""
             background-color: #0f172a;
             color: #38bdf8;
             font-weight: bold;
             font-family: Consolas, "Segoe UI", monospace;
-            font-size: 12px;
+            font-size: 11px;
             padding: 4px;
             border-radius: 4px;
             border: 2px solid #0284c7;
@@ -196,30 +197,31 @@ class Stage3MissionPanel(QGroupBox):
         self.director.execute_shutdown()
 
     def _on_state_changed(self, state: str, message: str):
+        self._base_message = message
         self.lbl_mission_status.setText(message)
 
         if state == Stage3MissionState.ENGAGING:
             self.lbl_mission_status.setStyleSheet("""
                 background-color: #3f1010; color: #ef4444; font-weight: bold;
-                font-family: Consolas, monospace; font-size: 12px;
+                font-family: Consolas, monospace; font-size: 11px;
                 padding: 4px; border-radius: 4px; border: 2px solid #ef4444;
             """)
         elif state in (Stage3MissionState.WAIT_POST_FIRE, Stage3MissionState.WAIT_POST_ESTOP):
             self.lbl_mission_status.setStyleSheet("""
                 background-color: #1e1b4b; color: #a855f7; font-weight: bold;
-                font-family: Consolas, monospace; font-size: 12px;
+                font-family: Consolas, monospace; font-size: 11px;
                 padding: 4px; border-radius: 4px; border: 2px solid #a855f7;
             """)
         elif state == Stage3MissionState.EMERGENCY_STOP:
             self.lbl_mission_status.setStyleSheet("""
                 background-color: #450a0a; color: #f87171; font-weight: bold;
-                font-family: Consolas, monospace; font-size: 12px;
+                font-family: Consolas, monospace; font-size: 11px;
                 padding: 4px; border-radius: 4px; border: 2px solid #dc2626;
             """)
         elif state == Stage3MissionState.COMPLETED:
             self.lbl_mission_status.setStyleSheet("""
                 background-color: #064e3b; color: #34d399; font-weight: bold;
-                font-family: Consolas, monospace; font-size: 12px;
+                font-family: Consolas, monospace; font-size: 11px;
                 padding: 4px; border-radius: 4px; border: 2px solid #10b981;
             """)
             self.btn_start.setEnabled(True)
@@ -228,7 +230,7 @@ class Stage3MissionPanel(QGroupBox):
         elif state in (Stage3MissionState.IDLE, Stage3MissionState.ABORTED):
             self.lbl_mission_status.setStyleSheet("""
                 background-color: #0f172a; color: #38bdf8; font-weight: bold;
-                font-family: Consolas, monospace; font-size: 12px;
+                font-family: Consolas, monospace; font-size: 11px;
                 padding: 4px; border-radius: 4px; border: 2px solid #0284c7;
             """)
             self.btn_start.setEnabled(True)
@@ -239,10 +241,7 @@ class Stage3MissionPanel(QGroupBox):
         if total > 0:
             pct = int((1.0 - (remaining / total)) * 1000)
             self.progress_bar.setValue(pct)
-            
-            # 显示高精度倒计时
-            cur_txt = self.lbl_mission_status.text().split("\n")[0]
-            self.lbl_mission_status.setText(f"{cur_txt}\n⏳ 倒计时: {remaining:.1f} 秒 (剩余 {int(remaining/total*100)}%)")
+            self.lbl_mission_status.setText(f"{self._base_message}\n⏳ 倒计时: {remaining:.1f} 秒 (剩余 {int(remaining/total*100)}%)")
 
     def _on_step_progress(self, current_step: int, step_name: str):
         for i, lbl in enumerate(self.step_labels):
