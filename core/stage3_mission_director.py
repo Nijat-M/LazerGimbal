@@ -87,7 +87,7 @@ class Stage3MissionDirector(QObject):
         self.engaging_start_time = 0.0
         self.hostile_disappeared_since = 0.0
 
-        # 1. 确保系统处于自动追踪模式与激光使能
+        # 1. 确保系统处于自动追踪模式与激光保险使能，但初始绝对不发射激光
         if self.main_window:
             try:
                 if hasattr(self.main_window.mode_panel, "mode_group"):
@@ -98,11 +98,12 @@ class Stage3MissionDirector(QObject):
                 self.main_window.control_panel.set_control_enabled(True)
                 self.main_window.control_panel.btn_arm.setChecked(True)
                 self.main_window.controller.set_laser_armed(True)
+                self.main_window.controller.set_laser_firing(False) # 初始阶段确保激光停火
             except Exception as e:
                 logger.error(f"[MISSION ERROR] 初始化任务状态异常: {e}")
 
-        self._enter_state(Stage3MissionState.ACQUIRING, "Step 1/6: Scanning Sector (~10m) & Acquiring Hostile...")
-        self.step_progress.emit(1, "Acquiring & Safe Lock")
+        self._enter_state(Stage3MissionState.ACQUIRING, "Step 1/6: Scanning & Slewing Reticle to Hostile (跟到目标再开火)...")
+        self.step_progress.emit(1, "Acquiring & Slewing to Target")
         return True
 
     def abort_mission(self, reason: str = "User Aborted") -> None:
@@ -141,31 +142,64 @@ class Stage3MissionDirector(QObject):
         if not self.is_running:
             return
 
-        red_c = sum(1 for d in dets if str(d.get("taraf", "")).upper() in ("ENEMY", "RED"))
+        import math
+        red_dets = [d for d in dets if str(d.get("taraf", "")).upper() in ("ENEMY", "RED")]
         blue_c = sum(1 for d in dets if str(d.get("taraf", "")).upper() in ("FRIENDLY", "BLUE"))
         
-        self.enemy_count = red_c
+        self.enemy_count = len(red_dets)
         self.friendly_count = blue_c
         self.friendly_audit_signal.emit(self.friendly_count, self.friendly_fired_count)
 
-        # 状态机推进：在锁定阶段，若发现敌方则立即进入自主开火摧毁阶段
-        if self.state == Stage3MissionState.ACQUIRING and red_c > 0:
-            self.engaging_start_time = time.time()
-            self.hostile_disappeared_since = 0.0
-            self._enter_state(Stage3MissionState.ENGAGING, "Step 2/6: Hostile Locked >> Engaging & Destroying (Awaiting Destruction)...")
-            self.step_progress.emit(2, "Autonomous Engagement")
-            if self.main_window:
+        # 阶段 1: 扫描与伺服逼近阶段 (ACQUIRING)
+        # 核心逻辑：云台自主跟踪敌方，必须等待准星真正接触/进入敌方目标框内后，才准许开火！
+        if self.state == Stage3MissionState.ACQUIRING:
+            if red_dets:
+                from config.vision_config import VisionConfig
+                aim_x, aim_y = VisionConfig.aim_point(VisionConfig.AKTIF_MESAFE_M)
+                
+                target = red_dets[0]
+                x1, y1, x2, y2 = target.get("box", (0, 0, 0, 0))
+                pos = target.get("position", ((x1 + x2) // 2, (y1 + y2) // 2))
+                dist = math.hypot(aim_x - pos[0], aim_y - pos[1])
+                bw = max(x2 - x1, 1)
+                bh = max(y2 - y1, 1)
+                
+                # 准星是否已到达目标框内或距离质心极近 (已跟到位)
+                is_on_target = (x1 <= aim_x <= x2 and y1 <= aim_y <= y2) or (dist <= max(24.0, min(bw, bh) * 0.55))
+                
+                if is_on_target:
+                    self.engaging_start_time = time.time()
+                    self.hostile_disappeared_since = 0.0
+                    self._enter_state(
+                        Stage3MissionState.ENGAGING, 
+                        "Step 2/6: Crosshair On Target >> Continuous Laser Tracking & Engaging (不停跟踪照射)..."
+                    )
+                    self.step_progress.emit(2, "Continuous Laser Engagement")
+                    if self.main_window:
+                        self.main_window.controller.set_laser_firing(True)
+                else:
+                    # 正在伺服跟踪飞向目标，严禁提前开火
+                    if self.main_window and self.main_window.controller.laser_firing:
+                        self.main_window.controller.set_laser_firing(False)
+                    self.step_progress.emit(1, f"Slewing to Target (Dist: {dist:.0f}px)")
+            else:
+                if self.main_window and self.main_window.controller.laser_firing:
+                    self.main_window.controller.set_laser_firing(False)
+
+        # 阶段 2: 持续跟踪照射打击阶段 (ENGAGING)
+        # 保持连续高能激光发射 (不是点射，而是不停的跟踪的射)，直至目标被摧毁
+        elif self.state == Stage3MissionState.ENGAGING:
+            # 持续确保激光发射保持开启
+            if self.main_window and not self.main_window.controller.laser_firing:
                 self.main_window.controller.set_laser_firing(True)
 
-        # 在交战阶段：如果敌方目标已从画面中消失（例如气球爆破/靶标倒下/被取下）连续超过 1.0 秒，视觉自动确认摧毁
-        elif self.state == Stage3MissionState.ENGAGING:
             now = time.time()
-            # 必须开火交战至少 1.5 秒后，才允许触发自动视觉消失判定，防止误判
-            if (now - self.engaging_start_time) > 1.5:
-                if red_c == 0:
+            # 目标摧毁判定：持续开火照射至少 1.2 秒后，若敌方目标从画面消失持续 >= 0.8 秒，自动确认摧毁
+            if (now - self.engaging_start_time) >= 1.2:
+                if len(red_dets) == 0:
                     if self.hostile_disappeared_since == 0.0:
                         self.hostile_disappeared_since = now
-                    elif (now - self.hostile_disappeared_since) >= 1.0:
+                    elif (now - self.hostile_disappeared_since) >= 0.8:
                         logger.info("[MISSION] 🎯 视觉感知：红色敌方已完全脱离/被消灭，自动判定摧毁！")
                         self.confirm_destruction()
                 else:
