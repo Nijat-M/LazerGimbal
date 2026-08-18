@@ -28,40 +28,38 @@ SINIF_RENK = {
 
 
 class DetectionPanel(QGroupBox):
-    """Real-time Target Classification & IFF Panel"""
+    """Real-time Target Classification & IFF Panel (Rock-Solid & Flicker-Free)"""
 
     def __init__(self, parent=None):
         super().__init__("Capability 6 — Target Classification & IFF", parent)
+        self._last_iff_style = ""
         self.init_ui()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
         layout.setSpacing(6)
+        layout.setContentsMargins(8, 12, 8, 8)
 
-        # 顶部：检测数量 + 模型状态
-        self.lbl_summary = QLabel("Model Not Loaded")
+        # 顶部：检测数量统计栏（固定高度，彻底杜绝折行抽动）
+        self.lbl_summary = QLabel("TOTAL: 0  |  🔴 ENEMY: 0  |  🔵 FRIENDLY: 0  |  ⚪ UNKNOWN: 0")
+        self.lbl_summary.setFixedHeight(34)
         self.lbl_summary.setStyleSheet("""
-            background-color: #1a1a1a;
-            color: #888;
+            background-color: #0f172a;
+            color: #38bdf8;
             font-weight: bold;
             font-family: Consolas, "Segoe UI", monospace;
-            padding: 6px;
+            font-size: 11px;
+            padding: 4px 6px;
             border-radius: 4px;
-            border: 1px solid #333;
+            border: 1px solid #1e3a8a;
         """)
         self.lbl_summary.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_summary.setWordWrap(True)
         layout.addWidget(self.lbl_summary)
 
-        # ---- Yetenek 7: ATES IZNI / FIRE AUTHORIZATION ----
-        # Sartname 2.4.4.1 Yetenek 7: sistem dusman (kirmizi) unsuru imha edecek,
-        # dost (mavi) unsurlara ATES ETMEYECEK. Hakem bunu ekranda gormeli.
-        # 规范能力7：系统摧毁红色敌方，且【不得】对蓝色友军开火。
-        # 裁判必须能在屏幕上看到这个判定 —— 所以单独做一个醒目状态条。
-        self.lbl_iff = QLabel("NO TARGET")
+        # ---- Yetenek 7: 火控开火授权/友军保护状态条（固定高度，防抖） ----
+        self.lbl_iff = QLabel("STANDBY  --  NO TARGET IN SECTOR")
         self.lbl_iff.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_iff.setWordWrap(True)
-        self.lbl_iff.setMinimumHeight(38)
+        self.lbl_iff.setFixedHeight(46)
         self._set_iff_style("#64748b", "#0f172a")
         layout.addWidget(self.lbl_iff)
 
@@ -72,7 +70,7 @@ class DetectionPanel(QGroupBox):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.table.setAlternatingRowColors(True)
-        self.table.setMinimumHeight(180)
+        self.table.setFixedHeight(170)
 
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -86,41 +84,35 @@ class DetectionPanel(QGroupBox):
         layout.addWidget(self.table)
 
         self.lbl_hint = QLabel(
-            "Note: Place targets at 5 m / 10 m / 15 m distances.\n"
-            "🔴 Red targets are identified as ENEMY, 🔵 Blue targets as FRIENDLY."
+            "Note: Red targets are marked ENEMY, Blue targets are marked FRIENDLY."
         )
-        self.lbl_hint.setStyleSheet("color: #94a3b8; font-size: 10px; padding: 2px;")
-        self.lbl_hint.setWordWrap(True)
+        self.lbl_hint.setStyleSheet("color: #64748b; font-size: 10px; padding: 2px;")
+        self.lbl_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.lbl_hint)
 
     # ------------------------------------------------------------------
     def _set_iff_style(self, fg: str, bg: str):
+        """样式缓存：仅在样式变化时更新，彻底杜绝 60FPS 重绘抽动"""
+        style_key = f"{fg}_{bg}"
+        if style_key == self._last_iff_style:
+            return
+        self._last_iff_style = style_key
         self.lbl_iff.setStyleSheet(
             f"background-color: {bg}; color: {fg}; font-weight: bold;"
             f"font-family: Consolas, monospace; font-size: 12px;"
-            f"padding: 6px; border-radius: 4px; border: 2px solid {fg};"
+            f"padding: 4px; border-radius: 4px; border: 2px solid {fg};"
         )
 
     def set_model_status(self, ok: bool, message: str):
-        """Update top status bar on model load status"""
-        color = "#00ff00" if ok else "#ff5555"
-        self.lbl_summary.setText(message)
-        self.lbl_summary.setStyleSheet(f"""
-            background-color: #1a1a1a;
-            color: {color};
-            font-weight: bold;
-            font-family: Consolas, "Segoe UI", monospace;
-            padding: 6px;
-            border-radius: 4px;
-            border: 1px solid #333;
-        """)
+        """模型加载状态指示"""
         if not ok:
             self.table.setRowCount(0)
+            self.lbl_summary.setText("MODEL NOT LOADED")
+            self._set_iff_style("#64748b", "#0f172a")
 
     def update_detections(self, dets: list):
         """
-        Refresh table and IFF status every frame.
-        dets: [{'sinif','gorunen','guven','box','mesafe_m','renk','taraf'}, ...]
+        每帧极速无抖动更新 (Atomic 60FPS Refresh)
         """
         def is_enemy(d):
             t = str(d.get("taraf", "")).upper()
@@ -134,94 +126,95 @@ class DetectionPanel(QGroupBox):
         blue_c = sum(1 for d in dets if is_friendly(d))
         neutral_c = len(dets) - red_c - blue_c
 
-        self.lbl_summary.setText(f"TOTAL TARGETS: {len(dets)}   |   🔴 ENEMY: {red_c}   |   🔵 FRIENDLY: {blue_c}   |   ⚪ UNKNOWN: {neutral_c}")
+        # 1. 单行固定宽度统计，绝不换行抽动
+        summary_text = f"TOTAL: {len(dets)}  |  🔴 ENEMY: {red_c}  |  🔵 FRIENDLY: {blue_c}  |  ⚪ UNKNOWN: {neutral_c}"
+        if self.lbl_summary.text() != summary_text:
+            self.lbl_summary.setText(summary_text)
 
-        # ---- Yetenek 7: 开火授权与友军保护判定 ----
+        # 2. Yetenek 7 火控状态条判定
         if red_c > 0:
             enemy_names = ", ".join([d.get("gorunen", d.get("sinif", "ENEMY")) for d in dets if is_enemy(d)])
-            txt = f"🔥 FIRE AUTHORIZED  >>  {enemy_names}"
+            txt = f"🔥 FIRE AUTHORIZED >> {enemy_names}"
             if blue_c > 0:
                 txt += chr(10) + f"🛡️ PROTECTED: {blue_c} FRIENDLY (BLUE) - DO NOT FIRE"
             self._set_iff_style("#ef4444", "#2a0808")
         elif blue_c > 0:
-            txt = f"🛑 HOLD FIRE  --  ALL {blue_c} FRIENDLY UNITS SAFE"
-            txt += chr(10) + f"🛡️ PROTECTED: {blue_c} FRIENDLY (BLUE) - DO NOT FIRE"
+            txt = f"🛑 HOLD FIRE -- ALL {blue_c} FRIENDLY UNITS SAFE\n🛡️ PROTECTED: {blue_c} FRIENDLY (BLUE) - DO NOT FIRE"
             self._set_iff_style("#38bdf8", "#081a2e")
         else:
             txt = "STANDBY  --  NO TARGET IN SECTOR"
             self._set_iff_style("#64748b", "#0f172a")
 
-        self.lbl_iff.setText(txt)
-        self.lbl_summary.setStyleSheet("""
-            background-color: #0f172a;
-            color: #38bdf8;
-            font-weight: bold;
-            font-family: Consolas, "Segoe UI", monospace;
-            padding: 6px;
-            border-radius: 4px;
-            border: 1px solid #1e3a8a;
-        """)
+        if self.lbl_iff.text() != txt:
+            self.lbl_iff.setText(txt)
 
-        # 刷新 4 列详细表格
-        self.table.setRowCount(len(dets))
+        # 3. 表格内容高效平滑刷新
+        if self.table.rowCount() != len(dets):
+            self.table.setRowCount(len(dets))
+
         for row, d in enumerate(dets):
-            # 1. Target Type
+            # Target Type
             raw_cls = str(d.get("sinif", "")).upper()
-            display_name = d.get("gorunen", d.get("sinif", "?"))
-            item_ad = QTableWidgetItem(display_name)
-            item_ad.setForeground(SINIF_RENK.get(raw_cls, QColor(220, 220, 220)))
-            self.table.setItem(row, 0, item_ad)
-
-            # 2. Affiliation (IFF)
-            if is_enemy(d):
-                item_taraf = QTableWidgetItem("🔴 ENEMY (RED)")
-                item_taraf.setForeground(QColor(255, 60, 60))
-            elif is_friendly(d):
-                item_taraf = QTableWidgetItem("🔵 FRIENDLY (BLUE)")
-                item_taraf.setForeground(QColor(56, 189, 248))
+            disp_name = d.get("gorunen", d.get("sinif", "?"))
+            it_name = self.table.item(row, 0)
+            if it_name is None:
+                it_name = QTableWidgetItem(disp_name)
+                it_name.setForeground(SINIF_RENK.get(raw_cls, QColor(220, 220, 220)))
+                self.table.setItem(row, 0, it_name)
             else:
-                item_taraf = QTableWidgetItem("⚪ UNKNOWN")
-                item_taraf.setForeground(QColor(180, 180, 180))
-            item_taraf.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 1, item_taraf)
+                if it_name.text() != disp_name:
+                    it_name.setText(disp_name)
+                    it_name.setForeground(SINIF_RENK.get(raw_cls, QColor(220, 220, 220)))
 
-            # 3. Confidence
-            guven_val = float(d.get("guven", 0.0))
-            item_conf = QTableWidgetItem(f"{guven_val * 100:.0f}%")
-            item_conf.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 2, item_conf)
+            # Affiliation
+            if is_enemy(d):
+                aff_txt = "🔴 ENEMY (RED)"
+                aff_col = QColor(255, 60, 60)
+            elif is_friendly(d):
+                aff_txt = "🔵 FRIENDLY (BLUE)"
+                aff_col = QColor(56, 189, 248)
+            else:
+                aff_txt = "⚪ UNKNOWN"
+                aff_col = QColor(180, 180, 180)
 
-            # 4. Distance
+            it_aff = self.table.item(row, 1)
+            if it_aff is None:
+                it_aff = QTableWidgetItem(aff_txt)
+                it_aff.setForeground(aff_col)
+                it_aff.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(row, 1, it_aff)
+            else:
+                if it_aff.text() != aff_txt:
+                    it_aff.setText(aff_txt)
+                    it_aff.setForeground(aff_col)
+
+            # Confidence
+            conf_val = float(d.get("guven", 0.0))
+            conf_txt = f"{conf_val * 100:.0f}%"
+            it_conf = self.table.item(row, 2)
+            if it_conf is None:
+                it_conf = QTableWidgetItem(conf_txt)
+                it_conf.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(row, 2, it_conf)
+            else:
+                if it_conf.text() != conf_txt:
+                    it_conf.setText(conf_txt)
+
+            # Distance
             m = d.get("mesafe_m")
-            item_m = QTableWidgetItem(f"{m:.1f} m" if m else "~10.0 m")
-            item_m.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 3, item_m)
+            dist_txt = f"{m:.1f} m" if m else "~10.0 m"
+            it_dist = self.table.item(row, 3)
+            if it_dist is None:
+                it_dist = QTableWidgetItem(dist_txt)
+                it_dist.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(row, 3, it_dist)
+            else:
+                if it_dist.text() != dist_txt:
+                    it_dist.setText(dist_txt)
 
     def update_iff(self, info: dict):
-        """
-        Yetenek 7 快速状态同步
-        """
-        e = int(info.get("enemy", 0))
-        f = int(info.get("friendly", 0))
-        n = int(info.get("neutral", 0))
-        self.lbl_summary.setText(f"ENEMY: {e}   FRIENDLY: {f}   UNKNOWN: {n}")
-
-        if info.get("fire"):
-            self.lbl_iff.setText(
-                f"🔥 FIRE AUTHORIZED  >>  {info.get('locked') or 'ENEMY (RED)'}"
-                + (chr(10) + f"🛡️ PROTECTED: {f} FRIENDLY (BLUE) - DO NOT FIRE" if f else ""))
-            self._set_iff_style("#ef4444", "#2a0808")
-        elif f > 0:
-            self.lbl_iff.setText(
-                f"🛑 HOLD FIRE  --  ALL {f} FRIENDLY UNITS SAFE"
-                + (chr(10) + f"🛡️ PROTECTED: {f} FRIENDLY (BLUE) - DO NOT FIRE"))
-            self._set_iff_style("#38bdf8", "#081a2e")
-        elif e > 0:
-            self.lbl_iff.setText(f"🎯 ENEMY DETECTED ({e}) - ACQUIRING LOCK")
-            self._set_iff_style("#f59e0b", "#2a1f0a")
-        else:
-            self.lbl_iff.setText("STANDBY  --  NO TARGET IN SECTOR")
-            self._set_iff_style("#64748b", "#0f172a")
+        """兼容保留接口，已整合至 update_detections 避免冲突"""
+        pass
 
     def set_emergency_stop_visual(self):
         """急停状态下的醒目指示"""
@@ -233,13 +226,4 @@ class DetectionPanel(QGroupBox):
         self.table.setRowCount(0)
         self.lbl_iff.setText("STANDBY")
         self._set_iff_style("#64748b", "#0f172a")
-        self.lbl_summary.setText("Standby")
-        self.lbl_summary.setStyleSheet("""
-            background-color: #1a1a1a;
-            color: #888;
-            font-weight: bold;
-            font-family: Consolas, monospace;
-            padding: 5px;
-            border-radius: 3px;
-            border: 1px solid #333;
-        """)
+        self.lbl_summary.setText("STANDBY")
