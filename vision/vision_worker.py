@@ -61,11 +61,13 @@ class VisionWorker(QThread):
     iff_signal = pyqtSignal(dict)   # Yetenek 7: dost/dusman durumu / 敌我态势
     detections_signal = pyqtSignal(list) # Yetenek 6/7: 完整检测目标列表 (给裁判UI表格展示)
     recording_status_signal = pyqtSignal(str, str, int) # (state: 'IDLE'/'RECORDING'/'PAUSED', file_path, elapsed_seconds)
+    laser_fire_request_signal = pyqtSignal(bool, int)   # (firing: bool, power: int) 自动打击开火请求
 
     def __init__(self):
         super().__init__()
         self.is_running: bool = True
         self.mode: str = "IDLE"
+        self.balloon_firing: bool = False
         self.cap = None
         self.camera_id: int = VisionConfig.CAMERA_ID
         self.frame_width: int = VisionConfig.FRAME_WIDTH
@@ -159,6 +161,10 @@ class VisionWorker(QThread):
 
     def set_mode(self, mode: str) -> None:
         """设置工作模式"""
+        if self.mode == "BALLOON_HUNT" and mode != "BALLOON_HUNT":
+            if self.balloon_firing:
+                self.balloon_firing = False
+                self.laser_fire_request_signal.emit(False, 0)
         self.mode = mode
         if mode == "YOLO_TRACKING" and self.yolo_detector is None:
             logger.info(f"[VISION] 正在初始化 YOLO 异步深度学习引擎 (模型: {self.yolo_model_path})...")
@@ -526,6 +532,8 @@ class VisionWorker(QThread):
                     self._process_blue_tracking(frame)
                 elif self.mode == "YOLO_TRACKING":
                     self._process_yolo_tracking(frame)
+                elif self.mode == "BALLOON_HUNT":
+                    self._process_balloon_hunt(frame)
                 
                 # 统一发送实时状态统计
                 self.stats_signal.emit(self.current_fps, self.frame_width, self.frame_height)
@@ -589,6 +597,116 @@ class VisionWorker(QThread):
 
         # 发送单次计算的高速调试蒙版
         self._send_mask(mask_blue)
+
+    def _process_balloon_hunt(self, frame: cv2.Mat) -> None:
+        """
+        BALLOON_HUNT 模式：橙色气球打击与爆破模式 (Orange Balloon Hunt & Pop Mode)
+        - 实时分割并追踪橙色气球 (Orange Balloon)
+        - 准星一旦触碰到气球主体范围 (is_touching): 自动发射 100% 功率高能激光打爆气球
+        - 若准星偏离/未触及气球: 持续追踪伺服修正，并在偏离时自动停火保护
+        - 循环执行直至气球爆炸/画面中无橙色气球为止 (自动安全停火)
+        """
+        _h, _w = frame.shape[:2]
+        VisionConfig.CENTER_X = _w // 2
+        VisionConfig.CENTER_Y = _h // 2
+        aim_x, aim_y = VisionConfig.aim_point(VisionConfig.AKTIF_MESAFE_M)
+
+        # 1. 橙色高精度色彩与物理通道联合分割
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        b = frame[:, :, 0].astype(np.float32)
+        g = frame[:, :, 1].astype(np.float32)
+        r = frame[:, :, 2].astype(np.float32)
+
+        # 橙色特征：H在[5, 25]区间，中高饱和度S>=65，亮度V>=55，且R通道显著高于G和B
+        hsv_mask = cv2.inRange(hsv, (5, 65, 55), (25, 255, 255))
+        bgr_mask = (r > g + 25) & (r > b + 45) & (r >= 95)
+        mask_orange = hsv_mask & (bgr_mask.astype(np.uint8) * 255)
+
+        # 形态学滤波：去除孤立杂点并平滑气球边缘
+        kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        mask_clean = cv2.morphologyEx(mask_orange, cv2.MORPH_OPEN, kernel_open)
+        mask_clean = cv2.morphologyEx(mask_clean, cv2.MORPH_CLOSE, kernel_close)
+
+        contours, _ = cv2.findContours(mask_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        valid_contours = [c for c in contours if cv2.contourArea(c) >= 350]
+
+        is_touching = False
+
+        if valid_contours:
+            c_max = max(valid_contours, key=cv2.contourArea)
+            area = cv2.contourArea(c_max)
+            (cx_b, cy_b), radius = cv2.minEnclosingCircle(c_max)
+            M = cv2.moments(c_max)
+            if M['m00'] > 0:
+                bx = int(M['m10'] / M['m00'])
+                by = int(M['m01'] / M['m00'])
+            else:
+                bx, by = int(cx_b), int(cy_b)
+
+            # 准星是否触碰/位于气球轮廓内部或包络圆内
+            is_inside_poly = cv2.pointPolygonTest(c_max, (float(aim_x), float(aim_y)), False) >= 0
+            dist_to_center = math.hypot(aim_x - bx, aim_y - by)
+            is_touching = is_inside_poly or (dist_to_center <= max(12.0, radius * 0.92))
+
+            # 发送目标坐标驱动云台追踪
+            self.target_pos_signal.emit(bx, by)
+
+            # 绘制气球战术轮廓与发光边界
+            cv2.drawContours(frame, [c_max], -1, (0, 140, 255), 2)
+            cv2.circle(frame, (int(cx_b), int(cy_b)), int(radius), (0, 165, 255), 2)
+            cv2.circle(frame, (bx, by), 6, (0, 215, 255), -1)
+
+            # 绘制从激光准星到气球质心的导引箭头
+            line_color = (0, 0, 255) if is_touching else (0, 255, 255)
+            cv2.arrowedLine(frame, (aim_x, aim_y), (bx, by), line_color, 2, tipLength=0.15)
+
+            if is_touching:
+                # 准星已触碰气球：自动触发 100% 激光发射！
+                if not self.balloon_firing:
+                    self.balloon_firing = True
+                    self.laser_fire_request_signal.emit(True, 100)
+                    logger.info(f"[BALLOON HUNT] 🔥 准星触碰气球 (Dist={dist_to_center:.1f}px) -> 触发 100% 激光打爆！")
+
+                # 绘制高亮开火告警 HUD
+                hud_text = "🔥 [LOCKED ON BALLOON] 100% LASER FIRING!"
+                cv2.rectangle(frame, (10, _h - 75), (520, _h - 35), (0, 0, 160), -1)
+                cv2.rectangle(frame, (10, _h - 75), (520, _h - 35), (0, 0, 255), 2)
+                cv2.putText(frame, hud_text, (20, _h - 48),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.70, (255, 255, 255), 2)
+            else:
+                # 准星偏离/未触及气球：激光停火，继续伺服对准
+                if self.balloon_firing:
+                    self.balloon_firing = False
+                    self.laser_fire_request_signal.emit(False, 0)
+                    logger.info("[BALLOON HUNT] 准星偏离气球 -> 激光停火并继续追踪")
+
+                hud_text = f"🎈 [ACQUIRING BALLOON] Tracking (Dist: {dist_to_center:.1f}px)"
+                cv2.rectangle(frame, (10, _h - 75), (500, _h - 35), (20, 20, 20), -1)
+                cv2.rectangle(frame, (10, _h - 75), (500, _h - 35), (0, 165, 255), 2)
+                cv2.putText(frame, hud_text, (20, _h - 48),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 215, 255), 2)
+        else:
+            # 画面中没有橙色气球（气球已爆炸或未出现）：立即关闭激光，保持安全搜索
+            if self.balloon_firing:
+                self.balloon_firing = False
+                self.laser_fire_request_signal.emit(False, 0)
+                logger.info("[BALLOON HUNT] ✓ 橙色气球已爆炸/消失 -> 激光安全关闭")
+
+            hud_text = "🎈 [BALLOON POPPED / SEARCHING] Laser SAFE"
+            cv2.rectangle(frame, (10, _h - 75), (460, _h - 35), (20, 20, 20), -1)
+            cv2.rectangle(frame, (10, _h - 75), (460, _h - 35), (52, 211, 153), 2)
+            cv2.putText(frame, hud_text, (20, _h - 48),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (52, 211, 153), 2)
+
+        # 画面准星绘制 (触碰时准星变红闪烁，未触碰时为亮黄色)
+        reticle_color = (0, 0, 255) if is_touching else (0, 255, 255)
+        cv2.line(frame, (aim_x - 22, aim_y), (aim_x + 22, aim_y), reticle_color, 2)
+        cv2.line(frame, (aim_x, aim_y - 22), (aim_x, aim_y + 22), reticle_color, 2)
+        cv2.circle(frame, (aim_x, aim_y), 6, reticle_color, 2)
+
+        # 发送调试蒙版
+        self._send_mask(mask_clean)
 
 
     def _boresight_crop(self, frame):

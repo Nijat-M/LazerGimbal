@@ -266,6 +266,7 @@ class MainWindow(QMainWindow):
         self.calibration_panel.offset_changed.connect(self.on_crosshair_offset)
         self.vision_thread.detections_signal.connect(self.detection_panel.update_detections)
         self.vision_thread.detections_signal.connect(self.stage3_director.on_detections_update)
+        self.vision_thread.laser_fire_request_signal.connect(self.on_laser_fire_request)
         # 物体追踪模式发送目标原始坐标，误差由控制器计算
         self.vision_thread.target_pos_signal.connect(self.controller.handle_target_position)
 
@@ -471,11 +472,33 @@ class MainWindow(QMainWindow):
         # Manual modes still display live video but do not run target detection.
         vision_mode = "IDLE" if mode in ("TEST", "MANUAL_MOUSE") else mode
         self.vision_thread.set_mode(vision_mode)
-        self.status_label.setText(
-            "Mouse Aim: Click live view to start, Esc to stop"
-            if is_mouse
-            else f"Mode: {mode}"
-        )
+        
+        if mode == "BALLOON_HUNT":
+            self.control_panel.set_control_enabled(True)
+            self.on_control_toggled(True)
+            self.status_label.setText("🎈 Orange Balloon Pop Mode: Auto-tracking & 100% Laser Active")
+        else:
+            self.controller.set_laser_firing(False)
+            self.status_label.setText(
+                "Mouse Aim: Click live view to start, Esc to stop"
+                if is_mouse
+                else f"Mode: {mode}"
+            )
+    
+    def on_laser_fire_request(self, firing: bool, power: int = 100):
+        """来自视觉线程（如橙色气球打击模式）的自动开火请求"""
+        if firing:
+            if not self.controller.laser_armed:
+                self.controller.set_laser_armed(True)
+                self.control_panel.btn_laser_arm.setChecked(True)
+            if self.controller.laser_power != power:
+                self.controller.set_laser_power(power)
+                self.control_panel.slider_power.setValue(power)
+            if not self.controller.laser_firing:
+                self.controller.set_laser_firing(True)
+        else:
+            if self.controller.laser_firing:
+                self.controller.set_laser_firing(False)
     
     def on_crosshair_offset(self, ox: int, oy: int):
         """Boresight offset degisti -> hem cizim hem nisan alma bundan etkilenir."""

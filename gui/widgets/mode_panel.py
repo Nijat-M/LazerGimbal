@@ -44,6 +44,7 @@ class ModePanel(QGroupBox):
         self.rb_idle = QRadioButton("IDLE")
         self.rb_blue_tracking = QRadioButton("Blue Object Tracking")
         self.rb_yolo_tracking = QRadioButton("YOLO Defense Tracking")
+        self.rb_balloon_hunt = QRadioButton("🎈 Orange Balloon Pop Mode")
         self.rb_test = QRadioButton("Test Mode")
         self.rb_mouse_manual = QRadioButton("Mouse Aim")
         
@@ -52,6 +53,7 @@ class ModePanel(QGroupBox):
         # 设置提示文本
         self.rb_blue_tracking.setToolTip("Center blue object")
         self.rb_yolo_tracking.setToolTip("Center defense & aerial targets using YOLO")
+        self.rb_balloon_hunt.setToolTip("Auto track orange balloon and fire 100% laser when crosshair touches it until it pops")
         self.rb_mouse_manual.setToolTip("Click live view to capture mouse for manual aiming")
         
         self.mode_group.addButton(self.rb_idle, 0)
@@ -59,6 +61,7 @@ class ModePanel(QGroupBox):
         self.mode_group.addButton(self.rb_yolo_tracking, 2)
         self.mode_group.addButton(self.rb_test, 3)
         self.mode_group.addButton(self.rb_mouse_manual, 4)
+        self.mode_group.addButton(self.rb_balloon_hunt, 5)
         
         # 连接模式选择信号
         self.mode_group.idToggled.connect(self._on_mode_toggled)
@@ -115,6 +118,7 @@ class ModePanel(QGroupBox):
         layout.addWidget(self.yolo_settings_widget)
         self.yolo_settings_widget.setVisible(False)  # 默认待机模式下隐藏
         
+        layout.addWidget(self.rb_balloon_hunt)
         layout.addWidget(self.rb_test)
         layout.addWidget(self.rb_mouse_manual)
         
@@ -215,6 +219,7 @@ class ModePanel(QGroupBox):
             2: "YOLO_TRACKING",
             3: "TEST",
             4: "MANUAL_MOUSE",
+            5: "BALLOON_HUNT",
         }
         mode = mode_map.get(btn_id, "IDLE")
         
