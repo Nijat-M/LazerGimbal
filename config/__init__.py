@@ -75,6 +75,11 @@ class ConfigManager:
     def INVERT_Y(self, v: bool): ControlConfig.INVERT_Y = v
 
     @property
+    def DEADZONE(self) -> int: return ControlConfig.DEADZONE
+    @DEADZONE.setter
+    def DEADZONE(self, v: int): ControlConfig.DEADZONE = v
+
+    @property
     def SERVO_SOFTWARE_STEP_SCALE(self) -> float: return ControlConfig.SERVO_STEP_TO_DEGREE
 
     @property

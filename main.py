@@ -14,43 +14,54 @@ except ImportError:
 os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '0'
 os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
 
+import argparse
 from PyQt6.QtWidgets import QApplication
-from gui.main_window import MainWindow
 from utils.logger import Logger
 
 logger = Logger("System")
 
-# 尝试导入主题（可选）
+# 导入 UI 模式
+try:
+    from gui.fluent.app_window import FluentAppWindow
+    HAS_FLUENT = True
+except ImportError:
+    HAS_FLUENT = False
+
+from gui.main_window import MainWindow
+
+# 尝试导入主题（可选，用于老版 UI）
 try:
     import qdarktheme
     HAS_DARK_THEME = True
 except ImportError:
     HAS_DARK_THEME = False
-    logger.info("[SYSTEM] 提示: 安装 pyqtdarktheme 以启用暗色主题")
+
 
 def main():
     """
     程序入口 (Program Entry Point)
     """
+    parser = argparse.ArgumentParser(description="LaserGimbal Ground Station")
+    parser.add_argument("--classic", action="store_true", help="Launch classic PyQt6 UI instead of Fluent UI")
+    args, _ = parser.parse_known_args()
+
     # 0. 配置标准输出缓冲 (Debug)
-    # 强制 stdout 立即刷新，防止 crash 时日志丢失
     sys.stdout.reconfigure(encoding='utf-8')
     
-    logger.info("[SYSTEM] 程序启动...")
-    logger.info("[SYSTEM] 初始化 Application...")
-
     # 1. 创建应用程序对象
     app = QApplication(sys.argv)
     
-    # 2. 应用现代暗色主题 (可选)
-    if HAS_DARK_THEME:
-        app.setStyleSheet(qdarktheme.load_stylesheet())
-        logger.info("[SYSTEM] 已应用暗色主题")
+    # 2. 根据参数选择启动 Fluent UI 还是 Classic UI
+    if not args.classic and HAS_FLUENT:
+        logger.info("[SYSTEM] 正在启动现代 Fluent UI 地面站...")
+        window = FluentAppWindow()
     else:
-        logger.info("[SYSTEM] 使用默认主题")
-    
-    # 3. 创建并显示主窗口
-    window = MainWindow()
+        logger.info("[SYSTEM] 正在启动经典版 UI...")
+        if HAS_DARK_THEME:
+            app.setStyleSheet(qdarktheme.load_stylesheet())
+        window = MainWindow()
+
+    # 3. 显示主窗口
     window.show()
     
     # 4. 进入事件循环

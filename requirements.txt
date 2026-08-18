@@ -1,5 +1,6 @@
 PyQt6
 pyqtdarktheme
+PyQt6-Fluent-Widgets
 opencv-python
 pyserial
 numpy
