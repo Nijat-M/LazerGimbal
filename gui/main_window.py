@@ -475,7 +475,6 @@ class MainWindow(QMainWindow):
         
         if mode == "BALLOON_HUNT":
             self.control_panel.set_control_enabled(True)
-            self.on_control_toggled(True)
             self.status_label.setText("🎈 Orange Balloon Pop Mode: Auto-tracking & 100% Laser Active")
         else:
             self.controller.set_laser_firing(False)
@@ -487,18 +486,30 @@ class MainWindow(QMainWindow):
     
     def on_laser_fire_request(self, firing: bool, power: int = 100):
         """来自视觉线程（如橙色气球打击模式）的自动开火请求"""
-        if firing:
-            if not self.controller.laser_armed:
-                self.controller.set_laser_armed(True)
-                self.control_panel.btn_laser_arm.setChecked(True)
-            if self.controller.laser_power != power:
-                self.controller.set_laser_power(power)
-                self.control_panel.slider_power.setValue(power)
-            if not self.controller.laser_firing:
-                self.controller.set_laser_firing(True)
-        else:
-            if self.controller.laser_firing:
-                self.controller.set_laser_firing(False)
+        try:
+            if firing:
+                if not self.controller.laser_armed:
+                    self.controller.set_laser_armed(True)
+                    if hasattr(self.control_panel, 'btn_arm'):
+                        self.control_panel.btn_arm.blockSignals(True)
+                        self.control_panel.btn_arm.setChecked(True)
+                        self.control_panel.btn_arm.setText("⚔️ ARMED (ACTIVE)")
+                        self.control_panel.btn_arm.blockSignals(False)
+                        self.control_panel.btn_fire.setEnabled(True)
+                if self.controller.laser_power != power:
+                    self.controller.set_laser_power(power)
+                    if hasattr(self.control_panel, 'slider_power'):
+                        self.control_panel.slider_power.blockSignals(True)
+                        self.control_panel.slider_power.setValue(power)
+                        self.control_panel.lbl_power_val.setText(f"{power}%")
+                        self.control_panel.slider_power.blockSignals(False)
+                if not self.controller.laser_firing:
+                    self.controller.set_laser_firing(True)
+            else:
+                if self.controller.laser_firing:
+                    self.controller.set_laser_firing(False)
+        except Exception as e:
+            logger.error(f"[MAIN WINDOW] 激光开火请求处理异常: {e}")
     
     def on_crosshair_offset(self, ox: int, oy: int):
         """Boresight offset degisti -> hem cizim hem nisan alma bundan etkilenir."""
