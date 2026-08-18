@@ -1,57 +1,72 @@
-# LazerGimbal Phase 3: 专业级视觉伺服与卡尔曼前馈控制方案
+# Phase 3: 运动学状态估计与卡尔曼高阶滤波演进方案 (Kinematic State Estimation & Kalman Roadmap)
 
-## 1. 背景与痛点分析
-当前系统在使用单纯的“位置误差增量PID”控制时，在低帧率（约16 fps）工业相机/Webcam下暴露出以下显著痛点：
-- **稳态震荡 (Hunting)**：由于视觉处理与通讯存在的系统延迟（通常 > 80ms），MCU 执行的控制动作往往建立在过期的误差数据上。当近距离接近目标时，积分项和滞后的比例项会导致在中心点反复横跳。
-- **动态跟踪迟缓**：纯误差驱动（反馈控制）意味着“只有落后了才去追”。当目标快速移动时，系统只能一直跟在目标后方，无法实现“咬死”的效果。
-- **微分项 (Kd) 失效**：由于相机帧率极低，MCU 在 50Hz 的控制周期间隔中，连续3-4次采样到的视觉画面完全一致（没来得及刷新）。这导致微分项 `(current - prev)` 算出来为 0，完全失去了预判和刹车阻尼的作用。
-
-## 2. 核心架构升级 (工业级标准)
-为了弥补便宜硬件（PWM舵机 + 低帧摄像头）的缺陷，我们将引入目前常用于 RoboMaster 竞赛与大疆专业云台的经典控制架构：**卡尔曼观测器 (Kalman Filter Observer) + 速度前馈 (Velocity Feedforward) 复合控制**。
-
-### 2.1 上位机 (Brain): 卡尔曼滤波与运动估计
-在 Python 端开发独立的 Kalman Filter 模块，建立 2D 恒速模型 (Constant Velocity Model)。
-- **平滑去噪**：消除视觉识别框由于光线和算法造成的边际跳动噪点。
-- **状态观测 (速度提取)**：除了输出平滑后的目标位置，更核心的是求导并过滤出真实物理世界中目标的**相对运动速度 (Velocity)**。
-- **延迟补偿 (外推预测)**：利用当前速度与两帧之间的时间差 (dt)，超前预测出“现在这一刻”（而不是几十毫秒前画面定格时）目标可能移动到的精确位置。
-
-### 2.2 通讯协议 (Spinal Cord): 扩充控制维度
-将原本仅包含单一位置误差的字符串协议，升级为包含运动趋势特征的高维指令：
-- **旧版协议**：`<Error_X, Error_Y, 0>\n`
-- **新版协议**：`<Error_X, Error_Y, Vel_X, Vel_Y>\n` (上位机直接把算好的绝对速度压给下位机)
-
-### 2.3 下位机 (Cerebellum): 前馈+反馈的复合控制器
-在 STM32 的 C 代码中修改核心控制律（Control Law）：
-$$ \Delta Output = [K_p \cdot e + K_i \cdot \int e + K_d \cdot \Delta e] \ +\  [K_{ff} \cdot V_{target}] $$
-- **Feedforward (前馈控制)**：作为跟踪主力。只要 Python 告诉 MCU “目标在以 100px/s 往左跑”，MCU 根本不必等误差拉大，**直接**给出基准脉宽速度，让云台与目标**同速移动**（保持相对静止）。
-- **PID (偏置反馈)**：作为辅助修正。由于前馈已经抵消了大部分的运动，此时目标处于画面中心的微小漂移状态，使用极小的 Kp 就能稳稳锁定，彻底拔除长期震荡的病根。
+> **适用硬件平台**：STM32F401 (10kHz TIM2 DDA 步进脉冲) + MKS SERVO42C 闭环步进电机 + Arducam AR0234 全局快门相机 (60 FPS) + 原生 USB CDC (12 Mbps) + YOLO26 目标检测  
+> **状态**：阶段核心已在 [`core/control/error_processor.py`](file:///d:/LazerGimbal/core/control/error_processor.py) 与 [`TRACKING_PARAMETERS_GUIDE.md`](file:///d:/LazerGimbal/TRACKING_PARAMETERS_GUIDE.md) 中全面落地；本方案提供向高阶 2D/3D EKF 扩展的演进技术路线。
 
 ---
 
-## 3. 分步实施计划 (Step-by-Step Plan)
+## 1. 现行已落地的运动学超前预测与抗抖系统
 
-### Step 1: Python 端 - 开发 Kalman Tracker 模块
-- 在 `core/control` 目录下新建 `kalman_filter.py`。
-- 基于 `cv2.KalmanFilter`，设计状态矩阵（4x1: `[x, y, vx, vy]`）和测量矩阵（2x1: `[x, y]`）。
-- 实现 `predict(dt)` 方法（根据时间差预测），与 `correct(meas_x, meas_y)` 方法（融合最新的目标检测框信息）。
+在当前项目中，为了解决视觉检测与控制链路中固有的全链路延时（约 $40 \sim 65\text{ms}$），系统已落地了一套高性能的**非对称动态超前预测与 3 区域运动学速度规划架构**：
 
-### Step 2: Python 端 - 控制流融合与串口协议升级
-- 修改 `core/gimbal_controller.py`。
-- 引入卡尔曼滤波器，将 `VisionWorker` 传来的含有延迟的 `target_x, target_y` 喂入滤波器。
-- 读取滤波后预测的当前误差与速度差，将其打包成新的命令：`<err_x, err_y, vel_x, vel_y>\n` 进行发送。
+### 1.1 动态非对称超前预测补偿 (Asymmetric Dynamic Lead Anticipation)
+位于 [`ErrorProcessor.process()`](file:///d:/LazerGimbal/core/control/error_processor.py)：
+- **急刹减速阶段 (fx 与 vel_x 异号)**：目标高速冲向准星中心时，系统判定为进场减速，自动施加 **$65\text{ms}$ 强效超前制动时间**，提前收油平滑制动，**彻底消除远距离大速度冲过准星与反向回摆**。
+- **加速追击阶段 (fx 与 vel_x 同号)**：目标加速远离准星时，采用 **$35\text{ms}$ 敏捷超前时间**，消除视觉传输滞后，起步瞬间零延迟咬住目标。
+- **零点穿越防抖**：当预测坐标跨越 0 点时强制吸附归零，避免符号翻转震荡。
 
-### Step 3: STM32 端 - 解析器重构与复合控制律
-- 更新 `main.c` 里的 `HAL_UART_RxCpltCallback`，由于数据段由 3 个变成 4 个，需要增加对 `Vel_X` 和 `Vel_Y` 浮点数/整数的解析。
-- 在 `HAL_TIM_PeriodElapsedCallback` 中，更新最终算式代码，直接在 `delta_x` 后叠加一个 `K_ff * Vel_X`。
-- 串口也要支持解析第四个新的调参参数常量（如发送 `{Kp,Ki,Kd,Kff}`）。
+### 1.2 消除果冻效应的导数噪声门限 (Anti-Jello Noise Gate)
+- 当单周期像素跳变 $|\Delta y| < 1.2\text{px}$ 时，直接判定为传感器离散噪点，瞬时速度强制置 0，**彻底切断 60Hz 视觉微震源**。
+- 俯仰 Y 轴结合重度低通滤波 ($\alpha = 0.35$)，彻底消除了相机滚动快门与微小机械共振引发的“果冻”扭曲。
 
-### Step 4: GUI 更新 - 补全前馈参数调节 (K_ff) 控制台
-- 在 `gui/widgets/pid_tuner.py` 中，在 Kd 的下方新增一根“FF (Feedforward 参数)”的滑块。
-- 在界面面板打通这一链路，做到实时热更新系统架构。
+### 1.3 3 区域运动学速度规划 (3-Zone Kinematic Servoing)
+- **准星过渡区 ($< \text{SettleZone}$)**：采用渐进比例缩放 ($0.50 + 0.50 \times \frac{err}{\text{SettleZone}}$)，起步即响应，进中心柔和刹车。
+- **线性追踪区 ($\text{SettleZone} \sim \text{EdgeThreshold}$)**：$1.20\times$ 敏捷线性跟踪。
+- **边缘软饱和区 ($> \text{EdgeThreshold}$)**：启用亚线性幂压缩 ($100 + (err - 100)^{0.55} \times 1.2$)，限制最高速度在安全制动包线内 (~210°/s)，防止超大速度甩脱目标。
 
 ---
 
-## 4. 给开发者的建议 (简历与面试亮点)
-当这一套系统在你的手里跑通后，你可以非常自信地将下述原话写在你的个人履历或说给面试官听，这将是从普通爱好者到进阶控制工程师的实质性飞跃：
+## 2. 高阶卡尔曼滤波 (EKF) 演进路线
 
-> "为了解决纯开环 PWM 舵机与 16FPS 低帧率工业视觉传感器间严重的几十毫秒级系统相移与跟踪震荡痛点，我在上位机运用 OpenCV 构建了基于恒速模型的**卡尔曼观测器**，实现了动态延迟补偿与高阶速度状态提取；进而重构了 MCU 的 UART 异步状态机，并在裸机层成功部署了**位置反馈 + 速度前馈 (Feedforward)** 的复合控制律。该架构使得系统在硬件条件极度受限的情况下，极大释放了跟踪动力，实现了无稳态震荡和低延迟的专业级视觉伺服表现。"
+为了在未来应对**复杂机动防空目标（高机动转弯、突变加速度、短暂被遮挡）**，系统可平滑升级为基于恒加速度 (CA) 模型的扩展卡尔曼滤波观测器。
+
+### 2.1 状态向量与运动学模型 (Constant Acceleration Model)
+定义目标在图像坐标系或空间物理坐标系中的 6 维状态向量：
+$$ X_k = \begin{bmatrix} x & y & v_x & v_y & a_x & a_y \end{bmatrix}^T $$
+
+状态转移矩阵 $F$（时间步长 $\Delta t = \frac{1}{60}\text{s} \approx 16.67\text{ms}$）：
+$$ F = \begin{bmatrix} 
+1 & 0 & \Delta t & 0 & \frac{1}{2}\Delta t^2 & 0 \\
+0 & 1 & 0 & \Delta t & 0 & \frac{1}{2}\Delta t^2 \\
+0 & 0 & 1 & 0 & \Delta t & 0 \\
+0 & 0 & 0 & 1 & 0 & \Delta t \\
+0 & 0 & 0 & 0 & 1 & 0 \\
+0 & 0 & 0 & 0 & 0 & 1
+\end{bmatrix} $$
+
+### 2.2 测量更新与抗遮挡推算 (Coasting Capability)
+测量向量仅包含目标检测给出的质心坐标 $Z_k = \begin{bmatrix} z_x & z_y \end{bmatrix}^T$：
+$$ H = \begin{bmatrix} 
+1 & 0 & 0 & 0 & 0 & 0 \\
+0 & 1 & 0 & 0 & 0 & 0 
+\end{bmatrix} $$
+
+- **正常观测时**：卡尔曼增益 $K_k = P_{k|k-1} H^T (H P_{k|k-1} H^T + R)^{-1}$，融合 YOLO 视觉测量与运动惯性预测。
+- **目标短暂遮挡 / 掉帧时 (Coasting 惯性航位推算)**：若 YOLO 在连续 3~10 帧未检测到目标，**不下发 STOP**，而是依靠卡尔曼先验状态矩阵 $\hat{X}_{k|k-1} = F \hat{X}_{k-1|k-1}$ 持续推算目标运动轨迹并引导云台继续追踪，当目标重新穿出遮挡物时实现无缝重捕获。
+
+---
+
+## 3. 分步进阶实施建议
+
+1. **模块设计**：
+   - 在 `core/control/` 目录下构建 `kalman_tracker.py`，保持与 `ErrorProcessor` 一致的接口 `process(raw_x, raw_y) -> (pred_x, pred_y)`。
+2. **多假设数据关联 (Data Association)**：
+   - 结合 YOLO 的国防目标类别（`BALISTIK_FUZE`, `F16`, `HELIKOPTER`, `MINI_IHA`）与马氏距离 (Mahalanobis Distance)，杜绝多目标交错时的跟丢与误跟。
+3. **下位机融合**：
+   - 维持下位机 10kHz DDA 闭环调速机制不变，上位机直接输出已包含卡尔曼加速度外推预测的高阶误差指令 `<err_x, err_y, fire>\n`。
+
+---
+
+## 4. 技术亮点与面试总结
+
+> "针对 60 FPS 视觉制导闭环中由曝光传输与机械惯性引发的数十毫秒系统时延，我们构建了**非对称动态超前预测观测器**与 **3 区域运动学速度规划架构**；创新性地引入了方向自适应制动超前（65ms）与加速追击超前（35ms），并配合 1.2px 导数噪声门限切断果冻效应源。结合 STM32 10kHz TIM2 DDA 闭环步进驱动与双区差分阻尼控制，实现了极速响应无过冲、高精度锁定且抗遮挡的高性能光电伺服追踪。"

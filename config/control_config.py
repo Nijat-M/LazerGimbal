@@ -22,7 +22,7 @@ class ControlConfig:
 
     # FPS 风格鼠标手动瞄准
     MOUSE_SENSITIVITY: float = 0.08      # 每个鼠标计数对应的虚拟角度（度）
-    MOUSE_ERROR_PER_DEGREE: float = 50.0 # 旧舵机协议的角度增量→模拟误差转换
+    MOUSE_ERROR_PER_DEGREE: float = 50.0 # 虚拟角度增量→模拟误差转换系数
     MOUSE_MAX_ERROR: int = 120           # 单个控制周期的最大模拟误差
     MOUSE_YAW_MIN: float = -80.0
     MOUSE_YAW_MAX: float = 80.0
@@ -50,14 +50,6 @@ class ControlConfig:
     SETTLE_ZONE_Y: int = 25              # Y 轴准星中心平滑减速过渡区（像素）
     EDGE_COMPRESS_THRESHOLD_X: int = 100 # X 轴屏幕边缘软饱和压缩起点（像素）
     EDGE_COMPRESS_THRESHOLD_Y: int = 100 # Y 轴屏幕边缘软饱和压缩起点（像素）
-
-
-
-    # 舵机软件限位（度）
-    SERVO_MIN_LIMIT: int = 0
-    SERVO_MAX_LIMIT: int = 180
-    SERVO_CENTER: int = 90
-    SERVO_STEP_TO_DEGREE: float = 0.1  # 每步对应的角度数
 
     # ==========================================
     # 辅助方法 (Helper Methods)
