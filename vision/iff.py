@@ -39,13 +39,29 @@ IFF_ETIKET = {
 
 def iff_analiz(frame_bgr, box):
     """
-    多色彩空间融合分析 (HSV + BGR差分 + CIELAB)
+    走廊/室内光照高鲁棒敌我识别 (IFF) 分析
+    
+    物理判据：
+    - 红色敌军 (ENEMY RED)：
+        H <= 13 或 H >= 167 (纯红/偏橙红)
+        S >= 30, V >= 20
+        (R - B) / (R + B + 1) >= 0.18 (强力压制蓝光反射)
+        (R - G) / (R + G + 1) >= 0.08 且 R >= G + 8 (排除 R~=G 的黄白背景墙面)
+        R >= B + 15
+    - 蓝色友军 (FRIENDLY BLUE)：
+        75 <= H <= 155 (青蓝/深蓝广谱)
+        S >= 20, V >= 18
+        (B - R) / (B + R + 1) >= 0.08 或 B >= R + 6 (B 显著超越 R)
+        B >= 25
+    - 环境黄墙/木门/门框：
+        H 在 20~35 区间，R ~= G，(R-B) 与 (B-R) 比值均不达标，完全排除
+
     返回 (taraf, kirmizi_sayisi, mavi_sayisi, oran)
     """
     if cv2 is None or frame_bgr is None or box is None:
         return NEUTRAL, 0, 0, 0.0
 
-    x1, y1, x2, y2 = [int(v) for v in box]
+    x1, y1, x2, y2 = [int(round(v)) for v in box]
     h, w = frame_bgr.shape[:2]
     x1, y1 = max(0, x1), max(0, y1)
     x2, y2 = min(w, x2), min(h, y2)
@@ -54,81 +70,76 @@ def iff_analiz(frame_bgr, box):
         return NEUTRAL, 0, 0, 0.0
 
     # 提取目标主体 ROI (去除边缘 4% 杂边)
-    mx, my = max(1, int(bw * 0.04)), max(1, int(bh * 0.04))
+    my = max(1, int(bh * 0.04))
+    mx = max(1, int(bw * 0.04))
     roi = frame_bgr[y1 + my:y2 - my, x1 + mx:x2 - mx]
-    if roi.size == 0:
+    if roi.size == 0 or roi.shape[0] < 4 or roi.shape[1] < 4:
         return NEUTRAL, 0, 0, 0.0
 
     total_px = roi.shape[0] * roi.shape[1]
 
-    # --- 1. RGB / BGR 物理通道 ---
     b = roi[:, :, 0].astype(np.float32)
     g = roi[:, :, 1].astype(np.float32)
     r = roi[:, :, 2].astype(np.float32)
 
-    # --- 2. HSV 色度空间 ---
     try:
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
         H = hsv[:, :, 0].astype(np.float32)
         S = hsv[:, :, 1].astype(np.float32)
         V = hsv[:, :, 2].astype(np.float32)
-
-        # 红色敌军特征：
-        # 1) H位于纯红区间 (0~7 或 170~180)
-        # 2) 强饱和度排除黄色墙壁/射灯/木头 (S >= 45, V >= 35)
-        # 3) R 通道必须大幅压倒 G 通道与 B 通道 (黄光下 R~=G，纯红 R>>G)
-        hsv_red = (
-            ((H <= 7) | (H >= 170)) & (S >= 45) & (V >= 35)
-            & (r - g >= 25) & (r - b >= 30) & (r / (g + b + 1.0) >= 1.25)
-        )
-        
-        # 蓝色友军特征 (全面适应走廊黄光/低曝光/深蓝/灰蓝 3D 打印靶标)：
-        # 1) H位于蓝色广谱区间 (75~155)
-        # 2) 宽容饱和度与亮度门限 (S >= 15, V >= 20)
-        # 3) 即使在黄光漫反射下，蓝色靶标的 B 通道仍明显高于 R 通道
-        hsv_blue = (
-            (H >= 75) & (H <= 155) & (S >= 15) & (V >= 20) & (b >= r + 2)
-        )
     except Exception:
-        hsv_red = np.zeros_like(b, dtype=bool)
-        hsv_blue = np.zeros_like(b, dtype=bool)
+        H = np.zeros_like(b)
+        S = np.zeros_like(b)
+        V = np.zeros_like(b)
 
-    # --- 3. BGR 强色度差分特征 ---
-    bgr_red = (r >= 65) & (r - g >= 25) & (r - b >= 35) & (r / (g + b + 1.0) >= 1.25)
-    bgr_blue = (b >= 40) & (b >= r + 4) & (b / (r + 1.0) >= 1.04)
+    # --- 1. 红色敌方像素判定 ---
+    is_red_pixel = (
+        ((H <= 13) | (H >= 167)) &
+        (S >= 30) & (V >= 20) &
+        ((r - b) / (r + b + 1.0) >= 0.18) &
+        ((r - g) / (r + g + 1.0) >= 0.08) &
+        (r >= g + 8) &
+        (r >= b + 15)
+    )
 
-    is_red = hsv_red | bgr_red
-    is_blue = hsv_blue | bgr_blue
+    # --- 2. 蓝色友方像素判定 ---
+    is_blue_pixel = (
+        (H >= 75) & (H <= 155) &
+        (S >= 20) & (V >= 18) &
+        (((b - r) / (b + r + 1.0) >= 0.08) | (b >= r + 6)) &
+        (b >= 25)
+    )
 
-    kirmizi_sayisi = int(np.count_nonzero(is_red))
-    mavi_sayisi = int(np.count_nonzero(is_blue))
+    kirmizi_sayisi = int(np.count_nonzero(is_red_pixel))
+    mavi_sayisi = int(np.count_nonzero(is_blue_pixel))
 
-    max_color = max(kirmizi_sayisi, mavi_sayisi)
-    oran = max_color / float(max(total_px, 1))
+    r_ratio = kirmizi_sayisi / float(total_px)
+    b_ratio = mavi_sayisi / float(total_px)
+    max_ratio = max(r_ratio, b_ratio)
 
-    # 细长无人机/导弹目标自适应门限 (只要有 4 颗清晰色彩像素即足以判决)
-    min_px = 3 if total_px < 300 else 4
+    min_px_thresh = 3 if total_px < 250 else 4
+    min_ratio_thresh = 0.020
 
-    if max_color < min_px:
-        return NEUTRAL, kirmizi_sayisi, mavi_sayisi, oran
+    # 裁决决策：比例达到 2.0% 且数量达到 4 颗
+    if mavi_sayisi >= min_px_thresh and b_ratio >= min_ratio_thresh:
+        if mavi_sayisi > kirmizi_sayisi * 1.20 or kirmizi_sayisi < min_px_thresh:
+            return FRIENDLY, kirmizi_sayisi, mavi_sayisi, b_ratio
 
-    # 主导色彩裁决：友军保护绝对优先 (发现蓝色立即保护)
-    if mavi_sayisi >= min_px and (mavi_sayisi >= kirmizi_sayisi or kirmizi_sayisi < min_px):
-        return FRIENDLY, kirmizi_sayisi, mavi_sayisi, oran
-    elif kirmizi_sayisi >= min_px and (kirmizi_sayisi > mavi_sayisi * 1.2 or mavi_sayisi < min_px):
-        return ENEMY, kirmizi_sayisi, mavi_sayisi, oran
+    if kirmizi_sayisi >= min_px_thresh and r_ratio >= min_ratio_thresh:
+        if kirmizi_sayisi > mavi_sayisi * 1.20 or mavi_sayisi < min_px_thresh:
+            return ENEMY, kirmizi_sayisi, mavi_sayisi, r_ratio
 
-    return NEUTRAL, kirmizi_sayisi, mavi_sayisi, oran
+    return NEUTRAL, kirmizi_sayisi, mavi_sayisi, max_ratio
 
 
 class TrackedIFFObject:
-    """单个跟踪目标的时序状态载体"""
+    """单个跟踪目标的时序状态载体 (平滑防抖与敏捷判定)"""
     def __init__(self, track_id: int, box, class_name: str, confidence: float, initial_side: str):
         self.track_id = track_id
         self.box = [float(v) for v in box]
         self.class_name = class_name
         self.confidence = float(confidence)
-        self.history = deque(maxlen=5)
+        self.history = deque(maxlen=6)
         self.history.append(initial_side)
         self.current_side = initial_side
         self.missing_frames = 0
@@ -147,18 +158,18 @@ class TrackedIFFObject:
         self.missing_frames = 0
         self.history.append(raw_side)
 
-        # 稳态表决：友军保护优先 (一旦出现蓝色证据，立即锁定为友军保护模式)
+        # 敏捷时序表决 (Agile Temporal Hysteresis)
         f_votes = self.history.count(FRIENDLY)
         e_votes = self.history.count(ENEMY)
         
-        if f_votes >= 1 and f_votes >= e_votes:
+        if f_votes >= 1 and f_votes > e_votes:
             self.current_side = FRIENDLY
-        elif e_votes >= 2 and e_votes > f_votes:
+        elif e_votes >= 1 and e_votes > f_votes:
             self.current_side = ENEMY
-        elif f_votes > 0 and e_votes == 0:
-            self.current_side = FRIENDLY
-        elif e_votes > 0 and f_votes == 0:
-            self.current_side = ENEMY
+        elif raw_side != NEUTRAL:
+            self.current_side = raw_side
+
+
 
 
 class IFFKarari:

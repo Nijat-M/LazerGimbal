@@ -1,0 +1,9 @@
+{
+    "offset_x": 103,
+    "offset_y": 200,
+    "parallax_x_at_1m": 0.0,
+    "parallax_y_at_1m": 0.0,
+    "boresight_mode": "crop",
+    "range_m": null,
+    "description": "Laser-camera boresight calibration configuration"
+}

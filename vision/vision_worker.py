@@ -71,6 +71,8 @@ class VisionWorker(QThread):
         self._active_balloon_pos: tuple[int, int] | None = None
         self._active_balloon_missing_count: int = 0
         self._eliminated_balloon_count: int = 0
+        self._balloon_tracks: dict = {}
+        self._next_balloon_id: int = 1
         self.cap = None
         self.camera_id: int = VisionConfig.CAMERA_ID
         self.frame_width: int = VisionConfig.FRAME_WIDTH
@@ -645,6 +647,8 @@ class VisionWorker(QThread):
                     self._process_yolo_tracking(frame)
                 elif self.mode == "BALLOON_HUNT":
                     self._process_balloon_hunt(frame)
+                elif self.mode in ("STAGE3_BALLOONS", "STAGE3_BALLOON_DEFENSE"):
+                    self._process_stage3_balloon_defense(frame)
                 
                 # 统一发送实时状态统计
                 self.stats_signal.emit(self.current_fps, self.frame_width, self.frame_height)
@@ -761,11 +765,15 @@ class VisionWorker(QThread):
             solidity = area / float(max(hull_area, 1.0))
             
             # (3) 边界框宽高比: 气球呈椭球或球形，长宽比在 0.45 ~ 2.2 之间，排除条状横木/线管
+            (cx_b, cy_b), radius = cv2.minEnclosingCircle(c)
             x_b, y_b, w_b, h_b = cv2.boundingRect(c)
             aspect_ratio = float(w_b) / float(max(h_b, 1))
             
+            # 排除天花板顶角边缘的消防警报灯/指示灯
+            if cy_b < _h * 0.25 or y_b < _h * 0.15:
+                continue
+
             # (4) 最小外接圆覆盖率 (Extent)
-            (cx_b, cy_b), radius = cv2.minEnclosingCircle(c)
             circle_extent = area / float(max(math.pi * (radius ** 2), 1.0))
 
             # (5) 椭圆拟合几何校验
@@ -909,6 +917,295 @@ class VisionWorker(QThread):
 
         # 发送调试蒙版
         self._send_mask(mask_clean)
+
+    def _process_stage3_balloon_defense(self, frame: cv2.Mat) -> None:
+        """
+        Stage 3 Balloon Defense Mode (Stage 3 竞赛三气球防空模式):
+        - Red Balloon (Center) -> ENEMY (HOSTILE) -> Slew & Laser Engagement
+        - Blue / Cyan Balloons (Left & Right) -> FRIENDLY (PROTECTED) -> Strictly Protected (Zero Friendly Fire)
+        - 100% English HUD & Stage 3 Timeline signals
+        """
+        _h, _w = frame.shape[:2]
+        VisionConfig.CENTER_X = _w // 2
+        VisionConfig.CENTER_Y = _h // 2
+        aim_x, aim_y = VisionConfig.aim_point(VisionConfig.AKTIF_MESAFE_M)
+
+        # 1. 色彩分割 (HSV + BGR 通道差分，适应走廊阴影与漫反射)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        b = frame[:, :, 0].astype(np.float32)
+        g = frame[:, :, 1].astype(np.float32)
+        r = frame[:, :, 2].astype(np.float32)
+
+        # 红色气球判据 (ENEMY HOSTILE)
+        mask_red = (
+            (cv2.inRange(hsv, (0, 60, 40), (18, 255, 255)) | cv2.inRange(hsv, (165, 60, 40), (180, 255, 255))) &
+            (((r > g + 20) & (r > b + 32) & (r >= 95)).astype(np.uint8) * 255)
+        )
+
+        # 蓝色/青色气球判据 (FRIENDLY PROTECTED - 增强阴影区提取)
+        mask_blue = (
+            cv2.inRange(hsv, (30, 18, 25), (150, 255, 255)) &
+            (((g > r + 1) | (b > r + 2)) & ((g + b) >= 2 * r + 2) & (g >= 50)).astype(np.uint8) * 255
+        )
+
+        # 2. 几何形态学与椭球体提取
+        def _extract_raw_candidates(mask, side_type):
+            k_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            k_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+            m_clean = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k_open)
+            m_clean = cv2.morphologyEx(m_clean, cv2.MORPH_CLOSE, k_close)
+            cnts, _ = cv2.findContours(m_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            res = []
+            for c in cnts:
+                area = cv2.contourArea(c)
+                if area < 150:
+                    continue
+                peri = cv2.arcLength(c, True)
+                if peri <= 0:
+                    continue
+                circ = 4.0 * math.pi * area / (peri * peri)
+                hull = cv2.convexHull(c)
+                solid = area / float(max(cv2.contourArea(hull), 1.0))
+                (cx, cy), radius = cv2.minEnclosingCircle(c)
+                xb, yb, wb, hb = cv2.boundingRect(c)
+                ar = float(wb) / float(max(hb, 1))
+
+                # 排除天花板及墙体高处纸飞机裁片 (地面气球在视野中下部 cy >= 0.40 * _h)
+                if cy < _h * 0.40 or yb < _h * 0.30:
+                    continue
+
+                if circ >= 0.35 and solid >= 0.70 and 0.40 <= ar <= 2.40 and radius >= 8.0:
+                    dist_m = max(1.0, (0.22 * 1200.0) / float(max(wb, hb, 1)))
+                    res.append({
+                        "contour": c,
+                        "center": (int(round(cx)), int(round(cy))),
+                        "radius": radius,
+                        "box": [float(xb), float(yb), float(xb + wb), float(yb + hb)],
+                        "area": area,
+                        "taraf": side_type,
+                        "mesafe_m": dist_m,
+                    })
+            return res
+
+        raw_reds = _extract_raw_candidates(mask_red, "ENEMY")
+        raw_blues = _extract_raw_candidates(mask_blue, "FRIENDLY")
+        
+        # 候选框空间去重 (Candidate Spatial De-duplication)
+        def _dedup_candidates(cands):
+            cands_sorted = sorted(cands, key=lambda item: item["area"], reverse=True)
+            kept = []
+            for c in cands_sorted:
+                if not any(math.hypot(c["center"][0] - k["center"][0], c["center"][1] - k["center"][1]) < 45.0 for k in kept):
+                    kept.append(c)
+            return kept
+
+        raw_reds = _dedup_candidates(raw_reds)
+        raw_blues = _dedup_candidates(raw_blues)
+        raw_all = raw_reds + raw_blues
+
+        # 3. 空间多目标时序追踪与零闪烁保持 (Multi-Object Spatial Tracker & Holdover)
+        if not hasattr(self, "_balloon_tracks"):
+            self._balloon_tracks = {}
+            self._next_balloon_id = 1
+
+        unmatched = list(range(len(raw_all)))
+        matched_ids = set()
+
+        for tid, t in list(self._balloon_tracks.items()):
+            best_d = 75.0
+            best_idx = -1
+            for idx in unmatched:
+                cand = raw_all[idx]
+                if cand["taraf"] == t["taraf"]:
+                    d = math.hypot(t["center"][0] - cand["center"][0], t["center"][1] - cand["center"][1])
+                    if d < best_d:
+                        best_d = d
+                        best_idx = idx
+            if best_idx >= 0:
+                cand = raw_all[best_idx]
+                # EMA 平滑平抑噪声抖动
+                for i in range(4):
+                    t["box"][i] = 0.70 * cand["box"][i] + 0.30 * t["box"][i]
+                t["center"] = (int((t["box"][0] + t["box"][2]) / 2.0), int((t["box"][1] + t["box"][3]) / 2.0))
+                t["radius"] = float(cand["radius"])
+                t["area"] = float(cand["area"])
+                t["contour"] = cand["contour"]
+                t["mesafe_m"] = cand["mesafe_m"]
+                t["missing"] = 0
+                matched_ids.add(tid)
+                unmatched.remove(best_idx)
+            else:
+                t["missing"] += 1
+                if t["missing"] > 4: # 超过 4 帧丢失才移除
+                    del self._balloon_tracks[tid]
+
+        for idx in unmatched:
+            cand = raw_all[idx]
+            # 检查是否与已有活跃轨迹重叠，杜绝在同一气球上派生双重轨迹
+            if any(math.hypot(cand["center"][0] - ex["center"][0], cand["center"][1] - ex["center"][1]) < 55.0 for ex in self._balloon_tracks.values() if ex["taraf"] == cand["taraf"]):
+                continue
+            nid = self._next_balloon_id
+            self._next_balloon_id += 1
+            self._balloon_tracks[nid] = {
+                "id": nid,
+                "box": list(cand["box"]),
+                "center": cand["center"],
+                "radius": cand["radius"],
+                "area": cand["area"],
+                "contour": cand.get("contour"),
+                "taraf": cand["taraf"],
+                "mesafe_m": cand["mesafe_m"],
+                "missing": 0,
+            }
+
+        # 4. 轨迹层空间非极大值抑制 (Track-Level Spatial NMS)，绝对防止同一气球出现两个重叠框
+        track_list = sorted(self._balloon_tracks.values(), key=lambda t: (t["missing"] == 0, t["area"]), reverse=True)
+        kept_tracks = {}
+        for t in track_list:
+            overlap = False
+            for k_id, k_t in kept_tracks.items():
+                if t["taraf"] == k_t["taraf"]:
+                    d = math.hypot(t["center"][0] - k_t["center"][0], t["center"][1] - k_t["center"][1])
+                    if d < 55.0:
+                        overlap = True
+                        break
+            if not overlap:
+                kept_tracks[t["id"]] = t
+        self._balloon_tracks = kept_tracks
+
+        # 5. 生成规范且左右固定的检测列表 (按左右 X 坐标稳定排序)
+        active_tracks = list(self._balloon_tracks.values())
+        red_tracks = [t for t in active_tracks if t["taraf"] == "ENEMY"]
+        blue_tracks = sorted([t for t in active_tracks if t["taraf"] == "FRIENDLY"], key=lambda t: t["center"][0])
+
+        all_detections = []
+        for r_obj in red_tracks:
+            rx1, ry1, rx2, ry2 = [int(v) for v in r_obj["box"]]
+            cx, cy = r_obj["center"]
+            all_detections.append({
+                "contour": r_obj.get("contour"),
+                "center": (cx, cy),
+                "position": (cx, cy),
+                "radius": r_obj["radius"],
+                "box": (rx1, ry1, rx2, ry2),
+                "area": r_obj["area"],
+                "taraf": "ENEMY",
+                "renk": "RED",
+                "raw_name": "Red Balloon",
+                "sinif": "RED BALLOON",
+                "gorunen": "Red Balloon (Hostile)",
+                "guven": 0.96 if r_obj["missing"] == 0 else 0.85,
+                "mesafe_m": r_obj["mesafe_m"],
+            })
+
+        for b_idx, b_obj in enumerate(blue_tracks, 1):
+            bx1, by1, bx2, by2 = [int(v) for v in b_obj["box"]]
+            cx, cy = b_obj["center"]
+            pos_label = "Left" if b_idx == 1 and len(blue_tracks) >= 2 else ("Right" if b_idx == 2 else f"#{b_idx}")
+            all_detections.append({
+                "contour": b_obj.get("contour"),
+                "center": (cx, cy),
+                "position": (cx, cy),
+                "radius": b_obj["radius"],
+                "box": (bx1, by1, bx2, by2),
+                "area": b_obj["area"],
+                "taraf": "FRIENDLY",
+                "renk": "BLUE",
+                "raw_name": f"Blue Balloon ({pos_label})",
+                "sinif": "BLUE BALLOON",
+                "gorunen": f"Blue Balloon ({pos_label})",
+                "guven": 0.94 if b_obj["missing"] == 0 else 0.82,
+                "mesafe_m": b_obj["mesafe_m"],
+            })
+
+        self.detections_signal.emit(all_detections)
+
+        # 5. 敌方红色气球锁定与交战
+        is_touching = False
+        target_red = None
+        if red_tracks:
+            target_red = max(red_tracks, key=lambda item: item["area"] - math.hypot(aim_x - item["center"][0], aim_y - item["center"][1]) * 0.2)
+            bx, by = target_red["center"]
+            rx1, ry1, rx2, ry2 = [int(v) for v in target_red["box"]]
+            radius = target_red["radius"]
+
+            if target_red.get("contour") is not None:
+                is_inside = cv2.pointPolygonTest(target_red["contour"], (float(aim_x), float(aim_y)), False) >= 0
+            else:
+                is_inside = (rx1 <= aim_x <= rx2 and ry1 <= aim_y <= ry2)
+            dist_to_center = math.hypot(aim_x - bx, aim_y - by)
+            is_touching = is_inside or (dist_to_center <= max(14.0, radius * 0.90))
+
+            # 发送云台伺服跟踪目标
+            self.target_pos_signal.emit(bx, by)
+
+            # 绘制红色敌军战术框 (Bold Red)
+            cv2.rectangle(frame, (rx1, ry1), (rx2, ry2), (30, 30, 255), 2)
+            cl = max(6, int(min(rx2 - rx1, ry2 - ry1) * 0.22))
+            cv2.line(frame, (rx1, ry1), (rx1 + cl, ry1), (0, 0, 255), 3)
+            cv2.line(frame, (rx1, ry1), (rx1, ry1 + cl), (0, 0, 255), 3)
+            cv2.line(frame, (rx2, ry1), (rx2 - cl, ry1), (0, 0, 255), 3)
+            cv2.line(frame, (rx2, ry1), (rx2, ry1 + cl), (0, 0, 255), 3)
+            cv2.line(frame, (rx1, ry2), (rx1 + cl, ry2), (0, 0, 255), 3)
+            cv2.line(frame, (rx1, ry2), (rx1, ry2 - cl), (0, 0, 255), 3)
+            cv2.line(frame, (rx2, ry2), (rx2 - cl, ry2), (0, 0, 255), 3)
+            cv2.line(frame, (rx2, ry2), (rx2, ry2 - cl), (0, 0, 255), 3)
+
+            # 中心红点与导引线
+            cv2.circle(frame, (bx, by), 5, (0, 0, 255), -1)
+            line_color = (0, 0, 255) if is_touching else (0, 200, 255)
+            cv2.arrowedLine(frame, (aim_x, aim_y), (bx, by), line_color, 2, tipLength=0.15)
+
+            # 战术文字标识 (100% English)
+            conf_val = 96 if target_red["missing"] == 0 else 85
+            tag_top = f"[HOSTILE LOCKED] Red Balloon ({conf_val}%)"
+            tag_sub = f"FIRE >> ENEMY (RED) | {target_red['mesafe_m']:.1f}m"
+
+            (tw, th), _ = cv2.getTextSize(tag_top, cv2.FONT_HERSHEY_SIMPLEX, 0.50, 1)
+            cv2.rectangle(frame, (rx1, max(0, ry1 - 32)), (rx1 + tw + 10, ry1), (0, 0, 0), -1)
+            cv2.putText(frame, tag_top, (rx1 + 4, ry1 - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 80, 255), 1, cv2.LINE_AA)
+            cv2.putText(frame, tag_sub, (rx1 + 4, ry1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 255), 1, cv2.LINE_AA)
+
+        # 6. 绘制蓝色友军保护标识 (Cyan Blue Box & PROTECTED Text)
+        for b_idx, b_obj in enumerate(blue_tracks, 1):
+            bx1, by1, bx2, by2 = [int(v) for v in b_obj["box"]]
+            bcx, bcy = b_obj["center"]
+            cv2.rectangle(frame, (bx1, by1), (bx2, by2), (255, 200, 0), 2)
+            cv2.circle(frame, (bcx, bcy), 4, (255, 200, 0), -1)
+
+            conf_val = 94 if b_obj["missing"] == 0 else 82
+            pos_label = "Left" if b_idx == 1 and len(blue_tracks) >= 2 else ("Right" if b_idx == 2 else f"#{b_idx}")
+            tag_blue = f"[FRIENDLY] Blue Balloon ({pos_label}) ({conf_val}%)"
+            sub_blue = "PROTECTED -- DO NOT FIRE"
+            (bw_t, bh_t), _ = cv2.getTextSize(tag_blue, cv2.FONT_HERSHEY_SIMPLEX, 0.50, 1)
+            cv2.rectangle(frame, (bx1, max(0, by1 - 32)), (bx1 + bw_t + 10, by1), (0, 0, 0), -1)
+            cv2.putText(frame, tag_blue, (bx1 + 4, by1 - 18), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 200, 0), 1, cv2.LINE_AA)
+            cv2.putText(frame, sub_blue, (bx1 + 4, by1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 255, 120), 1, cv2.LINE_AA)
+
+        # 7. 准星绘制 (触碰红色目标变红，否则保持明亮准星)
+        reticle_color = (0, 0, 255) if is_touching else (0, 255, 255)
+        cv2.line(frame, (aim_x - 22, aim_y), (aim_x + 22, aim_y), reticle_color, 2)
+        cv2.line(frame, (aim_x, aim_y - 22), (aim_x, aim_y + 22), reticle_color, 2)
+        cv2.circle(frame, (aim_x, aim_y), 6, reticle_color, 2)
+
+        # 8. 发送 IFF 状态信号
+        self.iff_signal.emit({
+            "enemy": len(red_tracks),
+            "friendly": len(blue_tracks),
+            "neutral": 0,
+            "locked": "Red Balloon" if target_red else None,
+            "fire": is_touching if target_red else False
+        })
+
+        # 9. 画面左上方战术态势表格 (On-Screen Tactical Table)
+        cv2.rectangle(frame, (10, 10), (330, 80), (15, 23, 42), -1)
+        cv2.rectangle(frame, (10, 10), (330, 80), (2, 132, 199), 1)
+        cv2.putText(frame, "STAGE 3 BALLOON IFF SUMMARY", (18, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (56, 189, 248), 1, cv2.LINE_AA)
+        cv2.putText(frame, f"RED (HOSTILE)   : {len(red_tracks)} TARGET [LOCKED]", (18, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 70, 255), 1, cv2.LINE_AA)
+        cv2.putText(frame, f"BLUE (FRIENDLY) : {len(blue_tracks)} PROTECTED [SAFE]", (18, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 200, 0), 1, cv2.LINE_AA)
+
+        # 发送调试蒙版
+        self._send_mask(mask_red | mask_blue)
 
 
     def _boresight_crop(self, frame):

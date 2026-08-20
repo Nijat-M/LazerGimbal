@@ -223,12 +223,21 @@ class VisionConfig:
     PIXELS_PER_DEGREE = 20  # 像素到角度转换系数（估算值）
     
     # ==========================
-    # 颜色阈值 - 蓝色物体
+    # 颜色阈值 - 蓝色物体 (基础 HSV 模式)
     # ==========================
     # 蓝色在 100-140 度
     # 提高V下限(30->60)和S下限(100->140)，避免黑色物体和阴影被误判为蓝色
     HSV_BLUE_LOWER = np.array([100, 140, 60])
     HSV_BLUE_UPPER = np.array([140, 255, 255])
+    
+    # ==========================
+    # 敌我识别 (IFF) 光照与多色彩空间自适应参数
+    # ==========================
+    # 走廊/复杂光照自适应参数
+    IFF_LIGHTING_MODE = "AUTO"             # "AUTO", "HALLWAY_WARM", "STANDARD"
+    IFF_MIN_FOREGROUND_RATIO = 0.05        # 目标前景区域中颜色有效像素最低占比 (5%)
+    IFF_DOMINANCE_RATIO = 1.25             # 主导色彩与竞争色彩的比值门限 (1.25x)
+    IFF_MIN_VALID_PIXELS = 6               # 最小有效色彩像素数
     
     # ==========================
     # 形态学参数
@@ -267,4 +276,5 @@ class VisionConfig:
     def get_class_display_name(cls, class_name: str) -> str:
         """Get friendly English display name for class"""
         return cls.CLASS_LABELS_EN.get(class_name, class_name)
+
 

@@ -24,6 +24,8 @@ SINIF_RENK = {
     "FUZE":           QColor(240, 90, 70),
     "MINI_IHA":       QColor(60, 170, 235),
     "IHA":            QColor(60, 170, 235),
+    "RED BALLOON":    QColor(255, 70, 70),
+    "BLUE BALLOON":   QColor(56, 189, 248),
 }
 
 

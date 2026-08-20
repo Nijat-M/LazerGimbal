@@ -87,6 +87,7 @@ class MainWindow(QMainWindow):
         self.controller = GimbalController(self.serial_thread)
         self.camera_request_generation = -1
         self.keyboard_control_enabled = True
+        self.current_mode: str = "IDLE"
 
         # [初始化]
         self.init_ui()
@@ -186,21 +187,17 @@ class MainWindow(QMainWindow):
         self.camera_panel = CameraPanel(default_id=cfg.CAMERA_ID)
         right_layout.addWidget(self.camera_panel)
 
-        # 3. 模式选择面板
-        self.mode_panel = ModePanel()
+        # 3. 模式选择面板 (内嵌完整 Stage 3 Workflow 面板)
+        self.stage3_director = Stage3MissionDirector(main_window=self)
+        self.mode_panel = ModePanel(director=self.stage3_director)
+        self.stage3_mission_panel = self.mode_panel.stage3_mission_panel
         right_layout.addWidget(self.mode_panel)
 
         # Yetenek 7: dost/dusman + ates izni paneli
-        # 能力7：敌我识别 + 开火授权面板（只在 YOLO Defense Tracking 下显示）
+        # 能力6/7：目标分类与敌我识别态势表
         self.detection_panel = DetectionPanel()
         self.detection_panel.setVisible(False)
         right_layout.addWidget(self.detection_panel)
-
-        # Stage 3 Autonomous Mission Panel (第三阶段自主防空竞赛加分流程)
-        self.stage3_director = Stage3MissionDirector(main_window=self)
-        self.stage3_mission_panel = Stage3MissionPanel(director=self.stage3_director)
-        self.stage3_mission_panel.setVisible(False)
-        right_layout.addWidget(self.stage3_mission_panel)
 
         # Lazer-Kamera boresight kalibrasyon paneli
         # 激光-相机光轴校准面板
@@ -320,6 +317,8 @@ class MainWindow(QMainWindow):
         self.mode_panel.yolo_model_changed.connect(self.vision_thread.set_yolo_model)
         self.mode_panel.yolo_class_changed.connect(self.vision_thread.set_yolo_target_class)
         self.mode_panel.yolo_conf_changed.connect(self.vision_thread.set_yolo_conf_threshold)
+        self.mode_panel.stage3_start_requested.connect(self.stage3_director.start_mission)
+        self.mode_panel.stage3_abort_requested.connect(lambda: self.stage3_director.abort_mission("User Aborted"))
         
         # PID 调参面板
         self.pid_tuner.pid_changed.connect(self.on_pid_changed)
@@ -451,11 +450,13 @@ class MainWindow(QMainWindow):
     
     def on_mode_changed(self, mode):
         """Switch modes while keeping automatic and manual motion exclusive."""
+        self.current_mode = mode
         logger.info(f"[GUI] Mode switched: {mode}")
 
-        self.detection_panel.setVisible(mode == "YOLO_TRACKING")
-        self.stage3_mission_panel.setVisible(mode == "YOLO_TRACKING")
-        if mode != "YOLO_TRACKING":
+        is_defense_mode = mode in ("YOLO_TRACKING", "STAGE3_BALLOONS", "STAGE3_BALLOON_DEFENSE")
+        self.detection_panel.setVisible(is_defense_mode)
+        self.stage3_mission_panel.setVisible(is_defense_mode)
+        if not is_defense_mode:
             self.detection_panel.clear_detections()
             if hasattr(self, "stage3_director") and self.stage3_director.is_running:
                 self.stage3_director.abort_mission("Mode Switched Away")
@@ -476,6 +477,9 @@ class MainWindow(QMainWindow):
         if mode == "BALLOON_HUNT":
             self.control_panel.set_control_enabled(True)
             self.status_label.setText("🎈 Orange Balloon Pop Mode: Auto-tracking & 100% Laser Active")
+        elif mode in ("STAGE3_BALLOONS", "STAGE3_BALLOON_DEFENSE"):
+            self.control_panel.set_control_enabled(True)
+            self.status_label.setText("🎈 Stage 3 Balloon Defense: 1 Red Hostile + 2 Blue Friendly (Ready)")
         else:
             self.controller.set_laser_firing(False)
             self.status_label.setText(

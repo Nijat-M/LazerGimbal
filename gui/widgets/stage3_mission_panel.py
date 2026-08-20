@@ -18,10 +18,15 @@ from core.stage3_mission_director import Stage3MissionDirector, Stage3MissionSta
 class Stage3MissionPanel(QGroupBox):
     """Stage 3 Autonomous Mission Control Panel"""
 
-    def __init__(self, director: Stage3MissionDirector, parent=None):
-        super().__init__("Stage 3 — Autonomous Mission (Stage 3 竞赛加分流程)", parent)
+    def __init__(self, director: Stage3MissionDirector = None, parent=None):
+        super().__init__("Stage 3 — Autonomous Mission (Competition Workflow)", parent)
         self.director = director
         self.init_ui()
+        if self.director is not None:
+            self.init_signals()
+
+    def set_director(self, director: Stage3MissionDirector):
+        self.director = director
         self.init_signals()
 
     def init_ui(self):
@@ -29,7 +34,7 @@ class Stage3MissionPanel(QGroupBox):
         layout.setSpacing(8)
         layout.setContentsMargins(8, 12, 8, 8)
 
-        # 1. 任务流程步骤进度条 (6 阶段 Stepper)
+        # 1. Mission timeline steps (6-Stage Stepper)
         self.lbl_steps_header = QLabel("MISSION TIMELINE:")
         self.lbl_steps_header.setStyleSheet("color: #94a3b8; font-size: 10px; font-weight: bold;")
         layout.addWidget(self.lbl_steps_header)
@@ -41,12 +46,12 @@ class Stage3MissionPanel(QGroupBox):
         steps_layout.setContentsMargins(0, 0, 0, 0)
 
         step_names = [
-            "1. 态势扫描 (1敌+2友)",
-            "2. 自主锁定并摧毁敌方",
-            "3. 停火并精确等待 10 秒",
-            "4. 触发急停 (E-STOP)",
-            "5. 急停后再等待 10 秒",
-            "6. 任务圆满完成并安全关机"
+            "1. Scan & Identify (1 Hostile + 2 Friendly)",
+            "2. Auto Lock & Engage Hostile Target",
+            "3. Cease Fire & Post-Fire Wait 10s",
+            "4. Trigger Emergency Stop (E-STOP)",
+            "5. Post-ESTOP Stabilization Wait 10s",
+            "6. Mission Complete & Safe Shutdown"
         ]
 
         for i, name in enumerate(step_names):
@@ -57,7 +62,7 @@ class Stage3MissionPanel(QGroupBox):
 
         layout.addWidget(steps_widget)
 
-        # 2. 核心状态与倒计时显示横幅
+        # 2. Core status & countdown banner
         self._base_message = "READY TO START STAGE 3 MISSION"
         self.lbl_mission_status = QLabel(self._base_message)
         self.lbl_mission_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -74,7 +79,7 @@ class Stage3MissionPanel(QGroupBox):
         """)
         layout.addWidget(self.lbl_mission_status)
 
-        # 3. 倒计时进度条
+        # 3. Countdown progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 1000)
         self.progress_bar.setValue(0)
@@ -92,7 +97,7 @@ class Stage3MissionPanel(QGroupBox):
         """)
         layout.addWidget(self.progress_bar)
 
-        # 4. 裁判铁证数据卡 (Referee Live Audit Card)
+        # 4. Referee live audit card
         self.lbl_audit = QLabel("🛡️ FRIENDLY: 2/2 PROTECTED  |  SHOTS ON FRIENDLY: 0")
         self.lbl_audit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_audit.setFixedHeight(28)
@@ -106,11 +111,11 @@ class Stage3MissionPanel(QGroupBox):
         """)
         layout.addWidget(self.lbl_audit)
 
-        # 5. 操作控制按钮行
+        # 5. Mission control buttons
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(6)
 
-        self.btn_start = QPushButton("▶ 启动第三阶段任务")
+        self.btn_start = QPushButton("▶ START STAGE 3 MISSION")
         self.btn_start.setFixedHeight(36)
         self.btn_start.setStyleSheet("""
             QPushButton {
@@ -130,7 +135,7 @@ class Stage3MissionPanel(QGroupBox):
         """)
         btn_layout.addWidget(self.btn_start, 2)
 
-        self.btn_abort = QPushButton("⏹ 中止")
+        self.btn_abort = QPushButton("⏹ ABORT")
         self.btn_abort.setFixedHeight(36)
         self.btn_abort.setEnabled(False)
         self.btn_abort.setStyleSheet("""
@@ -154,8 +159,8 @@ class Stage3MissionPanel(QGroupBox):
 
         layout.addLayout(btn_layout)
 
-        # 5.1 目标摧毁确认按钮（交战阶段高亮显示，点击立即确认推进）
-        self.btn_confirm_destroyed = QPushButton("💥 确认目标已摧毁 (Confirm Destroyed)")
+        # 5.1 Hostile Destroyed Confirmation Button
+        self.btn_confirm_destroyed = QPushButton("💥 CONFIRM HOSTILE DESTROYED")
         self.btn_confirm_destroyed.setFixedHeight(36)
         self.btn_confirm_destroyed.setVisible(False)
         self.btn_confirm_destroyed.setStyleSheet("""
@@ -173,8 +178,8 @@ class Stage3MissionPanel(QGroupBox):
         """)
         layout.addWidget(self.btn_confirm_destroyed)
 
-        # 6. 安全关机按钮 (完成阶段点亮)
-        self.btn_shutdown = QPushButton("🛑 安全关机 (Clean Shutdown)")
+        # 6. Clean shutdown button
+        self.btn_shutdown = QPushButton("🛑 SYSTEM SHUTDOWN (SAFE EXIT)")
         self.btn_shutdown.setFixedHeight(34)
         self.btn_shutdown.setVisible(False)
         self.btn_shutdown.setStyleSheet("""
@@ -196,6 +201,9 @@ class Stage3MissionPanel(QGroupBox):
         self.btn_abort.clicked.connect(self._on_abort_clicked)
         self.btn_confirm_destroyed.clicked.connect(self._on_confirm_destroyed_clicked)
         self.btn_shutdown.clicked.connect(self._on_shutdown_clicked)
+
+        if not self.director:
+            return
 
         self.director.state_changed.connect(self._on_state_changed)
         self.director.countdown_updated.connect(self._on_countdown_updated)
@@ -269,7 +277,7 @@ class Stage3MissionPanel(QGroupBox):
         if total > 0:
             pct = int((1.0 - (remaining / total)) * 1000)
             self.progress_bar.setValue(pct)
-            self.lbl_mission_status.setText(f"{self._base_message}\n⏳ 倒计时: {remaining:.1f} 秒 (剩余 {int(remaining/total*100)}%)")
+            self.lbl_mission_status.setText(f"{self._base_message}\n⏳ COUNTDOWN: {remaining:.1f}s ({int(remaining/total*100)}% REMAINING)")
 
     def _on_step_progress(self, current_step: int, step_name: str):
         for i, lbl in enumerate(self.step_labels):

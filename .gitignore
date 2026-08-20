@@ -56,6 +56,13 @@ gimbal_config.json
 htmlcov/
 *.tmp
 *.bak
+scratch/
+recordings/
+runs/
+chinese_lines.txt
+translate.py
+yetenek6/out/
+yetenek6/dataset/
 
 # ==========================================
 # IDE & System Files

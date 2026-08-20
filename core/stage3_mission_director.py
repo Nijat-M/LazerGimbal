@@ -87,58 +87,78 @@ class Stage3MissionDirector(QObject):
         self.engaging_start_time = 0.0
         self.hostile_disappeared_since = 0.0
 
-        # 1. 确保系统处于自动追踪模式与激光保险使能，但初始绝对不发射激光
+        # 1. Ensure tracking mode & laser armed, but laser is safe initially
         if self.main_window:
             try:
-                if hasattr(self.main_window.mode_panel, "mode_group"):
-                    btn = self.main_window.mode_panel.mode_group.button(2)
-                    if btn:
-                        btn.setChecked(True)
-                self.main_window.on_mode_changed("YOLO_TRACKING")
+                curr_mode = getattr(self.main_window, "current_mode", "")
+                if not curr_mode and hasattr(self.main_window, "vision_thread"):
+                    curr_mode = getattr(self.main_window.vision_thread, "mode", "")
+
+                # If the user is in STAGE3_BALLOONS, STAY in STAGE3_BALLOONS!
+                if curr_mode in ("STAGE3_BALLOONS", "STAGE3_BALLOON_DEFENSE"):
+                    if hasattr(self.main_window.mode_panel, "mode_group"):
+                        btn = self.main_window.mode_panel.mode_group.button(6)
+                        if btn:
+                            btn.setChecked(True)
+                    self.main_window.on_mode_changed("STAGE3_BALLOONS")
+                elif curr_mode == "YOLO_TRACKING":
+                    if hasattr(self.main_window.mode_panel, "mode_group"):
+                        btn = self.main_window.mode_panel.mode_group.button(2)
+                        if btn:
+                            btn.setChecked(True)
+                    self.main_window.on_mode_changed("YOLO_TRACKING")
+                else:
+                    # Default: switch to Stage 3 Balloon Defense mode
+                    if hasattr(self.main_window.mode_panel, "mode_group"):
+                        btn = self.main_window.mode_panel.mode_group.button(6)
+                        if btn:
+                            btn.setChecked(True)
+                    self.main_window.on_mode_changed("STAGE3_BALLOONS")
+
                 self.main_window.control_panel.set_control_enabled(True)
                 self.main_window.control_panel.btn_arm.setChecked(True)
                 self.main_window.controller.set_laser_armed(True)
-                self.main_window.controller.set_laser_firing(False) # 初始阶段确保激光停火
+                self.main_window.controller.set_laser_firing(False)
             except Exception as e:
-                logger.error(f"[MISSION ERROR] 初始化任务状态异常: {e}")
+                logger.error(f"[MISSION ERROR] Mission initialization error: {e}")
 
-        self._enter_state(Stage3MissionState.ACQUIRING, "Step 1/6: Scanning & Slewing Reticle to Hostile (跟到目标再开火)...")
+        self._enter_state(Stage3MissionState.ACQUIRING, "Step 1/6: Scanning & Slewing Reticle to Hostile (Wait for Lock)...")
         self.step_progress.emit(1, "Acquiring & Slewing to Target")
         return True
 
     def abort_mission(self, reason: str = "User Aborted") -> None:
-        """中止任务"""
+        """Abort Mission"""
         self.timer.stop()
         if self.main_window:
             self.main_window.controller.set_laser_firing(False)
         self._enter_state(Stage3MissionState.ABORTED, f"Mission Aborted: {reason}")
-        logger.warning(f"[MISSION] ⏹ 任务中止: {reason}")
+        logger.warning(f"[MISSION] ⏹ Mission Aborted: {reason}")
 
     def confirm_destruction(self) -> bool:
         """
-        确认目标已摧毁（由操作员/裁判点击或视觉自动识别靶标消失后调用）
+        Confirm hostile destroyed (called via operator button or vision disappear detection)
         """
         if self.state != Stage3MissionState.ENGAGING:
-            logger.warning("[MISSION] 目标未处于交战状态，无法确认摧毁")
+            logger.warning("[MISSION] Target not in ENGAGING state, cannot confirm destruction")
             return False
 
-        logger.info("[MISSION] 💥 确认敌方目标已摧毁 (Hostile Destruction Confirmed)!")
+        logger.info("[MISSION] 💥 Hostile Target Destruction Confirmed!")
         self.hostile_destroyed = True
         
-        # 立即切断激光
+        # Cut off laser immediately
         if self.main_window:
             try:
                 self.main_window.controller.set_laser_firing(False)
             except Exception:
                 pass
 
-        # 推进至第 3 阶段：等待 10 秒
+        # Advance to step 3: 10s post-fire wait
         self._enter_state(Stage3MissionState.WAIT_POST_FIRE, "Step 3/6: Hostile Destroyed! Cease Fire >> Waiting 10s...")
         self.step_progress.emit(3, "Post-Fire Wait 10s")
         return True
 
     def on_detections_update(self, dets: list) -> None:
-        """从视觉检测流水线接收最新态势"""
+        """Receive latest detections from vision thread"""
         if not self.is_running:
             return
 
@@ -150,8 +170,7 @@ class Stage3MissionDirector(QObject):
         self.friendly_count = blue_c
         self.friendly_audit_signal.emit(self.friendly_count, self.friendly_fired_count)
 
-        # 阶段 1: 扫描与伺服逼近阶段 (ACQUIRING)
-        # 核心逻辑：云台自主跟踪敌方，必须等待准星真正接触/进入敌方目标框内后，才准许开火！
+        # Step 1: Acquiring and slewing to target
         if self.state == Stage3MissionState.ACQUIRING:
             if red_dets:
                 from config.vision_config import VisionConfig
@@ -164,7 +183,7 @@ class Stage3MissionDirector(QObject):
                 bw = max(x2 - x1, 1)
                 bh = max(y2 - y1, 1)
                 
-                # 准星是否已到达目标框内或距离质心极近 (已跟到位)
+                # Check if reticle is on target
                 is_on_target = (x1 <= aim_x <= x2 and y1 <= aim_y <= y2) or (dist <= max(24.0, min(bw, bh) * 0.55))
                 
                 if is_on_target:
@@ -172,13 +191,12 @@ class Stage3MissionDirector(QObject):
                     self.hostile_disappeared_since = 0.0
                     self._enter_state(
                         Stage3MissionState.ENGAGING, 
-                        "Step 2/6: Crosshair On Target >> Continuous Laser Tracking & Engaging (不停跟踪照射)..."
+                        "Step 2/6: Crosshair On Target >> Continuous Laser Tracking & Engaging..."
                     )
                     self.step_progress.emit(2, "Continuous Laser Engagement")
                     if self.main_window:
                         self.main_window.controller.set_laser_firing(True)
                 else:
-                    # 正在伺服跟踪飞向目标，严禁提前开火
                     if self.main_window and self.main_window.controller.laser_firing:
                         self.main_window.controller.set_laser_firing(False)
                     self.step_progress.emit(1, f"Slewing to Target (Dist: {dist:.0f}px)")
@@ -186,21 +204,18 @@ class Stage3MissionDirector(QObject):
                 if self.main_window and self.main_window.controller.laser_firing:
                     self.main_window.controller.set_laser_firing(False)
 
-        # 阶段 2: 持续跟踪照射打击阶段 (ENGAGING)
-        # 保持连续高能激光发射 (不是点射，而是不停的跟踪的射)，直至目标被摧毁
+        # Step 2: Continuous laser engagement
         elif self.state == Stage3MissionState.ENGAGING:
-            # 持续确保激光发射保持开启
             if self.main_window and not self.main_window.controller.laser_firing:
                 self.main_window.controller.set_laser_firing(True)
 
             now = time.time()
-            # 目标摧毁判定：持续开火照射至少 1.2 秒后，若敌方目标从画面消失持续 >= 0.8 秒，自动确认摧毁
             if (now - self.engaging_start_time) >= 1.2:
                 if len(red_dets) == 0:
                     if self.hostile_disappeared_since == 0.0:
                         self.hostile_disappeared_since = now
                     elif (now - self.hostile_disappeared_since) >= 0.8:
-                        logger.info("[MISSION] 🎯 视觉感知：红色敌方已完全脱离/被消灭，自动判定摧毁！")
+                        logger.info("[MISSION] 🎯 Visual feedback: Hostile eliminated, confirming destruction!")
                         self.confirm_destruction()
                 else:
                     self.hostile_disappeared_since = 0.0
@@ -210,7 +225,6 @@ class Stage3MissionDirector(QObject):
         self.phase_start_time = time.time()
         
         if new_state == Stage3MissionState.ENGAGING:
-            # 交战阶段不再使用固定时间倒计时自动跳过，必须等待摧毁确认！
             self.phase_target_duration = 0.0
             self.timer.stop()
         elif new_state == Stage3MissionState.WAIT_POST_FIRE:
@@ -226,7 +240,7 @@ class Stage3MissionDirector(QObject):
         logger.info(f"[MISSION] State -> {new_state}: {message}")
 
     def _on_tick(self) -> None:
-        """高精度倒计时调度"""
+        """High-precision timer tick"""
         if self.phase_target_duration <= 0.0:
             return
             
@@ -238,22 +252,22 @@ class Stage3MissionDirector(QObject):
             self._on_phase_finished()
 
     def _on_phase_finished(self) -> None:
-        """当前阶段完成，自动推进下一步"""
+        """Phase finished, advance to next stage"""
         self.timer.stop()
 
         if self.state == Stage3MissionState.WAIT_POST_FIRE:
-            # 等待 10 秒结束 -> 阶段 4: 按急停
+            # 10s wait ended -> Step 4: E-STOP
             self._enter_state(Stage3MissionState.EMERGENCY_STOP, "Step 4/6: 10s Elapsed >> Triggering Emergency Stop (E-STOP)...")
             self.step_progress.emit(4, "Emergency Stop")
             self.request_emergency_stop.emit()
             if self.main_window:
                 self.main_window.on_emergency_stop()
             
-            # 立即进入阶段 5: 急停后再等 10 秒
+            # Step 5: Wait 10s post-ESTOP
             QTimer.singleShot(400, lambda: self._start_post_estop_wait())
 
         elif self.state == Stage3MissionState.WAIT_POST_ESTOP:
-            # 再等 10 秒结束 -> 阶段 6: 关机准备与裁判报告
+            # 10s post-ESTOP wait ended -> Step 6: Mission complete
             self._enter_state(Stage3MissionState.COMPLETED, "Step 6/6: Mission Completed Successfully! Ready for Safe Shutdown.")
             self.step_progress.emit(6, "Mission Complete / Shutdown")
 
@@ -262,7 +276,7 @@ class Stage3MissionDirector(QObject):
         self.step_progress.emit(5, "Post-ESTOP Wait 10s")
 
     def execute_shutdown(self) -> None:
-        """安全关机退出程序"""
-        logger.info("[MISSION] 🛑 执行安全关机退出 (Executing Clean System Shutdown)...")
+        """Safe system shutdown"""
+        logger.info("[MISSION] 🛑 Executing Clean System Shutdown...")
         if self.main_window:
             self.main_window.close()

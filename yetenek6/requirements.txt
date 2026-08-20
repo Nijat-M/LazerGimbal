@@ -1,0 +1,10 @@
+# ADIM 1-2 / 步骤 1-2 (render + dataset)
+trimesh>=4.0
+lxml
+networkx
+numpy
+pillow
+opencv-python
+# ADIM 3-5 / 步骤 3-5 (train + inference + UI)
+ultralytics>=8.1
+PyQt5
