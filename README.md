@@ -1,4 +1,4 @@
-# 🎯 LazerGimbal SADIR 1798-K
+# 🎯 SADIR 1798-K
 
 <div align="center">
 

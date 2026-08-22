@@ -71,7 +71,7 @@ class MainWindow(QMainWindow):
     """
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LazerGimbal SADIR 1798-K Ground Station")
+        self.setWindowTitle("SADIR 1798-K Ground Station")
         self.resize(1260, 820)
         self.setMinimumSize(960, 640)
         self.is_camera_fullscreen = False
