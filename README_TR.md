@@ -1,142 +1,232 @@
-# Laser Gimbal Pro
+# 🎯 LazerGimbal Pro
 
-<div align="left">
-  <img src="https://img.shields.io/badge/Language-Python%20%7C%20C-blue">
-  <img src="https://img.shields.io/badge/GUI-PyQt6-green">
-  <img src="https://img.shields.io/badge/Vision-OpenCV%20%7C%20YOLO-orange">
-  <img src="https://img.shields.io/badge/Hardware-STM32F401-lightgrey">
-</div>
-
-<br>
-
-<div align="right">
-  🇬🇧 <a href="README.md">English</a> | 🇹🇷 <a href="README_TR.md">Türkçe</a>
-</div>
-
-Masaüstü bilgisayarlı görü (computer vision) ile gerçek zamanlı mikrodenetleyici donanım yürütmesini harmanlayan 2 eksenli (2-axis) lazer gimbal takip sistemi.
-
-## Genel Bakış (Overview)
-Bu proje, bilgisayarlı görü ve gerçek zamanlı bir mikrodenetleyicinin birleşimi ile çalışan deneysel bir 2 eksenli lazer gimbal takip sistemidir. Sistem, kamera anlık görüntülerini işlemek, hedefleri algılamak (HSV renk takibi veya YOLO tabanlı derin öğrenme kullanarak) ve konum hatalarını hesaplamak için PyQt6/Python tabanlı bir masaüstü uygulaması kullanır. Hesaplanarak elde edilen bu hata koordinatları, daha sonra yüksek hızlı bir seri iletişim (115200 baud) üzerinden STM32F401 mikrodenetleyicisine iletilir.
-
-Donanım tarafında ise STM32, kamerayı etkili bir şekilde hedefin merkezinde tutabilmek için **10kHz donanımsal DDA (Digital Differential Analyzer) mikro-adım darbe üreteci** ve **50Hz Artımlı PID (Incremental PID) algoritması** çalıştırarak iki adet **Makerbase MKS SERVO42C kapalı çevrim step motoru (`CR_vFOC`)** sıfır adım kaybı ve yüksek tutma torkuyla kusursuzca sürer. Proje, gerçek zamanlı izleme, PID parametre ayarı, çift modlu manuel kontrol (tıkla-adım-at ve basılı-tut-döndür) ve bağımsız klavye kontrolü sunan modern bir PyQt6 arayüzüne sahiptir.
-
-*Not: Bu sistem Teknofest yarışmaları ve hassas optik gimbal sistemleri için geliştirilmiş ileri düzey bir prototip niteliğindedir.*
-
-## Demo Videoları
-- [V0.1.0 Lazer Takip Demosu](https://www.youtube.com/shorts/czz0KMfvBXw) - Gerçek zamanlı lazer takip tanıtımı
-- [V0.1.5 Lazer Takip ve PID Demosu](https://www.youtube.com/watch?v=KGi6N0OxIrQ) - Geliştirilmiş PID tepkisi ile gerçek zamanlı takip
-- [V0.1.6 Manuel Test Modu](https://www.youtube.com/shorts/dynt_BvkDTA) -  Manuel kontrol paneli ve kalibrasyon
-
-## Değişiklik Günlüğü (Changelog)
-Güncellemelerin ve düzeltmelerin detaylı geçmişi için lütfen [CHANGELOG_TR.md](CHANGELOG_TR.md) dosyasına göz atın.
-
-## Temel Özellikler (Core Features)
-
-### 👁️ Bilgisayarlı Görü ve Kontrol Arayüzü (PC / Python)
-- **Arducam AR0234 Global Shutter Kamera Desteği**: Yüksek hızlı endüstriyel global shutter sensörleri (Onsemi AR0234CS) için tam uyarlama; agresif gimbal hareketlerinde dahi sıfır hareket bulanıklığı ve jello/rolling-shutter bozulmasız kusursuz takip.
-- **Piramit Çok Ölçekli Algılama Hızlandırması**: Tek geçişli HSV segmentasyonu ve piramit alt örnekleme ile 1080p işlem gecikmesi **~3.2ms** seviyesine indirilerek sıfır kare kaybıyla stabil **60 FPS** gerçek zamanlı takip sağlandı.
-- **Anlık Görüntü Yönü Sıcak Değişimi**: Tavana/ters montaj (180° ters çevirme) ve yatay ayna modları doğrudan arayüzden gecikmesiz olarak uygulanabilir.
-- **Ultralytics YOLO26 NMS-Free Derin Öğrenme**: `yolo26n.pt` ve NVIDIA CUDA 12.6 GPU hızlandırması ile çalışan yerel uçtan uca nesne algılama motoru; NMS işlem gecikmeleri ve hedef kutusu titremeleri tamamen ortadan kaldırıldı.
-- **Asenkron Ayrıştırılmış Algılama İşlem Hattı**: 60 FPS video yakalama ve UI çizim akışını GPU sinir ağı çıkarımından ayıran çift tamponlu mimari sayesinde mikro-takılmalar (micro-stuttering) tamamen engellendi.
-- **Çift Takip Modu (Dual Tracking)**: Hafif ve yüksek performanslı HSV renk takibi ile Derin Öğrenme tabanlı nesne algılama (Ultralytics YOLO26 `yolo26n.pt`) algoritmaları arasında sorunsuzca geçiş imkanı.
-- **Kesintisiz Hedef Kilidi**: Çerçevedeki birden fazla algılanan hedef karşısında stabiliteyi koruyabilmek için, merkeze olan Öklid (Euclidean) uzaklığı eşik algoritması temel alınarak veri ilişkilendirmesi.
-- **Çok İş Parçacıklı İşleme (Multithreading)**: Arayüz güncellemeleri (`QTimer`), kamera kare işleme (`vision_worker`) ve seri haberleşme (`serial_thread`) için atanmış asenkron iş parçacıkları kullanılarak UI donmaları tamamen engellenmiştir.
-- **Gelişmiş Manuel ve Klavye Kontrolleri**:
-  - **Tıkla-Adım-At (Tap-to-Step)**: Kısa tıklamalar hassas ve net tek adımlık mikro-adım ayarı yapar.
-  - **Basılı-Tut-Döndür (Press-and-Hold)**: 40Hz pürüzsüz sürekli dönüş ve bırakıldığında anında yumuşak frenleme.
-  - **Klavye Modu Anahtarı**: `WASD` ve Yön tuşları (`↑ / ↓ / ← / →`) ile kontrolü açıp/kapatan bağımsız güvenlik seçimi.
-- **Tek Tıkla Akıllı Takip Başlatma**: Seri port ve kamera durumunu doğrulayarak hedef takibini sorunsuz başlatan "Kontrolü Başlat" butonu.
-
-### ⚙️ Gerçek Zamanlı Hareket Kontrolü (STM32 MCU / C)
-- **10kHz Sürekli Fazlı DDA Darbe Üreticisi**: Kesirli adımları kontrol döngüleri arasında koruyarak düşük takip hızlarında sıfır ve tek darbe arasında sıçramayı önler.
-- **50Hz Artımlı PID Motor Kontrolü**: Mevcut görsel PID korunurken ayrı motor katmanı güvenli hız ve ivme sınırlarını uygular.
-- **5 Katmanlı Endüstriyel Güvenlik ve Hata Koruma Mimarisi**:
-  1. **Dalgalanma Otomatik İyileşme (Auto-Healing Reset)**: Hata yakalayıcılar (`HardFault_Handler` / `Error_Handler`) motor pinlerini anında 0V'a çeker ve ani voltaj sıçramalarında 1ms'de otomatik yeniden başlatma (`NVIC_SystemReset()`) uygular.
-  2. **Donanımsal Görsel Bekçi (Watchdog)**: STM32 veri akışı 500ms kesildiğinde STEP çıkışını durdurur; PC ise 250ms eski kalan görsel komutları keser.
-  3. **Motor Hareket Sınırlayıcı**: İlk testler için takip hızını `200 steps/s`, ivmeyi `400 steps/s²` ile sınırlar; yön değiştirmeden önce sıfır hıza iner ve görüntü merkezine 160 piksel kala kademeli yavaşlar.
-  4. **UART Koordinat Sınırlaması**: Seri gürültülere karşı giriş hatası $\pm 400\text{px}$ ile sınırlandırılmıştır.
-  5. **500ms Bloklanmayan Durum Bildirim LED'i (`PC13`)**: Donanımın çalıştığını gösteren canlı kalp atışı (heartbeat) göstergesi.
-
-## Donanım Gereksinimleri
-
-### Elektronik
-- **Mikrodenetleyici**: STM32F401CCU6 (Blackpill)
-- **Motorlar ve Sürücüler**: 2x NEMA 17 Step Motor ve Makerbase MKS SERVO42C Kapalı Çevrim Vektör Sürücü Kartları (`CR_vFOC` modu)
-- **Kamera**: Arducam AR0234 Global Shutter Yüksek Hızlı USB Kamera (1080p @ 60 FPS) / UVC Masaüstü Kamera
-- **Güç Kaynağı**: 20V DC 2A+ Güç Kaynağı (Motor güç hattı)
-- **Sinyal Bağlantısı**: Ortak Katot (Common Cathode) bağlantısı (`COM` ve `GND` STM32 GND pinine; `PA0` X_STP, `PA4` X_DIR, `PA1` Y_STP, `PA5` Y_DIR)
-- **Lazer**: Kırmızı lazer diyot / işaretçi (Takip testleri için, opsiyonel)
-
-### Güç Mimarisi
-- **Motor Gücü**: 20V DC doğrudan sürücü kartlarının `V+` ve `GND` klemenslerine bağlıdır.
-- **Mantık Seviyesi (Logic)**: Ortak toprak referanslı 3.3V STM32 GPIO sinyal sürüşü.
-
-
-### Mekanik Altyapı
-- **3 Boyutlu Yazdırılan Pan-Tilt Sistemi**: [MakerWorld - Pan Tilt Servo Antenna Tracker MG996R](https://makerworld.com/en/models/973248-pan-tilt-servo-antenna-tracker-mg996r#profileId-945437)
-
-### Devre Şeması (Schematic)
 <div align="center">
-  <img src="images/Schematic.svg" width="700" alt="Devre Şeması">
-  <p><i>Sistem Elektrik Bağlantı Şeması - STM32F401, HC-05, MG996R Servolar</i></p>
+
+### Otonom Hava Savunma ve Hassas Optik Lazer Takip Sistemi
+**Gerçek Zamanlı Bilgisayarlı Görü, IFF Dost/Düşman Tanıma ve STM32 Gömülü Kontrollü 2 Eksenli Kapalı Çevrim Gimbal Platformu**
+
+[![Yarışma](https://img.shields.io/badge/TEKNOFEST%202026-Çelikkubbe%20Hava%20Savunma-red?style=for-the-badge&logo=target)](https://www.youtube.com/watch?v=ou6Uf3Ik7QI)
+[![Başvuru ID](https://img.shields.io/badge/Başvuru%20ID-5208679-blue?style=for-the-badge)](https://www.youtube.com/watch?v=ou6Uf3Ik7QI)
+[![Lisans: MIT](https://img.shields.io/badge/Lisans-MIT-yellow.svg?style=for-the-badge)](LICENSE)
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Arayüz-PyQt6-41CD52?style=flat-square&logo=qt&logoColor=white" alt="PyQt6">
+  <img src="https://img.shields.io/badge/Görü-OpenCV%20%7C%20YOLOv8-5C3EE8?style=flat-square&logo=opencv&logoColor=white" alt="Görü">
+  <img src="https://img.shields.io/badge/Gömülü-STM32F401-03234B?style=flat-square&logo=stmicroelectronics&logoColor=white" alt="STM32">
+  <img src="https://img.shields.io/badge/CUDA-12.6%20Hızlandırmalı-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="CUDA">
+  <img src="https://img.shields.io/badge/Donanım-MKS%20SERVO42C%20FOC-FF6F00?style=flat-square" alt="MKS SERVO42C">
+</p>
+
+[🇬🇧 English](README.md) • [🇹🇷 Türkçe](README_TR.md)
+
 </div>
 
-### Proje Dosya Yapısı (Project Structure)
+---
+
+## 📸 Donanım Prototipi ve Saha Konuşlandırması
+
+<div align="center">
+  <table>
+    <tr>
+      <td width="58%" align="center" valign="middle">
+        <img src="images/2_horizontal.png" width="100%" alt="Lazer Gimbal Donanım Prototipi (Yakın Çekim)">
+        <p><b>🔬 Donanım Prototipi (Yakın Çekim)</b><br>
+        <i>2 Eksenli Özel Gimbal, Optik Ray, Yüksek Güçlü Lazer Modülü, Arducam Global Shutter Kamera ve STM32 Kontrolcüsü</i></p>
+      </td>
+      <td width="42%" align="center" valign="middle">
+        <img src="images/1_vertical.jpg" width="100%" alt="15m Koridor Hedef Angajman Saha Testi">
+        <p><b>🎯 15m Uzun Menzil Saha Testi</b><br>
+        <i>Koridor Hedef Tespiti, Otonom Hedef Kilidi ve Bilgisayar Telemetri Takibi</i></p>
+      </td>
+    </tr>
+  </table>
+</div>
+
+---
+
+## 📺 Sistem Tanıtım Videosu (Video Demonstration)
+
+<div align="center">
+
+### 🏆 [2026 Çelikkubbe Hava Savunma Sistemleri Yarışması | Başvuru ID: 5208679](https://www.youtube.com/watch?v=ou6Uf3Ik7QI)
+
+[![2026 Çelikkubbe Hava Savunma Sistemleri Yarışması | Başvuru ID: 5208679](https://img.youtube.com/vi/ou6Uf3Ik7QI/maxresdefault.jpg)](https://www.youtube.com/watch?v=ou6Uf3Ik7QI)
+
+*Yukarıdaki görsele tıklayarak sistemin üçüncü aşama (Stage 3) otonom görev icrası, canlı IFF dost-hedef koruması ve hassas lazer takip kabiliyetlerini YouTube üzerinden izleyebilirsiniz.*
+
+</div>
+
+---
+
+## 📌 Genel Bakış (Overview)
+
+**LazerGimbal Pro**, hassas hedef tespiti, dost/düşman ayrımı (IFF) ve lazerle angajman görevleri için geliştirilmiş endüstriyel kalitede 2 eksenli kapalı çevrim bir optik hava savunma gimbal sistemidir. **TEKNOFEST 2026 Çelikkubbe Hava Savunma Sistemleri Yarışması** gereksinimlerine tam uyumlu olarak tasarlanmış olup yüksek hızlı bilgisayarlı görü ile gerçek zamanlı mikrodenetleyici kontrolünü entegre eder.
+
+Sistem üç ana sacayağından oluşur:
+1. **Ana Bilgisayar Yapay Zeka & Görü Motoru (PC / PyQt6 / Python)**: 60 FPS hızında global shutter kamera akışını işler, çok uzaylı (HSV+BGR+CIELAB) IFF algoritması ile dost/düşman hedefleri ayrıştırır ve Ultralytics YOLO tabanlı derin öğrenme çıkarımını sıfır NMS gecikmesiyle yürütür.
+2. **Gerçek Zamanlı Gömülü Kontrolcü (STM32F401 / C HAL)**: 10kHz sürekli fazlı DDA darbe üreteci ve 50Hz Artımlı PID döngüsü ile iki adet **Makerbase MKS SERVO42C kapalı çevrim vektör step motorunu (`CR_vFOC`)** sıfır adım kaybı ve yüksek torkla kontrol eder.
+3. **Yetenek 6 Sıfır Etiketlemeli Sentetik Veri Hattı**: Yarışma 3MF CAD modellerini (`Modeller.3mf`) farklı açılardan fotogerçekçi olarak işleyip gerçek arka planlarla harmanlayarak el ile etiketleme yapmaksızın YOLO eğitim veri setleri üreten tam otomatik veri hattı.
+
+---
+
+## 🚀 Temel Özellikler ve İnovasyonlar
+
+### 🛡️ Aşama 3 (Stage 3) Otonom Hava Savunma ve IFF Motoru
+- **Otonom Görev Yöneticisi (Stage 3 Mission Director)**: Hedef tarama, düşman kilitleme ve imha, 10s atış sonrası bekleme, acil durdurma (ESTOP) tetikleme, 10s bekleme ve güvenli kapanıştan oluşan 6 aşamalı yarışma durum makinesi.
+- **Yüksek Güvenilirlikli Çok Uzaylı IFF**: HSV, normalize BGR farkı ve CIELAB kroma uzaylarını birleştirerek kırmızı düşman ve mavi dost hedefleri ortam sarı ışığı ve ahşap yansımalarından kusursuzca ayırt eder.
+- **%100 Dost Unsur Koruma Kilidi**: Nişangah alanı içerisine mavi dost unsur girdiğinde lazer atışını donanımsal/yazılımsal olarak kesin olarak bloke eden güvenlik kilidi.
+- **Turuncu Balon Avı Modu (Balloon Hunt)**: Turuncu balon hedeflerini otomatik olarak tespit eder, hedefe kilitlenir ve patlama görsel olarak doğrulanana kadar kesintisiz lazerle angajman uygular.
+
+### 👁️ Bilgisayarlı Görü ve Taktik HUD (PyQt6 / Python)
+
+<div align="center">
+  <img src="images/GUI.png" width="95%" alt="Taktik Kullanıcı Arayüzü">
+  <p><i>Modern Siber-Karanlık PyQt6 Taktiksel Kontrol Paneli — Canlı Kamera Akışı, Hedef Kilidi, Hata Ayıklama Maskesi ve Cihaz Kontrolü</i></p>
+</div>
+
+- **Arducam AR0234 Global Shutter Kamera Desteği**: Hızlı gimbal ivmelenmelerinde jello/rolling-shutter bozulması ve hareket bulanıklığı olmaksızın 1080p @ 60 FPS kararlı takip.
+- **Taktik PiP (Picture-in-Picture) Büyüteç Dürbünü**: Kalibre edilmiş lazer nişangahı ile gerçek zamanlı senkronize çalışan dijital hedef yakınlaştırma dürbünü.
+- **Sabit Kare Hızlı (CFR 30fps) Video Kaydı**: Mikrofon ortam sesi ve HUD telemetri OSD katmanı ile eşzamanlı `.mp4` video kaydı.
+- **Sıfır Titremeli Uzamsal Çoklu Hedef Takipçisi**: Çoklu hedeflerde kimlik karışmasını ve kutu titremelerini önleyen Öklid veri ilişkilendirmesi ve Kalman filtreleme.
+- **Dinamik Görüntü Yönü Değişimi**: Tavana montaj (180° ters çevirme) ve yatay ayna modları arayüzden anında uygulanabilir.
+
+### ⚡ Gerçek Zamanlı Hareket Kontrolü (STM32F401 / C HAL)
+- **10kHz Sürekli Fazlı DDA Darbe Üreteci**: Düşük hızlarda mikro-adım sürekliliği sağlayan donanımsal darbe motoru.
+- **50Hz Artımlı PID Döngüsü**: Sürtünme ve ölü bölge kompanzasyonuna sahip kapalı çevrim hassas konumlandırma.
+- **3 Kademeli Vites Sistemi**: `1`, `2`, `3` kısayol tuşları ile Keşif, Seyir ve Hızlı İntikal vitesleri arasında anında geçiş.
+- **5 Katmanlı Güvenlik Mimarisi**:
+  1. **Voltaj Dalgalanması İyileştirme**: Hata anında pinleri 0V'a çeken ve 1ms'de yeniden başlayan (`NVIC_SystemReset()`) hata yakalayıcılar.
+  2. **Çift Donanım/Yazılım Watchdog**: İletişim koptuğunda 500ms içinde motorları kilitleyen güvenlik bekçisi.
+  3. **Hız ve İvme Sınırlandırması**: Mekanik zorlanmaları önleyen dinamik sınırlar.
+  4. **UART Koordinat Filtreleme**: İletişim parazitlerine karşı koordinat sınırlama.
+  5. **Bloklanmayan Kalp Atışı LED'i (`PC13`)**: Donanım çalışma durumunu gösteren durum göstergesi.
+
+### 🧠 Yetenek 6 — 3MF Sentetik Eğitim ve Sınıflandırma
+- **Sıfır Manuel Etiketleme Hattı**: 3MF montaj modellerini STL parçalarına böler, çok açılı aydınlatma ile render eder ve gerçek arka planlara otomatik ekleyerek YOLO etiketlerini (txt) hatasız üretir.
+- **Çok Sınıflı Hava Hedefi Tespiti**: `F16` savaş uçağı, `HELIKOPTER` taarruz helikopteri, `BALISTIK_FUZE` balistik füze ve `MINI_IHA` mini İHA sınıflarını 5m, 10m ve 15m mesafelerde tespit ve sınıflandırma yeteneği.
+
+---
+
+## 🛠️ Donanım Malzeme Listesi (BOM)
+
+| Bileşen | Model / Özellik | Kullanım Amacı |
+| :--- | :--- | :--- |
+| **Mikrodenetleyici** | STM32F401CCU6 (Blackpill / ARM Cortex-M4 @ 84MHz) | Gerçek zamanlı hareket kontrolü & DDA darbe üretimi |
+| **Motorlar & Sürücüler** | 2x NEMA 17 Step Motor + MKS SERVO42C Kapalı Çevrim FOC | Manyetik enkoder geri beslemeli 2 eksen Pan/Tilt sürüşü |
+| **Kamera Sensörü** | Arducam AR0234CS Global Shutter USB Kamera (1080p @ 60fps) | Yüksek hızlı, distorsiyonsuz optik hedef yakalama |
+| **Lazer Modülü** | 650nm Yüksek Güçlü Lazer Diyot & Optik Ray | Hedef aydınlatma ve simüle atış kontrolü |
+| **Güç Kaynağı** | 20V DC 2A+ Regüle Anahtarlamalı Güç Kaynağı | Motor güç hattı (`V+` / `GND`) |
+| **Pan-Tilt Gövde** | Özel takviyeli 3D baskı mekanik montaj | Rijit 2 eksenli optik gimbal taşıyıcı |
+
+### 🔌 Donanım Pin ve Elektrik Bağlantı Tablosu (Pinout)
+
+| Alt Sistem | Sinyal Adı | STM32F401 Pini | Bağlı Çevre Birimi / Pin | Mantık / Açıklama |
+| :--- | :--- | :--- | :--- | :--- |
+| **Pan Ekseni (X)** | `X_STEP` | `PA0` (TIM2_CH1) | MKS SERVO42C `STP` Darbesi | 3.3V Lojik (Active High) |
+| **Pan Ekseni (X)** | `X_DIR` | `PA4` (GPIO) | MKS SERVO42C `DIR` Yön Sinyali | CW / CCW Yön Kutupluluğu |
+| **Tilt Ekseni (Y)** | `Y_STEP` | `PA1` (TIM2_CH2) | MKS SERVO42C `STP` Darbesi | 3.3V Lojik (Active High) |
+| **Tilt Ekseni (Y)** | `Y_DIR` | `PA5` (GPIO) | MKS SERVO42C `DIR` Yön Sinyali | CW / CCW Yön Kutupluluğu |
+| **Lazer Modülü** | `LASER_PWM` | `PB0` (TIM3_CH3) | Lazer Sürücü Optokuplör / TTL | 1kHz PWM Güç / Tetikleme |
+| **Durum Telemetrisi**| `HEARTBEAT` | `PC13` (GPIO) | Kart Üstü Mavi LED | 500ms Bloklanmayan Darbe |
+| **Ana Bilgisayar Hattı**| `USB_CDC` | `PA11` (DM) / `PA12` (DP) | PC USB 3.0 / USB-C Portu | Yerel 12 Mbps Full-Speed CDC |
+| **Motor Güç Hattı** | `20V_RAIL` | Harici Güç Kaynağı | MKS Sürücü `V+` / `GND` | Ortak Toprak (`COM` STM32 GND'ye) |
+
+> [!NOTE]
+> **Donanım Yol Haritası (Roadmap)**: Ön eleme ve doğrulama testlerinde prototipleme kolaylığı için breadboard kablolaması kullanılmıştır. Final yarışması öncesinde tüm sistemi tek kartta toplayan **özel entegre PCB taşıyıcı kartı** tasarım aşamasındadır.
+
+---
+
+## 📂 Proje Dizin Yapısı (Project Structure)
+
 ```text
 LazerGimbal/
-├── config/                # Global konfigürasyon profilleri
-│   ├── control_config.py  # PID parametreleri, limitler
-│   ├── hardware_config.py # COM port ve Baud Rate ayarları
-│   └── vision_config.py   # HSV eşikleri ve kamera çözünürlüğü
-├── core/                  # Çekirdek mantık ve haberleşme
-│   ├── serial_thread.py   # Asenkron yüksek hızlı seri haberleşme işçisi
-│   ├── gimbal_controller.py # 40Hz Çalışan ana döngü & Güvenlik kontrolcüsü (Watchdog)
-│   └── control/           
-│       └── error_processor.py # Görsel hataların matematiksel sınırlandırıcıları
-├── gui/                   # Grafiksel Kullanıcı Arayüzü (PyQt6)
-│   ├── main_window.py     # Ana pencerenin montaj noktası
-│   ├── test_panel.py      # Manuel servo sürüş kontrol paneli
-│   └── widgets/           # Modüler arayüz bileşenleri
-├── STM32F401/             # MCU Donanım Yazılımı (Firmware) (C/C++ HAL)
-│   ├── Core/Src/main.c    # Donanım tabanlı Artımlı PID çekirdeği ve limit korumaları
-│   └── Lazer_F401.ioc     # STM32CubeMX konfigürasyon dosyası
-├── utils/                 # Genel yardımcı araçlar (Log, Kayıt)
-├── vision/                # Bilgisayarlı Görü (Computer Vision) operasyonları
-│   ├── vision_worker.py   # Kareleri yakalayan/işleyen arka plan aracı
-│   ├── detector.py        # Temel arayüz sınıfı
-│   ├── yolo_detector.py   # YOLO26 destekli Derin Öğrenme sınıfı
-│   └── models/            # Sinir ağı ağırlıkları (.pt)
-├── CHANGELOG.md           # Harici tutulan versiyon geçmişi
-├── main.py                # Sistemin giriş/tetiklenme noktası
-└── requirements.txt       # Gerekli bağımlılıklar
+├── main.py                     # Ana uygulama giriş noktası (PyQt6 + PyTorch DLL koruması)
+├── run_app.bat                 # Tek tıkla Windows başlatma betiği
+├── requirements.txt            # Python bağımlılıkları
+├── Modeller.3mf                # Resmi 3MF 3D hedef modelleri
+├── CHANGELOG_TR.md             # Detaylı sürüm geçmişi ve değişiklik günlüğü
+│
+├── core/                       # Kontrol ve Durum Makinesi Katmanı
+│   ├── gimbal_controller.py    # 40Hz PID takip kontrolcüsü ve güvenlik bekçisi
+│   ├── serial_thread.py        # Asenkron yüksek hızlı seri UART haberleşmesi
+│   ├── stage3_mission_director.py # Aşama 3 otonom hava savunma görev durum makinesi
+│   └── control/                # Hata hesaplama ve fareyle manuel hedefleme kontrolcüleri
+│
+├── vision/                     # Bilgisayarlı Görü ve Derin Öğrenme Katmanı
+│   ├── vision_worker.py        # Kamera yakalama, hedef tespiti, PiP dürbün ve video kayıt
+│   ├── iff.py                  # Dost/Düşman Tanıma Sistemi (HSV + BGR + CIELAB)
+│   ├── yolo_detector.py        # Ultralytics YOLO çıkarım motoru
+│   ├── yetenek6_detector.py    # Yetenek 6 hedef tespit bağdaştırıcısı
+│   └── yetenek6_stabilizer.py  # Uzamsal-zamansal titreme önleyici stabilizatör
+│
+├── gui/                        # Kullanıcı Arayüzü Katmanı (PyQt6)
+│   ├── main_window.py          # Ana panel penceresi ve yerleşim düzeni
+│   └── widgets/                # Modüler arayüz bileşenleri (Kamera, Kontrol, Mod, IFF, Kalibrasyon)
+│
+├── config/                     # Konfigürasyon ve Kalibrasyon Dosyaları
+│   ├── vision_config.py        # Kamera FOV, çözünürlük, renk eşikleri, nişangah ofseti
+│   ├── control_config.py       # PID parametreleri, vites hızları, hareket sınırları
+│   ├── hardware_config.py      # Seri port baud rate ve darbe tanımları
+│   ├── device_config.py        # Kalıcı donanım ve kamera ayarları
+│   └── yetenek6_config.py      # Yetenek 6 mesafe ve hedef metrikleri
+│
+├── STM32F401/                  # Gömülü Yazılım (C / STM32CubeIDE)
+│   ├── Core/Src/main.c         # DDA darbe motoru, artımlı PID ve güvenlik fonksiyonları
+│   └── Lazer_F401.ioc          # STM32CubeMX donanım pin konfigürasyonu
+│
+├── yetenek6/                   # Sentetik Veri Seti ve YOLO Eğitim Hattı
+│   ├── README_ZH.md            # Ayrıntılı veri hattı kılavuzu (Çince)
+│   ├── HIZLI_BASLANGIC_TR.md   # Hızlı başlangıç kılavuzu (Türkçe)
+│   ├── models_3mf/             # STL hedef modelleri (F16, Helikopter, Füze, İHA)
+│   ├── backgrounds/            # Sentetik yerleşim için gerçek arka plan fotoğrafları
+│   └── scripts/                # S0 Kamera -> S1 Render -> S2 Veri Seti -> S3 Eğitim -> S4 Tespit
+├── docs/                       # Teknik Araştırma, Parametre Ayarları ve Yol Haritaları
+│   ├── Phase3_Kalman_Tracking_Plan.md # Kinematik durum kestirimi ve EKF planı
+│   ├── Phase4_Future_Industrial_Upgrades.md # IMU kaskad, ADRC ve PnP atış kontrol planı
+│   └── TRACKING_PARAMETERS_GUIDE.md # Parametre ayar kılavuzu ve fiziksel formüller
+│
+└── tests/                      # Otomatik Birim ve Entegrasyon Testleri
+    ├── test_stage3_balloon.py  # Aşama 3 balon savunma ve durum makinesi testi
+    ├── test_balloon_hunt.py    # Turuncu balon segmentasyon ve şekil doğrulama testi
+    ├── test_iff_color.py       # IFF renk ayrım testi
+    └── test_manual_mouse_control.py # Gimbal hareket ve seri komut doğrulama testi
 ```
 
-## Yazılım Gereksinimleri
-- Python 3.10 veya üzeri
-- Kullanılan Kütüphaneler: `PyQt6`, `opencv-python`, `numpy`, `pyserial`, `qdarktheme`
+---
 
-## Kurulum (Installation)
-1. **Projeyi klonlayın (Clone)**:
-   ```bash
-   git clone https://github.com/Nijat-M/LazerGimbal.git
-   cd LazerGimbal
-   ```
+## ⚡ Hızlı Başlangıç (Quick Start)
 
-2. **Sanal ortamı oluşturun (Virtual environment)**:
-   ```bash
-   python -m venv .venv
-   .venv\Scripts\activate  # Windows
-   ```
+### 1. Sistem Gereksinimleri
+- **İşletim Sistemi**: Windows 10 / 11 (64-bit)
+- **Python**: 3.10 veya üzeri
+- **NVIDIA GPU** (YOLO derin öğrenme CUDA hızlandırması için önerilir)
 
-3. **Gerekli Python paketlerini yükleyin**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+### 2. Kurulum
+```bash
+# Depoyu klonlayın
+git clone https://github.com/Nijat-M/LazerGimbal.git
+cd LazerGimbal
 
-4. **Sistemi başlatın**:
-   ```bash
-   python main.py
-   ```
+# Sanal ortam oluşturun
+python -m venv .venv
+.venv\Scripts\activate
 
-## Lisans
-[MIT Lisansı](LICENSE)
+# Bağımlılıkları yükleyin
+pip install -r requirements.txt
+```
+
+### 3. Uygulamayı Başlatma
+```bash
+python main.py
+# Veya birlikte gelen toplu iş dosyasını çalıştırın:
+run_app.bat
+```
+
+---
+
+## 📜 Lisans ve Teşekkürler
+
+Bu proje **[MIT Lisansı](LICENSE)** ile lisanslanmıştır.
+
+**TEKNOFEST 2026 Çelikkubbe Hava Savunma Sistemleri Yarışması (Başvuru ID: 5208679)** kapsamında geliştirilmiştir. Açık kaynak robotik ve bilgisayarlı görü topluluklarına teşekkür ederiz.

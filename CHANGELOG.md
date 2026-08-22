@@ -4,6 +4,24 @@
   🇬🇧 <a href="CHANGELOG.md">English</a> | 🇹🇷 <a href="CHANGELOG_TR.md">Türkçe</a>
 </div>
 
+### [v0.5.0] - 2026-08-20
+- **Yetenek 6 Zero-Manual-Annotation 3MF Synthetic AI Dataset & Training Pipeline**:
+  - Engineered an automated synthetic pipeline generating labeled datasets directly from official competition 3MF models (`Modeller.3mf`), eliminating manual bounding box labeling.
+  - Implemented automated multi-angle target rendering with lighting variation and realistic hallway/room background compositing (`yetenek6/scripts/s0` ~ `s6`).
+  - Added native multi-class air defense model training and inference support for 4 critical aerial targets: `F16` (Fighter Jet), `HELIKOPTER` (Attack Helicopter), `BALISTIK_FUZE` (Ballistic Missile), and `MINI_IHA` (Mini/Micro UAV) across 5m, 10m, and 15m competition ranges.
+  - Deployed `yetenek6_best.pt` air-defense deep learning model with strict confidence threshold filtering and dynamic class discovery.
+  - Built spatial-temporal target stabilizer (`yetenek6_stabilizer.py`) and anti-jitter filtering for thin missile and aircraft geometries.
+- **Stage 3 Autonomous Air Defense Mission & IFF Separation (Çelikkubbe Competition)**:
+  - Designed and deployed `Stage3MissionDirector` autonomous 6-state competition sequence: 1. Hostile Target Acquisition & Lock -> 2. Continuous Tracking & Laser Engagement -> 3. Post-Engagement Wait (10s) -> 4. Automated Emergency Stop (ESTOP) Trigger -> 5. Post-ESTOP Stabilization Delay (10s) -> 6. Safe System Shutdown.
+  - Upgraded IFF (Identification Friend or Foe) chromatic engine (`vision/iff.py`) combining HSV, normalized BGR differential, and CIELAB chroma spaces, reliably distinguishing Red Hostile vs. Blue Friendly targets under yellow lighting and ambient reflections.
+  - Implemented 100% Friendly Fire Interlock to strictly suppress laser firing whenever friendly blue targets enter the reticle zone.
+  - Added Orange Balloon Hunt Mode (`BALLOON_HUNT`) with persistent lock-on and optical destruction verification.
+- **Tactical HUD, PiP Reticle Scope & High-Fidelity Video Recording**:
+  - Implemented synchronized Picture-in-Picture (PiP) tactical magnification scope with live crosshair alignment and real-time zoom controls (`[` / `]`).
+  - Added Constant Frame Rate (CFR 30fps) `.mp4` video recording with wall-clock frame pacing, microphone ambient audio capture, and automated AAC audio-video muxing.
+  - Introduced 3-speed motor gear selector (Keys `1`, `2`, `3` for Recon, Cruise, and Fast Slewing speeds).
+  - Added dedicated manual D-Pad jog controls and live STM32 serial monitor logging.
+
 ### [v0.4.5] - 2026-08-16
 - **Savunma YOLO26 Air-Defense Neural Model Adaptation & Tactical Defense HUD**:
   - Integrated `savunma_yolo26.pt` air-defense model with automatic model discovery and native **960×960 GPU inference** resolution.

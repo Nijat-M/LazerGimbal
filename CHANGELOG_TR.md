@@ -4,6 +4,24 @@
   🇬🇧 <a href="CHANGELOG.md">English</a> | 🇹🇷 <a href="CHANGELOG_TR.md">Türkçe</a>
 </div>
 
+### [v0.5.0] - 2026-08-20
+- **Yetenek 6 Sıfır Manuel Etiketlemeli 3MF Sentetik Veri Seti ve YOLO Eğitim Hattı**:
+  - Yarışma resmi 3MF modellerinden (`Modeller.3mf`) doğrudan etiketli eğitim verisi üreten tam otomatik sentetik veri hattı geliştirildi; el ile etiketleme ihtiyacı tamamen ortadan kaldırıldı.
+  - Çok açılı hedef renderlama, ışık varyasyonları ve gerçek koridor/iç mekan arka planlarına otomatik bindirme algoritmaları entegre edildi (`yetenek6/scripts/s0` ~ `s6`).
+  - 5m, 10m ve 15m yarışma mesafelerinde 4 kritik hava savunma hedefi için çok sınıflı model desteği: `F16` (Savaş Uçağı), `HELIKOPTER` (Taarruz Helikopteri), `BALISTIK_FUZE` (Balistik Füze) ve `MINI_IHA` (Mini/Mikro İHA).
+  - `yetenek6_best.pt` hava savunma derin öğrenme modeli entegre edildi; dinamik model tarama ve sıkı güven eşiği (confidence) filtrelemesi eklendi.
+  - İnce füze gövdeleri ve hava hedefleri için uzamsal-zamansal hedef stabilizatörü (`yetenek6_stabilizer.py`) ve titreme önleyici filtreler geliştirildi.
+- **Aşama 3 (Stage 3) Otonom Hava Savunma Görevi ve IFF Ayrıştırması (Çelikkubbe Yarışması)**:
+  - `Stage3MissionDirector` 6 aşamalı otonom yarışma durum makinesi geliştirildi: 1. Düşman Hedef Tespiti ve Kilitlenme -> 2. Kesintisiz Takip ve Lazer Angajmanı -> 3. Atış Sonrası Bekleme (10s) -> 4. Acil Durdurma (ESTOP) Tetikleme -> 5. ESTOP Sonrası Dengeleme Beklemesi (10s) -> 6. Güvenli Sistem Kapanışı.
+  - Çok uzaylı (HSV + normalize BGR farkı + CIELAB) IFF (Dost/Düşman Tanıma) motoru (`vision/iff.py`) ile sarı ortam ışığı ve yansımalarda dahi kırmızı düşman ve mavi dost hedefler hatasız ayrıştırıldı.
+  - Nişangaha mavi dost unsur girdiğinde lazer ateşlemesini anında bloke eden %100 Dost Unsur Koruma Kilidi eklendi.
+  - Turuncu Balon Avı Modu (`BALLOON_HUNT`) ile sürekli kilitlenme ve görsel imha doğrulaması sağlandı.
+- **Taktik HUD, PiP Büyüteç Dürbünü ve Yüksek Doğruluklu Video Kaydı**:
+  - Nişangahla senkronize çalışan Taktik PiP (Picture-in-Picture) dijital yakınlaştırma dürbünü ve gerçek zamanlı büyütme kontrolleri (`[` / `]`) eklendi.
+  - Duvar saati zaman damgalı Sabit Kare Hızlı (CFR 30fps) `.mp4` video kaydı, mikrofon ortam sesi kaydı ve otomatik AAC ses-video birleştirme özelliği eklendi.
+  - 3 kademeli motor vites sistemi (`1`, `2`, `3` kısayolları ile Keşif, Seyir ve Hızlı İntikal) eklendi.
+  - Arayüze özel manuel D-Pad motor jog kontrol paneli ve canlı STM32 seri port izleme monitörü entegre edildi.
+
 ### [v0.4.5] - 2026-08-16
 - **Savunma YOLO26 Hava Savunma Modeli Uyarlaması ve Taktik Savunma HUD**:
   - `savunma_yolo26.pt` hava savunma modeli otomatik model algılama ve GPU üzerinde yerel **960×960 çözünürlük** ile entegre edildi.
