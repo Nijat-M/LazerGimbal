@@ -1,4 +1,4 @@
-# 🎯 LazerGimbal Pro
+# 🎯 LazerGimbal SADIR 1798-K
 
 <div align="center">
 
@@ -61,7 +61,7 @@
 
 ## 📌 Executive Summary
 
-**LazerGimbal Pro** is an industrial-grade, 2-axis closed-loop optical laser tracking and air defense gimbal platform engineered for precision target acquisition, identification, and neutralisation. Built for **TEKNOFEST 2026 Çelikkubbe Air Defense Systems Competition**, the system tightly integrates high-speed computer vision with real-time embedded hardware control.
+**LazerGimbal SADIR 1798-K** is an industrial-grade, 2-axis closed-loop optical laser tracking and air defense gimbal platform engineered for precision target acquisition, identification, and neutralisation. Built for **TEKNOFEST 2026 Çelikkubbe Air Defense Systems Competition**, the system tightly integrates high-speed computer vision with real-time embedded hardware control.
 
 The system is architected across three core pillars:
 1. **Host AI & Vision Engine (PC / PyQt6 / Python)**: Processes live camera streams at 60 FPS (using global shutter sensors), runs multi-space IFF (Identification Friend or Foe) chromatic algorithms, and executes Ultralytics YOLO deep-learning target classification with zero NMS latency.

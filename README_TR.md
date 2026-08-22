@@ -1,4 +1,4 @@
-# 🎯 LazerGimbal Pro
+# 🎯 LazerGimbal SADIR 1798-K
 
 <div align="center">
 
@@ -61,7 +61,7 @@
 
 ## 📌 Genel Bakış (Overview)
 
-**LazerGimbal Pro**, hassas hedef tespiti, dost/düşman ayrımı (IFF) ve lazerle angajman görevleri için geliştirilmiş endüstriyel kalitede 2 eksenli kapalı çevrim bir optik hava savunma gimbal sistemidir. **TEKNOFEST 2026 Çelikkubbe Hava Savunma Sistemleri Yarışması** gereksinimlerine tam uyumlu olarak tasarlanmış olup yüksek hızlı bilgisayarlı görü ile gerçek zamanlı mikrodenetleyici kontrolünü entegre eder.
+**LazerGimbal SADIR 1798-K**, hassas hedef tespiti, dost/düşman ayrımı (IFF) ve lazerle angajman görevleri için geliştirilmiş endüstriyel kalitede 2 eksenli kapalı çevrim bir optik hava savunma gimbal sistemidir. **TEKNOFEST 2026 Çelikkubbe Hava Savunma Sistemleri Yarışması** gereksinimlerine tam uyumlu olarak tasarlanmış olup yüksek hızlı bilgisayarlı görü ile gerçek zamanlı mikrodenetleyici kontrolünü entegre eder.
 
 Sistem üç ana sacayağından oluşur:
 1. **Ana Bilgisayar Yapay Zeka & Görü Motoru (PC / PyQt6 / Python)**: 60 FPS hızında global shutter kamera akışını işler, çok uzaylı (HSV+BGR+CIELAB) IFF algoritması ile dost/düşman hedefleri ayrıştırır ve Ultralytics YOLO tabanlı derin öğrenme çıkarımını sıfır NMS gecikmesiyle yürütür.

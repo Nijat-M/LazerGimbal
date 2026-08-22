@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 >nul
-title LaserGimbal Pro Launcher
+title LazerGimbal SADIR 1798-K Launcher
 cd /d "%~dp0"
 
 echo ===================================================
-echo           LaserGimbal Pro Launcher
+echo        LazerGimbal SADIR 1798-K Launcher
 echo ===================================================
 
 :: 1. If venv exists, jump to RUN_APP
@@ -46,7 +46,7 @@ pause
 exit /b 1
 
 :RUN_APP
-echo [INFO] Starting LaserGimbal Pro main application...
+echo [INFO] Starting LazerGimbal SADIR 1798-K main application...
 .venv\Scripts\python.exe main.py
 if %errorlevel% neq 0 (
     echo.
