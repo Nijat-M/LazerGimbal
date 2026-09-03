@@ -6,19 +6,33 @@
 **Gerçek Zamanlı Bilgisayarlı Görü, IFF Dost/Düşman Tanıma ve STM32 Gömülü Kontrollü 2 Eksenli Kapalı Çevrim Gimbal Platformu**
 
 [![Yarışma](https://img.shields.io/badge/TEKNOFEST%202026-Çelikkubbe%20Hava%20Savunma-red?style=for-the-badge&logo=target)](https://www.youtube.com/watch?v=ou6Uf3Ik7QI)
-[![Başvuru ID](https://img.shields.io/badge/Başvuru%20ID-5208679-blue?style=for-the-badge)](https://www.youtube.com/watch?v=ou6Uf3Ik7QI)
+[![Takım](https://img.shields.io/badge/Takım-Sadir%20Pehlivan-orange?style=for-the-badge)](https://www.youtube.com/watch?v=ou6Uf3Ik7QI)
+[![Takım ID](https://img.shields.io/badge/Takım%20ID-%23990060-purple?style=for-the-badge)](https://www.youtube.com/watch?v=ou6Uf3Ik7QI)
+[![Başvuru ID](https://img.shields.io/badge/Başvuru%20ID-%235208679-blue?style=for-the-badge)](https://www.youtube.com/watch?v=ou6Uf3Ik7QI)
 [![Lisans: MIT](https://img.shields.io/badge/Lisans-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/Arayüz-PyQt6-41CD52?style=flat-square&logo=qt&logoColor=white" alt="PyQt6">
-  <img src="https://img.shields.io/badge/Görü-OpenCV%20%7C%20YOLOv8-5C3EE8?style=flat-square&logo=opencv&logoColor=white" alt="Görü">
+  <img src="https://img.shields.io/badge/Görü-OpenCV%20%7C%20YOLO26-5C3EE8?style=flat-square&logo=opencv&logoColor=white" alt="Görü">
   <img src="https://img.shields.io/badge/Gömülü-STM32F401-03234B?style=flat-square&logo=stmicroelectronics&logoColor=white" alt="STM32">
   <img src="https://img.shields.io/badge/CUDA-12.6%20Hızlandırmalı-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="CUDA">
   <img src="https://img.shields.io/badge/Donanım-MKS%20SERVO42C%20FOC-FF6F00?style=flat-square" alt="MKS SERVO42C">
 </p>
 
 [🇬🇧 English](README.md) • [🇹🇷 Türkçe](README_TR.md)
+
+</div>
+
+---
+
+<div align="center">
+
+### 📋 TEKNOFEST 2026 Yarışma / Başvuru Bilgileri
+
+| Başvuru Yaptığı Takım Adı | Takım ID | Başvuru ID |
+| :---: | :---: | :---: |
+| **Sadir Pehlivan** | **#990060** | **#5208679** |
 
 </div>
 
@@ -64,9 +78,9 @@
 **LazerGimbal SADIR 1798-K**, hassas hedef tespiti, dost/düşman ayrımı (IFF) ve lazerle angajman görevleri için geliştirilmiş endüstriyel kalitede 2 eksenli kapalı çevrim bir optik hava savunma gimbal sistemidir. **TEKNOFEST 2026 Çelikkubbe Hava Savunma Sistemleri Yarışması** gereksinimlerine tam uyumlu olarak tasarlanmış olup yüksek hızlı bilgisayarlı görü ile gerçek zamanlı mikrodenetleyici kontrolünü entegre eder.
 
 Sistem üç ana sacayağından oluşur:
-1. **Ana Bilgisayar Yapay Zeka & Görü Motoru (PC / PyQt6 / Python)**: 60 FPS hızında global shutter kamera akışını işler, çok uzaylı (HSV+BGR+CIELAB) IFF algoritması ile dost/düşman hedefleri ayrıştırır ve Ultralytics YOLO tabanlı derin öğrenme çıkarımını sıfır NMS gecikmesiyle yürütür.
+1. **Ana Bilgisayar Yapay Zeka & Görü Motoru (PC / PyQt6 / Python)**: 60 FPS hızında global shutter kamera akışını işler, çok uzaylı (HSV+BGR+CIELAB) IFF algoritması ile dost/düşman hedefleri ayrıştırır ve Ultralytics YOLO26 tabanlı derin öğrenme çıkarımını sıfır NMS gecikmesiyle yürütür.
 2. **Gerçek Zamanlı Gömülü Kontrolcü (STM32F401 / C HAL)**: 10kHz sürekli fazlı DDA darbe üreteci ve 50Hz Artımlı PID döngüsü ile iki adet **Makerbase MKS SERVO42C kapalı çevrim vektör step motorunu (`CR_vFOC`)** sıfır adım kaybı ve yüksek torkla kontrol eder.
-3. **Yetenek 6 Sıfır Etiketlemeli Sentetik Veri Hattı**: Yarışma 3MF CAD modellerini (`Modeller.3mf`) farklı açılardan fotogerçekçi olarak işleyip gerçek arka planlarla harmanlayarak el ile etiketleme yapmaksızın YOLO eğitim veri setleri üreten tam otomatik veri hattı.
+3. **Yetenek 6 Sıfır Etiketlemeli Sentetik Veri Hattı**: Yarışma 3MF CAD modellerini (`Modeller.3mf`) farklı açılardan fotogerçekçi olarak işleyip gerçek arka planlarla harmanlayarak el ile etiketleme yapmaksızın YOLO26 eğitim veri setleri üreten tam otomatik veri hattı.
 
 ---
 
@@ -115,7 +129,7 @@ Sistem üç ana sacayağından oluşur:
 | **Mikrodenetleyici** | STM32F401CCU6 (Blackpill / ARM Cortex-M4 @ 84MHz) | Gerçek zamanlı hareket kontrolü & DDA darbe üretimi |
 | **Motorlar & Sürücüler** | 2x NEMA 17 Step Motor + MKS SERVO42C Kapalı Çevrim FOC | Manyetik enkoder geri beslemeli 2 eksen Pan/Tilt sürüşü |
 | **Kamera Sensörü** | Arducam AR0234CS Global Shutter USB Kamera (1080p @ 60fps) | Yüksek hızlı, distorsiyonsuz optik hedef yakalama |
-| **Lazer Modülü** | 650nm Yüksek Güçlü Lazer Diyot & Optik Ray | Hedef aydınlatma ve simüle atış kontrolü |
+| **Lazer Modülü** | 450nm Yüksek Güçlü Mavi Lazer Diyot & Optik Ray | Hedef aydınlatma ve simüle atış kontrolü |
 | **Güç Kaynağı** | 20V DC 2A+ Regüle Anahtarlamalı Güç Kaynağı | Motor güç hattı (`V+` / `GND`) |
 | **Pan-Tilt Gövde** | Özel takviyeli 3D baskı mekanik montaj | Rijit 2 eksenli optik gimbal taşıyıcı |
 
@@ -156,7 +170,7 @@ LazerGimbal/
 ├── vision/                     # Bilgisayarlı Görü ve Derin Öğrenme Katmanı
 │   ├── vision_worker.py        # Kamera yakalama, hedef tespiti, PiP dürbün ve video kayıt
 │   ├── iff.py                  # Dost/Düşman Tanıma Sistemi (HSV + BGR + CIELAB)
-│   ├── yolo_detector.py        # Ultralytics YOLO çıkarım motoru
+│   ├── yolo_detector.py        # Ultralytics YOLO26 çıkarım motoru ve savunma modeli bağdaştırıcısı
 │   ├── yetenek6_detector.py    # Yetenek 6 hedef tespit bağdaştırıcısı
 │   └── yetenek6_stabilizer.py  # Uzamsal-zamansal titreme önleyici stabilizatör
 │
@@ -169,13 +183,14 @@ LazerGimbal/
 │   ├── control_config.py       # PID parametreleri, vites hızları, hareket sınırları
 │   ├── hardware_config.py      # Seri port baud rate ve darbe tanımları
 │   ├── device_config.py        # Kalıcı donanım ve kamera ayarları
+│   ├── tracking_parameters.py  # Çalışma zamanı takip dinamikleri ve Kalman parametreleri
 │   └── yetenek6_config.py      # Yetenek 6 mesafe ve hedef metrikleri
 │
 ├── STM32F401/                  # Gömülü Yazılım (C / STM32CubeIDE)
 │   ├── Core/Src/main.c         # DDA darbe motoru, artımlı PID ve güvenlik fonksiyonları
 │   └── Lazer_F401.ioc          # STM32CubeMX donanım pin konfigürasyonu
 │
-├── yetenek6/                   # Sentetik Veri Seti ve YOLO Eğitim Hattı
+├── yetenek6/                   # Sentetik Veri Seti ve YOLO26 Eğitim Hattı
 │   ├── README_ZH.md            # Ayrıntılı veri hattı kılavuzu (Çince)
 │   ├── HIZLI_BASLANGIC_TR.md   # Hızlı başlangıç kılavuzu (Türkçe)
 │   ├── models_3mf/             # STL hedef modelleri (F16, Helikopter, Füze, İHA)
@@ -200,7 +215,7 @@ LazerGimbal/
 ### 1. Sistem Gereksinimleri
 - **İşletim Sistemi**: Windows 10 / 11 (64-bit)
 - **Python**: 3.10 veya üzeri
-- **NVIDIA GPU** (YOLO derin öğrenme CUDA hızlandırması için önerilir)
+- **NVIDIA GPU** (YOLO26 derin öğrenme CUDA hızlandırması için önerilir)
 
 ### 2. Kurulum
 ```bash
@@ -229,4 +244,4 @@ run_app.bat
 
 Bu proje **[MIT Lisansı](LICENSE)** ile lisanslanmıştır.
 
-**TEKNOFEST 2026 Çelikkubbe Hava Savunma Sistemleri Yarışması (Başvuru ID: 5208679)** kapsamında geliştirilmiştir. Açık kaynak robotik ve bilgisayarlı görü topluluklarına teşekkür ederiz.
+**TEKNOFEST 2026 Çelikkubbe Hava Savunma Sistemleri Yarışması** (Takım: **Sadir Pehlivan**, Takım ID: **#990060**, Başvuru ID: **#5208679**) kapsamında geliştirilmiştir. Açık kaynak robotik ve bilgisayarlı görü topluluklarına teşekkür ederiz.

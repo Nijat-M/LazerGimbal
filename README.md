@@ -6,19 +6,33 @@
 **2-Axis High-Speed Closed-Loop Gimbal with Real-Time Computer Vision, IFF Defense & STM32 Firmware**
 
 [![Competition](https://img.shields.io/badge/TEKNOFEST%202026-Çelikkubbe%20Hava%20Savunma-red?style=for-the-badge&logo=target)](https://www.youtube.com/watch?v=ou6Uf3Ik7QI)
-[![Application ID](https://img.shields.io/badge/Başvuru%20ID-5208679-blue?style=for-the-badge)](https://www.youtube.com/watch?v=ou6Uf3Ik7QI)
+[![Takım](https://img.shields.io/badge/Takım-Sadir%20Pehlivan-orange?style=for-the-badge)](https://www.youtube.com/watch?v=ou6Uf3Ik7QI)
+[![Takım ID](https://img.shields.io/badge/Takım%20ID-%23990060-purple?style=for-the-badge)](https://www.youtube.com/watch?v=ou6Uf3Ik7QI)
+[![Başvuru ID](https://img.shields.io/badge/Başvuru%20ID-%235208679-blue?style=for-the-badge)](https://www.youtube.com/watch?v=ou6Uf3Ik7QI)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/GUI-PyQt6-41CD52?style=flat-square&logo=qt&logoColor=white" alt="PyQt6">
-  <img src="https://img.shields.io/badge/Vision-OpenCV%20%7C%20YOLOv8-5C3EE8?style=flat-square&logo=opencv&logoColor=white" alt="Vision">
+  <img src="https://img.shields.io/badge/Vision-OpenCV%20%7C%20YOLO26-5C3EE8?style=flat-square&logo=opencv&logoColor=white" alt="Vision">
   <img src="https://img.shields.io/badge/Embedded-STM32F401-03234B?style=flat-square&logo=stmicroelectronics&logoColor=white" alt="STM32">
   <img src="https://img.shields.io/badge/CUDA-12.6%20Accelerated-76B900?style=flat-square&logo=nvidia&logoColor=white" alt="CUDA">
   <img src="https://img.shields.io/badge/Hardware-MKS%20SERVO42C%20FOC-FF6F00?style=flat-square" alt="MKS SERVO42C">
 </p>
 
 [🇬🇧 English](README.md) • [🇹🇷 Türkçe](README_TR.md)
+
+</div>
+
+---
+
+<div align="center">
+
+### 📋 TEKNOFEST 2026 Yarışma / Başvuru Bilgileri
+
+| Başvuru Yaptığı Takım Adı | Takım ID | Başvuru ID |
+| :---: | :---: | :---: |
+| **Sadir Pehlivan** | **#990060** | **#5208679** |
 
 </div>
 
@@ -64,9 +78,9 @@
 **LazerGimbal SADIR 1798-K** is an industrial-grade, 2-axis closed-loop optical laser tracking and air defense gimbal platform engineered for precision target acquisition, identification, and neutralisation. Built for **TEKNOFEST 2026 Çelikkubbe Air Defense Systems Competition**, the system tightly integrates high-speed computer vision with real-time embedded hardware control.
 
 The system is architected across three core pillars:
-1. **Host AI & Vision Engine (PC / PyQt6 / Python)**: Processes live camera streams at 60 FPS (using global shutter sensors), runs multi-space IFF (Identification Friend or Foe) chromatic algorithms, and executes Ultralytics YOLO deep-learning target classification with zero NMS latency.
+1. **Host AI & Vision Engine (PC / PyQt6 / Python)**: Processes live camera streams at 60 FPS (using global shutter sensors), runs multi-space IFF (Identification Friend or Foe) chromatic algorithms, and executes Ultralytics YOLO26 deep-learning target classification with zero NMS latency.
 2. **Real-Time Embedded Controller (STM32F401 / C HAL)**: Executes a continuous 10kHz hardware DDA (Digital Differential Analyzer) microstep pulse engine and a 50Hz Incremental PID loop driving **Makerbase MKS SERVO42C closed-loop vector stepper motors (`CR_vFOC`)** with absolute zero step loss and high holding torque.
-3. **Yetenek 6 Zero-Annotation Synthetic Pipeline**: A synthetic dataset generator that automatically renders 3MF CAD meshes into multi-angle photorealistic targets, generating labeled YOLO training datasets without manual bounding box annotation.
+3. **Yetenek 6 Zero-Annotation Synthetic Pipeline**: A synthetic dataset generator that automatically renders 3MF CAD meshes into multi-angle photorealistic targets, generating labeled YOLO26 training datasets without manual bounding box annotation.
 
 ---
 
@@ -115,7 +129,7 @@ The system is architected across three core pillars:
 | **Microcontroller** | STM32F401CCU6 (Blackpill / ARM Cortex-M4 @ 84MHz) | Real-time motion control & DDA pulse engine |
 | **Motors & Drivers** | 2x NEMA 17 Stepper Motors + MKS SERVO42C Closed-Loop FOC | 2-axis Pan/Tilt drive with magnetic encoder feedback |
 | **Camera Sensor** | Arducam AR0234CS Global Shutter USB Camera (1080p @ 60fps) | High-speed, distortion-free optical acquisition |
-| **Laser Emitter** | 650nm High-Power Red Laser Diode & Optics Rail | Precision target illumination & simulated engagement |
+| **Laser Emitter** | 450nm High-Power Blue Laser Diode & Optics Rail | Precision target illumination & simulated engagement |
 | **Power Supply** | 20V DC 2A+ Regulated Switching Power Supply | Motor power rail (`V+` / `GND`) |
 | **Pan-Tilt Frame** | Custom reinforced 3D printed mechanical assembly | 2-axis rigid optical gimbal platform |
 
@@ -156,7 +170,7 @@ LazerGimbal/
 ├── vision/                     # Computer Vision & Deep Learning Layer
 │   ├── vision_worker.py        # Video capture, detection dispatcher, PiP scope & video recorder
 │   ├── iff.py                  # Identification Friend or Foe (HSV + BGR + CIELAB)
-│   ├── yolo_detector.py        # Ultralytics YOLO inference pipeline
+│   ├── yolo_detector.py        # Ultralytics YOLO26 inference pipeline & defense model adapter
 │   ├── yetenek6_detector.py    # Yetenek 6 target detection adapter
 │   └── yetenek6_stabilizer.py  # Spatial-temporal anti-jitter stabilizer
 │
@@ -169,13 +183,14 @@ LazerGimbal/
 │   ├── control_config.py       # PID parameters, speed gears, motion limits
 │   ├── hardware_config.py      # Serial port baud rate & step pulse definitions
 │   ├── device_config.py        # Persistent hardware & camera settings
+│   ├── tracking_parameters.py  # Runtime tracking & Kalman filter dynamics
 │   └── yetenek6_config.py      # Yetenek 6 distance & target metrics
 │
 ├── STM32F401/                  # Embedded MCU Firmware (C / STM32CubeIDE)
 │   ├── Core/Src/main.c         # DDA pulse engine, incremental PID & safety handlers
 │   └── Lazer_F401.ioc          # STM32CubeMX hardware pinout configuration
 │
-├── yetenek6/                   # Synthetic Dataset & YOLO Training Pipeline
+├── yetenek6/                   # Synthetic Dataset & YOLO26 Training Pipeline
 │   ├── README_ZH.md            # Detailed pipeline guide (Chinese)
 │   ├── HIZLI_BASLANGIC_TR.md   # Quick start guide (Turkish)
 │   ├── models_3mf/             # Extracted STL model assets (F16, Helicopter, Missile, Drone)
@@ -200,7 +215,7 @@ LazerGimbal/
 ### 1. Prerequisites
 - **Operating System**: Windows 10 / 11 (64-bit)
 - **Python**: 3.10 or higher
-- **NVIDIA GPU** (Optional for CUDA-accelerated YOLO inference)
+- **NVIDIA GPU** (Optional for CUDA-accelerated YOLO26 inference)
 
 ### 2. Installation
 ```bash
@@ -229,4 +244,4 @@ run_app.bat
 
 This project is licensed under the **[MIT License](LICENSE)**.
 
-Developed for **TEKNOFEST 2026 Çelikkubbe Air Defense Systems Competition (Başvuru ID: 5208679)**. Special thanks to the open-source robotics and computer vision communities.
+Developed for **TEKNOFEST 2026 Çelikkubbe Air Defense Systems Competition** (Takım: **Sadir Pehlivan**, Takım ID: **#990060**, Başvuru ID: **#5208679**). Special thanks to the open-source robotics and computer vision communities.
