@@ -15,7 +15,7 @@
 [配置文件职责]
 - control_config.py : PID参数、速度分级、死区、误差缩放（控制相关全在这里）
 - vision_config.py  : 摄像头、颜色阈值、图像参数
-- hardware_config.py: 串口、舵机PWM、手动控制参数
+- hardware_config.py: 串口通讯、步进电机脉冲时基、激光PWM
 """
 
 import json
@@ -74,15 +74,6 @@ class ConfigManager:
     def INVERT_Y(self) -> bool: return ControlConfig.INVERT_Y
     @INVERT_Y.setter
     def INVERT_Y(self, v: bool): ControlConfig.INVERT_Y = v
-
-    @property
-    def SERVO_SOFTWARE_STEP_SCALE(self) -> float: return ControlConfig.SERVO_STEP_TO_DEGREE
-
-    @property
-    def SERVO_MIN_LIMIT(self) -> int: return ControlConfig.SERVO_MIN_LIMIT
-
-    @property
-    def SERVO_MAX_LIMIT(self) -> int: return ControlConfig.SERVO_MAX_LIMIT
 
     # 以下从各子配置类透出（只读，旧代码使用）
     @property
@@ -179,6 +170,6 @@ __all__ = [
     'cfg',           # 兼容旧代码
     'ControlConfig', # 控制参数（PID/速度/死区/缩放）
     'VisionConfig',  # 视觉参数（颜色/摄像头）
-    'HardwareConfig', # 硬件参数（串口/舵机）
+    'HardwareConfig', # 硬件参数（串口/步进电机/激光）
     'ConfigManager',
 ]

@@ -56,8 +56,8 @@ class DataRecorder:
             'error_y',       # Y 轴误差
             'output_x',      # X 轴 PID 输出（步数）
             'output_y',      # Y 轴 PID 输出
-            'pos_x',         # X 轴舵机位置（度）
-            'pos_y',         # Y 轴舵机位置
+            'pos_x',         # X 轴电机估算位置（度）
+            'pos_y',         # Y 轴电机估算位置（度）
             'kp',            # 当前 Kp 值
             'ki',            # 当前 Ki 值
             'kd'             # 当前 Kd 值
@@ -190,10 +190,10 @@ class QuickPlotter:
         # 子图3: 位置曲线
         axes[2].plot(df['timestamp'], df['pos_x'], label='Position X', color='purple', alpha=0.7)
         axes[2].plot(df['timestamp'], df['pos_y'], label='Position Y', color='brown', alpha=0.7)
-        axes[2].axhline(y=90, color='gray', linestyle='--', alpha=0.5, label='中位 (90°)')
+        axes[2].axhline(y=0, color='gray', linestyle='--', alpha=0.5, label='相对原点 (0°)')
         axes[2].set_xlabel('时间 (秒)')
         axes[2].set_ylabel('位置 (度)')
-        axes[2].set_title('舵机位置曲线 (Position)')
+        axes[2].set_title('云台电机姿态角曲线 (Position / Telemetry)')
         axes[2].legend()
         axes[2].grid(True, alpha=0.3)
         

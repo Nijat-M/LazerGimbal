@@ -1,16 +1,27 @@
 # -*- coding: utf-8 -*-
+"""
+LazerGimbal SADIR 1798-K — 系统主入口 (System Main Entry Point)
+================================================================================
+本程序为 2 轴闭环激光跟踪与防空云台系统的总入口。负责：
+1. Windows 底层 DLL (CUDA/PyTorch vs PyQt6) 动态加载顺序保护；
+2. 图像采集底层 (OpenCV MSMF / DirectShow) 环境变量抑制与调优；
+3. 标准输入输出缓冲与 UTF-8 编码重定向；
+4. PyQt6 高清 DPI 自适应渲染与现代暗色主题 (qdarktheme) 加载；
+5. 主仪表盘窗口 (MainWindow) 的实例化与事件主循环启动。
+================================================================================
+"""
 import os
 import sys
 
-# 关键修复：在 Windows 下，由于 PyQt6 和 PyTorch (CUDA) 可能存在 DLL (如 c10.dll, OpenMP等) 冲突，
-# 若安装了 PyTorch，在导入 PyQt6 之前优先导入 torch，以保证底层库正确初始化。
+# 【Windows 底层 DLL 冲突防护守卫 (DLL Load Guard)】
+# 在 Windows 下，PyQt6 与 PyTorch (CUDA / OpenMP / c10.dll) 并存时极易发生加载符号冲突。
+# 必须严格在导入 PyQt6 之前优先导入 torch，确保底层 CUDA 运行时正确绑定。
 try:
     import torch
 except ImportError:
     pass
 
-
-# 抑制OpenCV警告和错误信息（在导入cv2之前设置）
+# 抑制 OpenCV 底层非必要警告信息并关闭 MSMF 后端卡死问题
 os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '0'
 os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'
 

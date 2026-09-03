@@ -57,52 +57,58 @@ class VisionConfig:
     CENTER_X = 320          # 画面中心X（一般是宽度/2）
     CENTER_Y = 240          # 画面中心Y（一般是高度/2）
 
-    # ==========================
-    # Lazer-Kamera Boresight Kalibrasyonu / 激光-相机 光轴校准
-    # ==========================
-    # Kamera lazer cikisinin USTUNDE duruyor -> ikisi es eksenli DEGIL.
-    # Bu yuzden lazerin gercek vurus noktasi ekran merkezine denk gelmez.
-    # 相机装在激光出口【上方】，两者不同轴，所以激光实际落点不在画面正中。
+    # ==========================================================================
+    # 激光-相机 光轴视差校准模型 (Laser-Camera Boresight Parallax Calibration)
+    # ==========================================================================
+    # 【物理与光学视差原理 (Optical Parallax Mechanics)】
+    # 相机镜头安装在高功率激光发射管的正上方，两者光轴在物理空间中存在间距（基线 Baseline），
+    # 并非共轴系统。因此，激光光斑在相机画面上的实际像素落点绝对不会恰好落在画面正中 (Width/2, Height/2)。
     #
-    # Toplam kayma iki bilesenden olusur / 总偏移由两部分组成:
-    #   1) SABIT (mekanik egiklik): mesafeden bagimsiz, piksel cinsinden sabit
-    #      固定分量（机械倾斜）：与距离无关，像素值恒定
-    #   2) PARALAKS (baz mesafesi): mesafeyle TERS orantili, uzakta kuculur
-    #      视差分量（基线）：与距离成反比，越远越小
+    # 任意目标距离 d (米) 下，激光在画面上的总像素偏移量由两大物理分量叠加而成:
+    #   offset(d) = CENTER_OFFSET + PARALLAX_AT_1M / d
     #
-    #   kayma(d) = CENTER_OFFSET + PARALLAX_AT_1M / d
+    #   1. 固定角度倾斜分量 (CENTER_OFFSET):
+    #      由相机支架与激光管的微小机械倾角误差导致，与目标距离 d 无关，属于常数偏移项 (像素 px)；
+    #   2. 物理光轴视差分量 (PARALLAX_AT_1M / d):
+    #      由相机与激光管的物理中心距基线产生，与目标交战距离 d 成严格反比（距离越远视差越小，无限远趋向于 0）。
     #
-    # Tek mesafede kalibre ederseniz PARALLAX_AT_1M = 0 birakin;
-    # 5/10/15 m'nin ucunde de vurmak istiyorsaniz iki mesafede olcup doldurun.
-    # 只在一个距离校准就把 PARALLAX 留 0；要在 5/10/15 米都打准就测两个距离。
-    CENTER_OFFSET_X = 0      # sabit bilesen (px) / 固定分量
-    CENTER_OFFSET_Y = 0
-    PARALLAX_X_AT_1M = 0.0   # 1 m'deki paralaks (px) / 1米处的视差量
-    PARALLAX_Y_AT_1M = 0.0
+    # 【双距离快速校准法 (Dual-Distance Calibration)】
+    #   若仅在固定单一距离下射击，保持 PARALLAX_AT_1M = 0 即可；
+    #   若需要在 5m、10m、15m 多级交战距离下均实现直打红心，只需在两个距离测出实际偏移，
+    #   调用 solve_parallax(d1, off1, d2, off2) 即可自动联立解析出精准的机械倾角与视差基线！
+    CENTER_OFFSET_X = 0      # X 轴固定机械倾角偏移量 (像素 px)
+    CENTER_OFFSET_Y = 0      # Y 轴固定机械倾角偏移量 (像素 px)
+    PARALLAX_X_AT_1M = 0.0   # 1 米标准基准距离下的 X 轴物理视差量 (像素 px)
+    PARALLAX_Y_AT_1M = 0.0   # 1 米标准基准距离下的 Y 轴物理视差量 (像素 px)
     CALIB_PATH = "config/crosshair_calibration.json"
 
-    # Aktif atis mesafesi (m). Paralaks duzeltmesi bunu kullanir.
-    # 当前交战距离(米)，视差修正用它。None = 只用固定偏移。
-    # Yarismada mesafe bilindigi icin (5/10/15 m) arayuzden secilir.
-    # 比赛里距离是已知的，界面上直接选。
+    # 当前比赛/测试设定的交战距离 (单位: 米)。
+    # 视差修正函数将依据此距离动态微调落点。若为 None 则退化为仅使用固定偏移模式。
+    # 竞赛中交战距离已知固定（如 5m / 10m / 15m），可在 GUI 界面直接一键选择。
     AKTIF_MESAFE_M = None
 
-    # Boresight duzeltme yontemi / 光轴补偿方式:
-    #   "offset" = nisangahi lazerin vurdugu yere TASI (tam FOV korunur,
-    #              ama nisangah ekran ortasinda durmaz)
-    #              把十字线移到激光落点（保留全部视场，但十字线不居中）
-    #   "crop"   = goruntuyu lazer noktasi MERKEZ olacak sekilde KIRP
-    #              (nisangah ortada kalir, karsiliginda biraz FOV kaybi:
-    #               yatayda 2*|ox|, dikeyde 2*|oy| piksel)
-    #              裁剪画面让激光点成为中心（十字线居中，代价是损失
-    #               2*|ox| 宽和 2*|oy| 高的视场）
+    # 光轴校准视场补偿模式 (Boresight Correction Mode):
+    #   "offset" (准星偏移模式): 
+    #       保持摄像头完整原始视场 (Full FOV)，将瞄准十字准星动态平移到激光真实击打落点。
+    #       优点: 零裁剪、视场最大、目标丢失率最低。
+    #   "crop" (对称裁剪居中模式): 
+    #       以激光真实落点为对称中心，对输入画面进行裁切，使十字准星依然呈现在视窗正中央。
+    #       代价: 损失边缘部分视场 (水平损失 2*|ox| 像素，垂直损失 2*|oy| 像素)。
     BORESIGHT_MODE = "offset"
 
     @classmethod
-    def get_calibrated_aim_coords(cls, frame_w: int, frame_h: int):
+    def get_calibrated_aim_coords(cls, frame_w: int, frame_h: int) -> tuple[int, int]:
         """
-        返回在当前分辨率 (frame_w, frame_h) 下激光瞄准点的绝对像素坐标 (aim_x, aim_y)。
-        无论是 Crop 模式还是 Offset 模式，保证大准星与小屏幕裁切中心 100% 绝对对齐。
+        获取在指定分辨率画面 (frame_w, frame_h) 下激光实际瞄准点的绝对像素坐标 (aim_x, aim_y)
+
+        无论是 Crop 模式还是 Offset 模式，均确保大屏准星与画中画局部放大镜完全共轴对齐。
+
+        Args:
+            frame_w: 当前帧图像宽度（像素）
+            frame_h: 当前帧图像高度（像素）
+
+        Returns:
+            tuple[int, int]: 激光落点绝对坐标 (aim_x, aim_y)
         """
         if cls.BORESIGHT_MODE == "crop":
             return int(frame_w // 2), int(frame_h // 2)
@@ -112,9 +118,19 @@ class VisionConfig:
         return int(aim_x), int(aim_y)
 
     @classmethod
-    def aim_point(cls, mesafe_m=None):
-        """Lazerin GERCEKTEN vuracagi ekran noktasi.
-           激光【实际】会打到的屏幕点。云台要把目标驱动到这里，而不是画面正中。"""
+    def aim_point(cls, mesafe_m=None) -> tuple[int, int]:
+        """
+        获取当前距离下激光物理光斑在 640x480 参考画面中的实际落点
+
+        控制原理:
+            云台自动闭环追踪的根本目标是将目标驱动到【此落点】，而非画面的几何中心！
+
+        Args:
+            mesafe_m: 当前目标距离 (米)，若为 None 则读取全局 AKTIF_MESAFE_M
+
+        Returns:
+            tuple[int, int]: 激光落点在参考坐标系下的坐标 (aim_x, aim_y)
+        """
         if cls.BORESIGHT_MODE == "crop":
             return int(cls.CENTER_X), int(cls.CENTER_Y)
         ox, oy = cls.CENTER_OFFSET_X, cls.CENTER_OFFSET_Y
@@ -124,9 +140,16 @@ class VisionConfig:
         return int(round(cls.CENTER_X + ox)), int(round(cls.CENTER_Y + oy))
 
     @classmethod
-    def raw_offset(cls, mesafe_m=None):
-        """Moddan bagimsiz ham kayma (px). Kirpma bunu kullanir.
-           与模式无关的原始偏移，裁剪用它。"""
+    def raw_offset(cls, mesafe_m=None) -> tuple[int, int]:
+        """
+        计算相对于画面中心的原始视差偏差矢量 (ox, oy)（单位: 像素 px）
+
+        Args:
+            mesafe_m: 当前目标物理距离（米）
+
+        Returns:
+            tuple[int, int]: 偏移量分量 (ox, oy)
+        """
         ox, oy = float(cls.CENTER_OFFSET_X), float(cls.CENTER_OFFSET_Y)
         if mesafe_m and mesafe_m > 0.2:
             ox += cls.PARALLAX_X_AT_1M / mesafe_m
@@ -134,27 +157,52 @@ class VisionConfig:
         return int(round(ox)), int(round(oy))
 
     @classmethod
-    def set_center_offset(cls, ox: int, oy: int):
+    def set_center_offset(cls, ox: int, oy: int) -> tuple[int, int]:
+        """设置固定机械倾角偏移分量 (ox, oy)"""
         cls.CENTER_OFFSET_X, cls.CENTER_OFFSET_Y = int(ox), int(oy)
         return cls.CENTER_OFFSET_X, cls.CENTER_OFFSET_Y
 
     @classmethod
-    def adjust_center_offset(cls, dx: int, dy: int):
+    def adjust_center_offset(cls, dx: int, dy: int) -> tuple[int, int]:
+        """在当前固定倾角偏移基础上进行增量微调"""
         return cls.set_center_offset(cls.CENTER_OFFSET_X + dx,
                                      cls.CENTER_OFFSET_Y + dy)
 
     @classmethod
-    def reset_center_offset(cls):
+    def reset_center_offset(cls) -> tuple[int, int]:
+        """重置所有光轴校准参数至初始零位"""
         cls.PARALLAX_X_AT_1M = cls.PARALLAX_Y_AT_1M = 0.0
         return cls.set_center_offset(0, 0)
 
     @classmethod
-    def solve_parallax(cls, d1, off1, d2, off2):
-        """Iki mesafedeki olcumden sabit + paralaks bilesenlerini cozer.
-           由两个距离的实测偏移解出【固定分量】和【视差分量】。
-           off = (dx, dy) piksel. Ornek / 例: solve_parallax(5,(-40,-55), 15,(-18,-25))"""
+    def solve_parallax(cls, d1: float, off1: tuple[int, int], d2: float, off2: tuple[int, int]):
+        """
+        双距离实测偏移联立求解机械倾角固定分量 (C) 与物理视差基线分量 (P)
+
+        数学推导原理:
+            已知在距离 d1 处测得偏移 o1，在距离 d2 处测得偏移 o2:
+                o1 = C + P / d1
+                o2 = C + P / d2
+            两式相减消除常数 C:
+                o1 - o2 = P * (1/d1 - 1/d2)
+            从而解出:
+                P = (o1 - o2) / (1/d1 - 1/d2)
+                C = o1 - P / d1
+
+        使用范例:
+            # 5 米处实测偏移 (-40, -55)，15 米处实测偏移 (-18, -25)
+            solve_parallax(5.0, (-40, -55), 15.0, (-18, -25))
+
+        Args:
+            d1: 第一个测量距离（米）
+            off1: 第一个距离下的实测像素偏移 (dx1, dy1)
+            d2: 第二个测量距离（米）
+            off2: 第二个距离下的实测像素偏移 (dx2, dy2)
+
+        Returns:
+            tuple: (CENTER_OFFSET_X, CENTER_OFFSET_Y, PARALLAX_X_AT_1M, PARALLAX_Y_AT_1M)
+        """
         for i, (o1, o2) in enumerate(zip(off1, off2)):
-            # o = C + P/d  ->  P = (o1-o2)/(1/d1 - 1/d2),  C = o1 - P/d1
             denom = (1.0 / d1) - (1.0 / d2)
             P = (o1 - o2) / denom if abs(denom) > 1e-9 else 0.0
             C = o1 - P / d1
@@ -165,14 +213,17 @@ class VisionConfig:
         return (cls.CENTER_OFFSET_X, cls.CENTER_OFFSET_Y,
                 cls.PARALLAX_X_AT_1M, cls.PARALLAX_Y_AT_1M)
 
-    # calibration_panel.py'nin bekledigi kisa adlar / 面板期望的简写接口
+    # --------------------------------------------------------------------------
+    # 快捷访问与持久化接口 (供 CalibrationPanel 调校面板调用)
+    # --------------------------------------------------------------------------
     @classmethod
-    def get_center_x(cls):
-        """Nisangahin ekrandaki X'i (offset uygulanmis) / 十字线屏幕 X（含偏移）"""
+    def get_center_x(cls) -> int:
+        """获取当前距离下带偏移修正的准星 X 像素坐标"""
         return cls.aim_point(cls.AKTIF_MESAFE_M)[0]
 
     @classmethod
-    def get_center_y(cls):
+    def get_center_y(cls) -> int:
+        """获取当前距离下带偏移修正的准星 Y 像素坐标"""
         return cls.aim_point(cls.AKTIF_MESAFE_M)[1]
 
     @classmethod
